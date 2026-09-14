@@ -19,13 +19,21 @@ A real desktop metaphor in the browser, not a dashboard that looks like one:
 - **Window manager** — drag, resize from eight edges, edge-snap to halves and quadrants,
   maximize, minimize to a tray, cascade, tile, pin across workspaces, nine workspaces,
   full session restore.
+- **A real desktop** — drag a rubber band to select icons, move one or a whole selection
+  anywhere, rename, nudge with arrow keys, tidy to a grid. Pin any app, any app *you*
+  built in Studio, or any file, dropped exactly where you right-clicked.
+- **Widgets you describe in a sentence** — the model writes one, it runs sandboxed on
+  your desktop, and it exports as a standalone HTML file you can open or embed anywhere.
+- **Export as a real project** — nine targets, from a single HTML file to React+Vite,
+  Express, full-stack, Next.js, a canvas game, FastAPI or a Node CLI. Downloads as a
+  `.zip` you can `npm install` and open in any editor.
 - **27 apps**, every one code-split and loaded on first open.
 - **17 selectable OS profiles** — Web-AIOS, WebOS All-Out, GenAI-OS, NovaOS, Aurora
   Mycelium, Mac OS Platinum, Aqua, Sequoia, Windows 95, Vista Aero, Windows 11 Fluent,
   Ubuntu Yaru, Tokyo Night, CRT Phosphor, Swiss Paper, Amiga Workbench, Night City.
 - **Customization down to the token** — 16 palettes, 11 procedural wallpapers, fonts,
   radius, glass blur, UI scale, density, window opacity, dock position and contents,
-  widgets, desktop pets, keybindings. Every CSS custom property is editable by hand.
+  widgets, 16 desktop pets, keybindings. Every CSS custom property is editable by hand.
 - **A bespoke icon set** — 100+ glyphs drawn for this OS on a 24×24 grid, stroked at
   1.6 in `currentColor`. No emoji anywhere: emoji are a different picture on every
   platform, carry their own colour that fights the active theme, and sit on a baseline
@@ -77,9 +85,11 @@ src/
 │   ├── Dock.tsx  TopBar.tsx  Launcher.tsx  CommandPalette.tsx
 │   ├── Widgets.tsx      7 draggable desktop widgets
 │   ├── Wallpaper.tsx    11 procedural wallpapers on one canvas
+│   ├── DesktopIcons.tsx marquee selection, multi-drag, free placement
+│   ├── PinPicker.tsx    pin any app, built app or file to the desktop
 │   └── icons.tsx        the drawn icon set + desktop pets
 ├── apps/            27 modules, one file each
-├── lib/             transport, providers, hooks, helpers
+├── lib/             transport, providers, hooks, zip writer, project targets
 └── app/api/         ai/chat · ai/models · proxy
 ```
 
@@ -185,7 +195,7 @@ Everything below was run against this code, not assumed.
 
 | Check | Result |
 | --- | --- |
-| `npm test` | **14/14 pass** — streaming transport (3 dialects, split frames, CRLF, usage, errors) and SSRF guard |
+| `npm test` | **32/32 pass** — streaming transport, SSRF guard, ZIP writer, project scaffolds |
 | `tsc --noEmit` | clean |
 | `next build` (from a deleted `.next`) | clean, zero warnings |
 | `eslint .` | **0 errors, 0 warnings** |
@@ -197,10 +207,23 @@ Everything below was run against this code, not assumed.
 | Phone shell at 402 × 874 | renders; switches live at the 768px breakpoint; no horizontal scroll |
 | OS profile switching | verified end-to-end (Windows 95 transforms the whole shell) |
 | Icon coverage | 0 emoji in `src/`; every app surface renders drawn SVG glyphs |
+| Marquee + multi-drag | 5/5 selected by rubber band; group moves with identical deltas, spacing preserved |
+| Single-icon drag | Only the dragged icon moves; the rest stay put |
+| Pin to desktop | Lands at the right-click position and persists |
+| Widget sandbox | Frame is `allow-scripts` only; reaching the parent throws `SecurityError` |
+| ZIP output | `unzip -t` verifies CRCs; nested paths, UTF-8 and empty files all survive |
 
 **Not verified:** a live call to a paid provider — no API key was used, so the transport
-is covered by tests against recorded frames rather than a real socket. The Bridge
-companion daemon was never executed; it ships as source for you to run.
+is covered by tests against recorded frames rather than a real socket, and AI generation
+(widgets, projects) was not exercised end-to-end. The Bridge companion daemon was never
+executed; it ships as source for you to run.
+
+One thing the test harness could not reach: **clicking inside a widget's iframe.** Its
+synthetic clicks do not cross an iframe boundary at all — a same-origin control frame
+ignored them too — so this is a limitation of the automation, not of the sandbox. What
+*is* proven is that scripts run inside the frame, that DOM APIs work there, and that the
+frame cannot reach the host page. Ordinary mouse input into an iframe is standard browser
+behaviour that does not depend on this code.
 Service-worker registration was blocked by the preview browser's sandbox; the worker and
 manifest are served correctly with the right MIME types, so install it in a real browser
 to confirm.

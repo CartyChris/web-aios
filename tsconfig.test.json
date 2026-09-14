@@ -8,7 +8,14 @@
     "strict": true,
     "skipLibCheck": true,
     "noEmit": false,
-    "types": ["node"]
+    "types": [
+      "node"
+    ]
   },
-  "include": ["src/lib/ai-transport.ts", "src/lib/ssrf.ts"]
+  "include": [
+    "src/lib/ai-transport.ts",
+    "src/lib/ssrf.ts",
+    "src/lib/zip.ts",
+    "src/lib/scaffold.ts"
+  ]
 }

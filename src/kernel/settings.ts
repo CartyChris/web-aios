@@ -37,8 +37,11 @@ export interface Settings {
   dockLabels: boolean;
   topBarVisible: boolean;
   topBarItems: string[];
-  desktopIcons: string[];
+  desktopItems: DesktopItem[];
   showDesktopIcons: boolean;
+  /** Icons land on a grid when true — the tidy-desktop preference. */
+  snapIconsToGrid: boolean;
+  iconSize: number;
   widgets: WidgetInstance[];
   showWidgets: boolean;
   titlebarStyle: "mac" | "windows" | "minimal";
@@ -58,13 +61,31 @@ export interface Settings {
   ai: AISettings;
 }
 
+/** Something pinned to the desktop at a free position.
+ *
+ *  `kind` decides how `ref` is read: a registry app id, a Studio-built app id,
+ *  or a path in the virtual filesystem. That is what lets you pin an app you
+ *  invented ten seconds ago next to one that shipped with the OS. */
+export interface DesktopItem {
+  id: string;
+  kind: "app" | "userapp" | "file";
+  ref: string;
+  x: number;
+  y: number;
+  /** Overrides the default label; used when you rename an icon. */
+  label?: string;
+}
+
 export interface WidgetInstance {
   id: string;
+  /** A built-in kind, or "custom" when it renders `customId`. */
   kind: string;
   x: number;
   y: number;
   w: number;
   h: number;
+  /** Points at a CustomWidget when kind === "custom". */
+  customId?: string;
   config?: Record<string, unknown>;
 }
 
@@ -127,8 +148,16 @@ const DEFAULTS: Settings = {
   dockLabels: false,
   topBarVisible: true,
   topBarItems: ["workspaces", "spotlight", "ai", "net", "battery", "clock", "notifications"],
-  desktopIcons: ["chat", "swarm", "atlas", "ide", "notes"],
+  desktopItems: [
+    { id: "d_chat", kind: "app", ref: "chat", x: 24, y: 56 },
+    { id: "d_swarm", kind: "app", ref: "swarm", x: 24, y: 156 },
+    { id: "d_atlas", kind: "app", ref: "atlas", x: 24, y: 256 },
+    { id: "d_ide", kind: "app", ref: "ide", x: 24, y: 356 },
+    { id: "d_notes", kind: "app", ref: "notes", x: 24, y: 456 },
+  ],
   showDesktopIcons: true,
+  snapIconsToGrid: false,
+  iconSize: 1,
   // Placed clear of the desktop icon column on the left edge, which is 96px
   // wide — widgets defaulting to x:24 landed directly on top of it.
   widgets: [
@@ -177,6 +206,11 @@ export interface SettingsState extends Settings {
   removeWidget: (id: string) => void;
   moveWidget: (id: string, x: number, y: number) => void;
   resizeWidget: (id: string, w: number, h: number) => void;
+  addDesktopItem: (item: Omit<DesktopItem, "id">) => string;
+  moveDesktopItems: (moves: Array<{ id: string; x: number; y: number }>) => void;
+  removeDesktopItems: (ids: string[]) => void;
+  renameDesktopItem: (id: string, label: string) => void;
+  tidyDesktop: () => void;
   toggleDockApp: (appId: string) => void;
   reorderDock: (from: number, to: number) => void;
 }
@@ -257,6 +291,39 @@ export const useSettings = create<SettingsState>()(
       moveWidget: (id, x, y) => set((s) => ({ widgets: s.widgets.map((w) => (w.id === id ? { ...w, x, y } : w)) })),
       resizeWidget: (id, w, h) => set((s) => ({ widgets: s.widgets.map((x) => (x.id === id ? { ...x, w, h } : x)) })),
 
+      addDesktopItem: (item) => {
+        const id = `d_${Math.random().toString(36).slice(2, 9)}`;
+        set((s) => ({ desktopItems: [...s.desktopItems, { ...item, id }] }));
+        return id;
+      },
+
+      // One call for the whole selection, so dragging six icons is a single
+      // state write rather than six that each re-render the desktop.
+      moveDesktopItems: (moves) =>
+        set((s) => {
+          const by = new Map(moves.map((m) => [m.id, m]));
+          return { desktopItems: s.desktopItems.map((d) => { const m = by.get(d.id); return m ? { ...d, x: m.x, y: m.y } : d; }) };
+        }),
+
+      removeDesktopItems: (ids) =>
+        set((s) => ({ desktopItems: s.desktopItems.filter((d) => !ids.includes(d.id)) })),
+
+      renameDesktopItem: (id, label) =>
+        set((s) => ({ desktopItems: s.desktopItems.map((d) => (d.id === id ? { ...d, label: label || undefined } : d)) })),
+
+      tidyDesktop: () =>
+        set((s) => {
+          const cellH = 96, cellW = 92, top = 56, left = 24;
+          const perCol = Math.max(1, Math.floor((window.innerHeight - top - 90) / cellH));
+          return {
+            desktopItems: s.desktopItems.map((d, i) => ({
+              ...d,
+              x: left + Math.floor(i / perCol) * cellW,
+              y: top + (i % perCol) * cellH,
+            })),
+          };
+        }),
+
       toggleDockApp: (appId) =>
         set((s) => ({
           dockApps: s.dockApps.includes(appId) ? s.dockApps.filter((a) => a !== appId) : [...s.dockApps, appId],
@@ -275,6 +342,15 @@ export const useSettings = create<SettingsState>()(
       storage: createJSONStorage(() => localStorage),
       version: 1,
       merge: (persisted, current) => {
+        // v1 stored `desktopIcons: string[]` in a fixed column. Convert rather
+        // than drop: losing someone's desktop on upgrade is not acceptable.
+        const legacy = (persisted as { desktopIcons?: unknown })?.desktopIcons;
+        if (Array.isArray(legacy) && legacy.every((x) => typeof x === "string")) {
+          (persisted as Partial<Settings>).desktopItems = (legacy as string[]).map((ref, i) => ({
+            id: `d_${ref}`, kind: "app" as const, ref, x: 24, y: 56 + i * 100,
+          }));
+          delete (persisted as { desktopIcons?: unknown }).desktopIcons;
+        }
         // Deep-merge so a new release that adds a setting doesn't wipe the
         // user's saved profile, and vice versa.
         const p = (persisted ?? {}) as Partial<Settings>;

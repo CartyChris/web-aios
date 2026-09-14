@@ -18,6 +18,8 @@ import { MobileShell } from "./MobileShell";
 import { useViewport } from "@/lib/useViewport";
 import { cn } from "@/lib/cn";
 import { Icon, PetIcon } from "./icons";
+import { DesktopIcons } from "./DesktopIcons";
+import { PinPicker } from "./PinPicker";
 
 export function Desktop() {
   const hydrated = useHydrated();
@@ -159,25 +161,7 @@ export function Desktop() {
       <Wallpaper />
       <WidgetLayer />
 
-      {settings.showDesktopIcons && (
-        <div className="absolute left-0 top-12 z-[1] flex w-24 flex-col gap-1 px-2">
-          {settings.desktopIcons.map((id) => {
-            const app = getApp(id);
-            if (!app) return null;
-            return (
-              <button
-                key={id}
-                onDoubleClick={() => wm.open(id, { title: app.name, icon: app.icon, size: app.defaultSize, singleton: app.singleton })}
-                className="flex flex-col items-center gap-1 rounded-lg p-2 text-center hover:bg-white/10"
-                title={`${app.name} — double-click to open`}
-              >
-                <Icon name={app.icon} size={26} style={{ color: app.accent ?? "var(--accent)" }} />
-                <span className="text-[10px] leading-tight">{app.name}</span>
-              </button>
-            );
-          })}
-        </div>
-      )}
+      <DesktopIcons topInset={settings.topBarVisible ? 40 : 0} />
 
       {visible.map((w) => <WindowFrame key={w.id} win={w} />)}
 
@@ -199,6 +183,7 @@ export function Desktop() {
       {palette && <CommandPalette onClose={() => setPalette(false)} />}
 
       {menu && <DesktopMenu x={menu.x} y={menu.y} onClose={() => setMenu(null)} />}
+      <PinPicker />
 
       {/* Minimized windows live in a tray so nothing can be lost. */}
       <MinimizedTray />
@@ -235,6 +220,11 @@ function DesktopMenu({ x, y, onClose }: { x: number; y: number; onClose: () => v
   const wm = useWM();
   const settings = useSettings();
   const items: Array<{ label: string; run: () => void } | "sep"> = [
+    { label: "Pin an app here…", run: () => bus.emit("desktop:pin-picker", { x, y }) },
+    { label: "New AI widget…", run: () => wm.open("personalize", { title: "Personalize", icon: "personalize", singleton: true, size: { w: 1020, h: 720 }, args: { tab: "widgets", newWidget: true } }) },
+    { label: "Tidy desktop icons", run: () => settings.tidyDesktop() },
+    { label: settings.snapIconsToGrid ? "Free icon placement" : "Snap icons to grid", run: () => settings.set("snapIconsToGrid", !settings.snapIconsToGrid) },
+    "sep",
     { label: "Personalize…", run: () => wm.open("personalize", { title: "Personalize", icon: "personalize", singleton: true, size: { w: 1020, h: 720 } }) },
     { label: "Settings…", run: () => wm.open("settings", { title: "Settings", icon: "settings", singleton: true, size: { w: 960, h: 680 } }) },
     "sep",

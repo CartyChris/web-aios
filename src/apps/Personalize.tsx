@@ -12,6 +12,7 @@ import { download } from "@/lib/format";
 import { Tabs, Slider, Toggle, Field, ErrorNote } from "./_ui";
 import { cn } from "@/lib/cn";
 import { Icon, PetIcon } from "@/shell/icons";
+import { WidgetBuilder } from "./WidgetBuilder";
 
 /* ────────────────────────────────────────────────────────────────────────────
    Personalize — the customization surface.
@@ -315,7 +316,9 @@ export default function Personalize({}: AppProps) {
 
         {/* ── WIDGETS ── */}
         {tab === "widgets" && (
-          <div className="max-w-2xl">
+          <div className="max-w-3xl">
+            <WidgetBuilder />
+            <div className="my-5 h-px bg-[var(--border)]" />
             <p className="mb-3 text-[12px] text-[var(--muted)]">Widgets sit on the desktop behind your windows and can be dragged anywhere.</p>
             <div className="mb-4 flex flex-wrap gap-1.5">
               {WIDGET_KINDS.map((k) => (

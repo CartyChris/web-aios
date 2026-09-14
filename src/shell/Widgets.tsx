@@ -1,12 +1,15 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSettings, type WidgetInstance } from "@/kernel/settings";
 import { useWM } from "@/kernel/wm";
 import { useVFS } from "@/kernel/vfs";
 import { getApp } from "@/kernel/registry";
 import { bytes } from "@/lib/format";
 import { Icon } from "./icons";
+import { cn } from "@/lib/cn";
+import { useCustomWidgets, widgetDocument } from "@/kernel/widgets";
+import { resolveTokens } from "@/kernel/settings";
 
 export const WIDGET_KINDS = [
   { id: "clock", name: "Clock", icon: "clock" },
@@ -22,7 +25,11 @@ export function WidgetLayer() {
   const { widgets, showWidgets, moveWidget, removeWidget } = useSettings();
   if (!showWidgets) return null;
   return (
-    <div className="pointer-events-none absolute inset-0 z-[1]">
+    // Above the icon surface (z-1). The layer itself is pointer-events-none, so
+    // a click that misses a widget card still falls through to the marquee
+    // underneath — but a click ON a widget reaches the widget, which it did not
+    // when the two layers shared a z-index.
+    <div className="pointer-events-none absolute inset-0 z-[3]">
       {widgets.map((w) => (
         <WidgetHost key={w.id} widget={w} onMove={moveWidget} onRemove={removeWidget} />
       ))}
@@ -34,9 +41,17 @@ function WidgetHost({ widget, onMove, onRemove }: { widget: WidgetInstance; onMo
   const drag = useRef<{ dx: number; dy: number } | null>(null);
   const [hover, setHover] = useState(false);
 
+  // Dragging starts ONLY from the handle.
+  //
+  // The card used to capture the pointer itself, which silently broke every
+  // interactive widget: pointer capture on an ancestor redirects events away
+  // from a child iframe, so a widget's own buttons never received a click. A
+  // handle keeps the body fully interactive — which is the whole point of a
+  // widget you can build.
   const onDown = useCallback(
     (e: React.PointerEvent) => {
-      if ((e.target as HTMLElement).closest("button")) return;
+      if (!(e.target as HTMLElement).closest("[data-widget-handle]")) return;
+      e.preventDefault();
       drag.current = { dx: e.clientX - widget.x, dy: e.clientY - widget.y };
       (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
     },
@@ -57,25 +72,38 @@ function WidgetHost({ widget, onMove, onRemove }: { widget: WidgetInstance; onMo
       onPointerUp={() => (drag.current = null)}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
-      className="glass pointer-events-auto absolute cursor-grab overflow-hidden p-3 active:cursor-grabbing"
+      className="glass pointer-events-auto absolute overflow-hidden"
       style={{ left: widget.x, top: widget.y, width: widget.w, height: widget.h, borderRadius: "var(--radius)" }}
     >
+      {/* Handle: the only draggable surface, revealed on hover so it does not
+          clutter the widget the rest of the time. */}
+      <div
+        data-widget-handle
+        className="absolute inset-x-0 top-0 z-10 flex h-5 cursor-grab items-center justify-center active:cursor-grabbing"
+        style={{ opacity: hover ? 1 : 0, transition: "opacity 140ms ease", background: "linear-gradient(var(--panel-solid), transparent)" }}
+        title="Drag to move"
+      >
+        <span className="h-[3px] w-8 rounded-full" style={{ background: "color-mix(in srgb, var(--muted) 60%, transparent)" }} />
+      </div>
       {hover && (
         <button
           onClick={() => onRemove(widget.id)}
-          className="absolute right-1.5 top-1.5 z-10 grid h-5 w-5 place-items-center rounded-full bg-black/40 hover:bg-[var(--danger)]"
+          className="absolute right-1 top-0.5 z-20 grid h-5 w-5 place-items-center rounded-full bg-black/45 hover:bg-[var(--danger)]"
           title="Remove widget"
           aria-label="Remove widget"
         >
           <Icon name="close" size={10} />
         </button>
       )}
-      <WidgetBody kind={widget.kind} />
+      <div className={cn("h-full w-full overflow-hidden", widget.kind === "custom" ? "p-0" : "p-3")}>
+        <WidgetBody kind={widget.kind} customId={widget.customId} />
+      </div>
     </div>
   );
 }
 
-function WidgetBody({ kind }: { kind: string }) {
+function WidgetBody({ kind, customId }: { kind: string; customId?: string }) {
+  if (kind === "custom") return <CustomWidgetFrame id={customId} />;
   switch (kind) {
     case "clock": return <ClockWidget />;
     case "calendar": return <CalendarWidget />;
@@ -86,6 +114,38 @@ function WidgetBody({ kind }: { kind: string }) {
     case "storage": return <StorageWidget />;
     default: return <div className="text-[var(--muted)]">Unknown widget</div>;
   }
+}
+
+/** Runs a user/AI-authored widget inside a sandbox.
+ *
+ *  `sandbox="allow-scripts"` WITHOUT allow-same-origin puts the frame in an
+ *  opaque origin: it can run its own code but cannot read this page, its
+ *  localStorage, or the API keys held there. That single omission is what
+ *  separates "a widget you generated" from "arbitrary code with your
+ *  credentials". */
+function CustomWidgetFrame({ id }: { id?: string }) {
+  const widget = useCustomWidgets((s) => s.widgets.find((w) => w.id === id));
+  const settings = useSettings();
+  const doc = useMemo(
+    () => (widget ? widgetDocument(widget.html, resolveTokens(settings)) : ""),
+    [widget, settings],
+  );
+  if (!widget) {
+    return (
+      <div className="grid h-full place-items-center px-2 text-center text-[11px] text-[var(--muted)]">
+        This widget was deleted.
+      </div>
+    );
+  }
+  return (
+    <iframe
+      srcDoc={doc}
+      sandbox="allow-scripts"
+      title={widget.name}
+      className="h-full w-full border-0 bg-transparent"
+      style={{ colorScheme: "normal" }}
+    />
+  );
 }
 
 function ClockWidget() {

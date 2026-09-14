@@ -6,6 +6,7 @@ import { useWM } from "@/kernel/wm";
 import { bus } from "@/kernel/bus";
 import type { AppProps } from "@/kernel/types";
 import { bytes, relTime, download } from "@/lib/format";
+import { downloadZip } from "@/lib/zip";
 import { Empty, ErrorNote, CopyButton } from "./_ui";
 import { cn } from "@/lib/cn";
 import { Icon } from "@/shell/icons";
@@ -70,7 +71,23 @@ export default function Files({}: AppProps) {
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search names and contents…" className="os-input min-w-32 flex-1 !py-1 text-[12px]" />
         <button className="os-btn !py-1 text-[11px]" onClick={() => fileInput.current?.click()}>Import</button>
         <input ref={fileInput} type="file" multiple hidden onChange={(e) => { importFiles(e.target.files); e.target.value = ""; }} />
-        <button className="os-btn !py-1 text-[11px]" onClick={() => download(`web-aios-files-${Date.now()}.json`, vfs.exportAll(), "application/json")}>Export all</button>
+        <button
+          className="os-btn !py-1 text-[11px]"
+          title="Every file, as a real folder tree you can open"
+          onClick={() =>
+            downloadZip(`web-aios-files-${new Date().toISOString().slice(0, 10)}`, [
+              ...all.map((n) => ({ path: n.path.replace(/^\//, ""), content: n.content })),
+              {
+                path: "README.md",
+                content: `# Web-AIOS files\n\n${all.length} file(s), exported ${new Date().toISOString()}.\n\nThis is the OS filesystem as a plain folder tree — everything your apps wrote:\nchats, research briefs, plans, notes, code and generated projects.\n\nTo bring it back, use Files -> Import with backup.json.\n`,
+              },
+              { path: "backup.json", content: vfs.exportAll() },
+            ])
+          }
+        >
+          Export all (.zip)
+        </button>
+        <button className="os-btn !py-1 text-[11px]" onClick={() => download(`web-aios-files-${Date.now()}.json`, vfs.exportAll(), "application/json")}>.json</button>
         <span className="os-chip">{usage.count} files · {bytes(usage.bytes)}</span>
       </div>
 
@@ -111,6 +128,11 @@ export default function Files({}: AppProps) {
               <button className="os-btn !py-1 text-[11px]" onClick={() => openIn(node.path)}>Open</button>
               <CopyButton text={node.content} />
               <button className="os-btn !py-1 text-[11px]" onClick={() => download(node.name, node.content, node.mime)}>Download</button>
+              <button className="os-btn !py-1 text-[11px]" title="This file and everything beside it in its folder" onClick={() => {
+                const dir = node.path.split("/").slice(0, -1).join("/") || "/";
+                const siblings = all.filter((n) => (n.path.split("/").slice(0, -1).join("/") || "/") === dir);
+                downloadZip((dir.split("/").pop() || "folder"), siblings.map((n) => ({ path: n.name, content: n.content })));
+              }}>Folder .zip</button>
               <button className="os-btn !py-1 text-[11px]" onClick={() => { vfs.remove(node.path); setSel(null); }}>Delete</button>
             </div>
             <pre className="min-h-0 flex-1 overflow-auto p-2 font-[family-name:var(--font-mono)] text-[11px] leading-relaxed whitespace-pre-wrap break-words">

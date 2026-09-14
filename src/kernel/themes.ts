@@ -83,6 +83,14 @@ export const PETS = [
   { id: "dragon", name: "Dragon", glyph: "dragon" },
   { id: "ghost", name: "Ghost", glyph: "ghost" },
   { id: "octo", name: "Octopus", glyph: "octo" },
+  { id: "penguin", name: "Penguin", glyph: "penguin" },
+  { id: "bunny", name: "Bunny", glyph: "bunny" },
+  { id: "bird", name: "Bird", glyph: "bird" },
+  { id: "crab", name: "Crab", glyph: "crab" },
+  { id: "fish", name: "Fish", glyph: "fish" },
+  { id: "bear", name: "Bear", glyph: "bear" },
+  { id: "alien", name: "Alien", glyph: "alien" },
+  { id: "mushroom", name: "Mushroom", glyph: "mushroom" },
 ] as const;
 
 export const FONT_STACKS = [

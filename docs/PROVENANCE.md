@@ -24,6 +24,15 @@ Where each source app went. Nineteen inputs, one OS.
 | `Chat-AI-UI.html`, `nexus-ai-pro.html` | **Chat** | Threaded multi-provider chat |
 | `BUILD_REPORT.md`, `GATES.md` | Deep Work's gate model | "A stage cannot be marked verified by assertion" |
 
+## Added beyond the sources
+
+The sources had fixed icon columns and no selection model at all. The desktop here has
+marquee selection, free placement and group drag because that is the interaction everyone
+already has muscle memory for. Widgets were a fixed set in every source; here you can
+describe one and run it sandboxed. And every source could only emit a single HTML file —
+Studio now targets nine real project shapes, because a single file is a fine way to make
+something in five minutes and a poor way to keep it.
+
 ## Deliberate omissions
 
 - **Seeded demo data** (Signals) — removed. Fake data that looks real is a liability.
