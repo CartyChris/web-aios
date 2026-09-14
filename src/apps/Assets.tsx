@@ -275,6 +275,7 @@ export default function Assets({}: AppProps) {
   const [q, setQ] = useState("");
   const [kind, setKind] = useState("all");
   const [error, setError] = useState<string | null>(null);
+  const [menu, setMenu] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const kinds = useMemo(() => ["all", ...Array.from(new Set(store.assets.map((a) => a.kind)))], [store.assets]);
@@ -299,13 +300,53 @@ export default function Assets({}: AppProps) {
     <div className="flex h-full flex-col">
       <Tabs tabs={[{ id: "library", label: `Library (${store.assets.length})`, icon: "assets" }, { id: "inspect", label: "Inspector", icon: "search" }]} active={tab} onChange={setTab} />
 
-      <div className="flex shrink-0 flex-wrap items-center gap-1.5 border-b border-[var(--border)] px-2.5 py-1.5">
-        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search assets…" className="os-input min-w-28 flex-1 !py-1 text-[12px]" />
+      {/* Search and the one thing you came to do stay visible; moving and
+          copying the library go in a menu, the same shape Forge 3D uses. Five
+          equal-weight buttons is a toolbar nobody reads. */}
+      <div className="flex shrink-0 items-center gap-1.5 border-b border-[var(--border)] px-2.5 py-1.5">
+        <Icon name="search" size={13} style={{ color: "var(--muted)" }} />
+        <input
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder="Search assets…"
+          className="min-w-20 flex-1 bg-transparent text-[12.5px] outline-none placeholder:text-[var(--muted)]"
+        />
         <select value={kind} onChange={(e) => setKind(e.target.value)} className="os-input !w-auto !py-1 text-[11px]">
           {kinds.map((k) => <option key={k} value={k}>{k}</option>)}
         </select>
-        <button className="os-btn !py-1 text-[11px]" onClick={create}>+ New</button>
-        <button className="os-btn !py-1 text-[11px]" onClick={() => fileRef.current?.click()}>Import</button>
+        <button className="os-btn !py-1 text-[11px]" onClick={create}>
+          <Icon name="plus" size={11} className="mr-1" />New
+        </button>
+        <div className="relative">
+          <button className="os-btn !py-1 text-[11px]" onClick={() => setMenu((m) => !m)} title="Library menu">
+            <Icon name="menu" size={12} />
+          </button>
+          {menu && (
+            <>
+              <div className="fixed inset-0 z-[40]" onClick={() => setMenu(false)} />
+              <div className="glass absolute right-0 top-full z-[50] mt-1 w-48 p-1.5 shadow-2xl" style={{ borderRadius: "var(--radius)" }}>
+                <button
+                  onClick={() => { setMenu(false); fileRef.current?.click(); }}
+                  className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[12px] hover:bg-[var(--accent)]/18"
+                >
+                  <Icon name="folder" size={12} />Import .json
+                </button>
+                <button
+                  onClick={() => { setMenu(false); download("asset_library.json", JSON.stringify({ assets: store.assets }, null, 2), "application/json"); }}
+                  className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[12px] hover:bg-[var(--accent)]/18"
+                >
+                  <Icon name="download" size={12} />Export all
+                </button>
+                <button
+                  onClick={() => { setMenu(false); bus.emit("app:open", { appId: "forge3d" }); }}
+                  className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[12px] hover:bg-[var(--accent)]/18"
+                >
+                  <Icon name="cube3d" size={12} />Open Forge 3D
+                </button>
+              </div>
+            </>
+          )}
+        </div>
         <input
           ref={fileRef} type="file" accept="application/json" hidden multiple
           onChange={async (e) => {
@@ -317,7 +358,6 @@ export default function Assets({}: AppProps) {
             e.target.value = "";
           }}
         />
-        <button className="os-btn !py-1 text-[11px]" onClick={() => download("asset_library.json", JSON.stringify({ assets: store.assets }, null, 2), "application/json")}>Export all</button>
       </div>
 
       <div className="px-2.5 pt-2"><ErrorNote error={error} onDismiss={() => setError(null)} /></div>
