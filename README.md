@@ -46,7 +46,7 @@ A real desktop metaphor in the browser, not a dashboard that looks like one:
   to a PNG and goes back to a vision model, which can see that the roof floats and fix it.
 - **Asset Studio** — describe a prop and a model composes it out of primitives, with a
   real lit thumbnail rendered from its own geometry.
-- **29 apps**, every one code-split and loaded on first open.
+- **28 apps**, every one code-split and loaded on first open.
 - **An arcade** — Snake, Breakout, 2048 and Minesweeper, keyboard and touch, plus eight
   secrets hidden around the OS.
 - **17 selectable OS profiles** — Web-AIOS, WebOS All-Out, GenAI-OS, NovaOS, Aurora
@@ -119,7 +119,7 @@ src/
 │   └── icons.tsx        the drawn icon set + desktop pets
 │   ├── pets.ts          37 species as descriptions, not drawings
 │   └── userapps.ts      apps you built — html documents and real projects
-├── apps/            29 modules, one file each
+├── apps/            28 modules, one file each
 ├── lib/             transport, providers, hooks, zip + deflate, project targets,
 │                    the browser bundler, the MCP client, the 3D renderer
 ├── wasm/deflate/    a DEFLATE encoder in Rust, compiled to WebAssembly
@@ -284,7 +284,7 @@ Everything below was run against this code, not assumed.
 | Arcade | Snake 0 → 10 with death detection · 2048 0 → 304 across 24 moves · Minesweeper 144 cells, flood-fill reveal · Breakout 3 lives |
 | Easter eggs | Konami summons a dragon · "matrix" swaps the theme and reverts · "drop" drops every icon to the floor · "party" toggles cleanly on and off |
 | Desktop pet | click produces a speech bubble; with no key it falls back to a written line instead of an error |
-| All 29 apps mount and render | 29/29, no blank panes |
+| All 28 apps mount and render | opened every one from the OS terminal: 29 surfaces (Terminal twice), **0 blank panes**, 0 stuck loaders |
 | Console on boot and through a full session | **0 errors** |
 | Calculator expression parser | 6/6 including right-associative `2^3^2 = 512` |
 | SSRF guard | 10/10 attack vectors refused (incl. `169.254.169.254`, `::1`, `file://`) |
