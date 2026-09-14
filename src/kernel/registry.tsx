@@ -1,0 +1,352 @@
+"use client";
+
+import dynamic from "next/dynamic";
+import type { ComponentType } from "react";
+import type { AppManifest, AppProps } from "./types";
+
+/** Every app is code-split. The desktop shell boots in one small chunk and an
+ *  app's bundle is fetched the first time it is opened — which is why a 20-app
+ *  OS still has a fast first paint. */
+const lazy = (loader: () => Promise<{ default: ComponentType<AppProps> }>): ComponentType<AppProps> =>
+  dynamic(loader, { ssr: false, loading: () => <AppSkeleton /> }) as ComponentType<AppProps>;
+
+function AppSkeleton() {
+  return (
+    <div className="flex h-full w-full items-center justify-center gap-3 text-[var(--muted)]">
+      <span
+        className="inline-block h-4 w-4 rounded-full border-2 border-[var(--accent)] border-t-transparent"
+        style={{ animation: "os-spin 700ms linear infinite" }}
+      />
+      <span className="text-sm">Loading module…</span>
+    </div>
+  );
+}
+
+export const APPS: AppManifest[] = [
+  // ── AI ──────────────────────────────────────────────────────────────────
+  {
+    id: "chat",
+    name: "Chat",
+    icon: "chat",
+    category: "ai",
+    description: "Multi-provider AI chat with streaming, threads, artifacts and personas.",
+    component: lazy(() => import("@/apps/Chat")),
+    defaultSize: { w: 900, h: 660 },
+    permissions: ["ai", "network", "storage"],
+    accent: "#67e8f9",
+  },
+  {
+    id: "swarm",
+    name: "Agent Swarm",
+    icon: "swarm",
+    category: "ai",
+    description: "Fan a question out across many agents, then reconcile the answers.",
+    component: lazy(() => import("@/apps/Swarm")),
+    defaultSize: { w: 1080, h: 720 },
+    permissions: ["ai", "network", "storage"],
+    accent: "#fbbf24",
+  },
+  {
+    id: "atlas",
+    name: "Atlas Research",
+    icon: "atlas",
+    category: "research",
+    description: "Source-tagged research: crawl, corroborate, cite, export leads.",
+    component: lazy(() => import("@/apps/Atlas")),
+    defaultSize: { w: 1060, h: 720 },
+    permissions: ["ai", "network", "storage"],
+    accent: "#8b5cf6",
+  },
+  {
+    id: "deepwork",
+    name: "Deep Work",
+    icon: "deepwork",
+    category: "ai",
+    description: "Staged execution with gates that can fail and verification status per stage.",
+    component: lazy(() => import("@/apps/DeepWork")),
+    defaultSize: { w: 1000, h: 700 },
+    permissions: ["ai", "storage"],
+    accent: "#4ade80",
+  },
+  {
+    id: "profiler",
+    name: "Profiler",
+    icon: "profiler",
+    category: "research",
+    description: "Structured multi-stage subject analysis from public signals.",
+    component: lazy(() => import("@/apps/Profiler")),
+    defaultSize: { w: 960, h: 700 },
+    permissions: ["ai", "network", "storage"],
+    accent: "#fb7185",
+  },
+  {
+    id: "loop",
+    name: "Agent Loop",
+    icon: "loop",
+    category: "ai",
+    description: "Self-improving plan→act→verify→learn loop with a session ledger.",
+    component: lazy(() => import("@/apps/Loop")),
+    defaultSize: { w: 980, h: 680 },
+    permissions: ["ai", "storage"],
+    accent: "#22d3ee",
+  },
+
+  // ── Build ───────────────────────────────────────────────────────────────
+  {
+    id: "ide",
+    name: "Code Studio",
+    icon: "ide",
+    category: "build",
+    description: "AI-assisted editor with live preview, project map and snapshots.",
+    component: lazy(() => import("@/apps/IDE")),
+    defaultSize: { w: 1140, h: 760 },
+    permissions: ["ai", "storage", "files"],
+    accent: "#60a5fa",
+  },
+  {
+    id: "forge3d",
+    name: "Forge 3D",
+    icon: "forge3d",
+    category: "build",
+    description: "Scene editor: entities, transforms, physics, materials, play mode.",
+    component: lazy(() => import("@/apps/Forge3D")),
+    defaultSize: { w: 1180, h: 780 },
+    permissions: ["storage", "files"],
+    accent: "#a78bfa",
+    heavy: true,
+  },
+  {
+    id: "assets",
+    name: "Asset Library",
+    icon: "assets",
+    category: "build",
+    description: "Reusable prop, prefab and physics-body library that feeds Forge 3D.",
+    component: lazy(() => import("@/apps/Assets")),
+    defaultSize: { w: 960, h: 660 },
+    permissions: ["storage", "files"],
+    accent: "#f59e0b",
+  },
+  {
+    id: "labs",
+    name: "Builder Labs",
+    icon: "labs",
+    category: "build",
+    description: "Blueprints, test matrices, release pilots, dependency and design-system audits.",
+    component: lazy(() => import("@/apps/Labs")),
+    defaultSize: { w: 1040, h: 720 },
+    permissions: ["ai", "storage"],
+    accent: "#14b8a6",
+  },
+  {
+    id: "studio",
+    name: "HTML Studio",
+    icon: "studio",
+    category: "build",
+    description: "Write, preview and install single-file HTML apps into this OS.",
+    component: lazy(() => import("@/apps/Studio")),
+    defaultSize: { w: 1040, h: 720 },
+    permissions: ["storage", "files"],
+    accent: "#34d399",
+  },
+
+  // ── Research / data ─────────────────────────────────────────────────────
+  {
+    id: "intel",
+    name: "Signals",
+    icon: "intel",
+    category: "research",
+    description: "Global signal feed, advisories, country risk and trend charts.",
+    component: lazy(() => import("@/apps/Intel")),
+    defaultSize: { w: 1080, h: 720 },
+    permissions: ["network", "storage"],
+    accent: "#f472b6",
+  },
+  {
+    id: "browser",
+    name: "Browser",
+    icon: "browser",
+    category: "productivity",
+    description: "Embedded browsing with a fetch proxy for pages that refuse framing.",
+    component: lazy(() => import("@/apps/Browser")),
+    defaultSize: { w: 1040, h: 720 },
+    permissions: ["network"],
+    accent: "#38bdf8",
+  },
+
+  // ── Productivity ────────────────────────────────────────────────────────
+  {
+    id: "notes",
+    name: "Notes",
+    icon: "notes",
+    category: "productivity",
+    description: "Markdown notes with live preview, stored in the OS filesystem.",
+    component: lazy(() => import("@/apps/Notes")),
+    defaultSize: { w: 860, h: 620 },
+    permissions: ["storage"],
+    accent: "#fbbf24",
+  },
+  {
+    id: "tasks",
+    name: "Task Board",
+    icon: "tasks",
+    category: "productivity",
+    description: "Drag-and-drop kanban with per-column WIP and AI task breakdown.",
+    component: lazy(() => import("@/apps/Tasks")),
+    defaultSize: { w: 980, h: 640 },
+    permissions: ["storage", "ai"],
+    accent: "#4ade80",
+  },
+  {
+    id: "files",
+    name: "Files",
+    icon: "files",
+    category: "system",
+    description: "Browse, import, export and search everything the OS has stored.",
+    component: lazy(() => import("@/apps/Files")),
+    defaultSize: { w: 940, h: 620 },
+    permissions: ["storage", "files"],
+    accent: "#94a3b8",
+  },
+  {
+    id: "terminal",
+    name: "Terminal",
+    icon: "terminal",
+    category: "system",
+    description: "A real shell over the OS: filesystem, apps, settings and AI.",
+    component: lazy(() => import("@/apps/Terminal")),
+    defaultSize: { w: 820, h: 520 },
+    permissions: ["storage", "ai"],
+    accent: "#22c55e",
+  },
+  {
+    id: "focus",
+    name: "Focus",
+    icon: "focus",
+    category: "productivity",
+    description: "Pomodoro sessions that keep running while you work elsewhere.",
+    component: lazy(() => import("@/apps/Focus")),
+    defaultSize: { w: 460, h: 520 },
+    minSize: { w: 360, h: 420 },
+    permissions: ["storage"],
+    accent: "#fb923c",
+  },
+  {
+    id: "calc",
+    name: "Calculator",
+    icon: "calc",
+    category: "productivity",
+    description: "Expression calculator with history and unit-aware parsing.",
+    component: lazy(() => import("@/apps/Calc")),
+    defaultSize: { w: 380, h: 540 },
+    minSize: { w: 320, h: 420 },
+    accent: "#a3e635",
+  },
+  {
+    id: "media",
+    name: "Media",
+    icon: "media",
+    category: "media",
+    description: "Play local audio and video with a visualizer.",
+    component: lazy(() => import("@/apps/Media")),
+    defaultSize: { w: 800, h: 560 },
+    permissions: ["files"],
+    accent: "#c084fc",
+  },
+
+  // ── Agent infrastructure (from aurora-os.html) ──────────────────────────
+  {
+    id: "vault",
+    name: "Memory Vault",
+    icon: "vault",
+    category: "ai",
+    description: "Long-term agent memory: capture, reflect, recall and prune.",
+    component: lazy(() => import("@/apps/Vault")),
+    defaultSize: { w: 940, h: 680 },
+    permissions: ["storage", "ai"],
+    accent: "#a78bfa",
+  },
+  {
+    id: "observatory",
+    name: "Observatory",
+    icon: "observatory",
+    category: "ai",
+    description: "Span trees over every model call, with local heuristics that flag bad runs.",
+    component: lazy(() => import("@/apps/Observatory")),
+    defaultSize: { w: 1060, h: 700 },
+    permissions: ["storage"],
+    accent: "#22d3ee",
+  },
+  {
+    id: "bridge",
+    name: "Bridge",
+    icon: "bridge",
+    category: "system",
+    description: "Pair with a local companion daemon for filesystem and shell access.",
+    component: lazy(() => import("@/apps/Bridge")),
+    defaultSize: { w: 900, h: 640 },
+    permissions: ["network", "storage"],
+    accent: "#f59e0b",
+  },
+  {
+    id: "mediadeck",
+    name: "Media Deck",
+    icon: "mediadeck",
+    category: "media",
+    description: "Playlists, decks and a visualizer for local audio and video.",
+    component: lazy(() => import("@/apps/MediaDeck")),
+    defaultSize: { w: 1000, h: 680 },
+    permissions: ["files", "storage"],
+    accent: "#f472b6",
+  },
+
+  // ── System ──────────────────────────────────────────────────────────────
+  {
+    id: "personalize",
+    name: "Personalize",
+    icon: "personalize",
+    category: "system",
+    description: "Themes, tokens, wallpaper engine, layout, widgets, pets and fonts.",
+    component: lazy(() => import("@/apps/Personalize")),
+    defaultSize: { w: 1020, h: 720 },
+    singleton: true,
+    permissions: ["storage"],
+    accent: "#f9a8d4",
+  },
+  {
+    id: "settings",
+    name: "Settings",
+    icon: "settings",
+    category: "system",
+    description: "Providers and keys, keybindings, privacy, storage and backup.",
+    component: lazy(() => import("@/apps/Settings")),
+    defaultSize: { w: 960, h: 680 },
+    singleton: true,
+    permissions: ["storage"],
+    accent: "#94a3b8",
+  },
+  {
+    id: "monitor",
+    name: "System Monitor",
+    icon: "monitor",
+    category: "system",
+    description: "Live processes, storage, memory, event log and AI spend.",
+    component: lazy(() => import("@/apps/Monitor")),
+    defaultSize: { w: 900, h: 620 },
+    singleton: true,
+    permissions: ["storage"],
+    accent: "#38bdf8",
+  },
+];
+
+const byId = new Map(APPS.map((a) => [a.id, a]));
+export const getApp = (id: string): AppManifest | undefined => byId.get(id);
+
+export const CATEGORY_LABELS: Record<string, string> = {
+  ai: "AI & Agents",
+  research: "Research",
+  build: "Build",
+  productivity: "Productivity",
+  media: "Media",
+  system: "System",
+  game: "Games",
+};

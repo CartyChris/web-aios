@@ -1,0 +1,14 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "outDir": ".test-build",
+    "rootDir": "src/lib",
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmit": false,
+    "types": ["node"]
+  },
+  "include": ["src/lib/ai-transport.ts", "src/lib/ssrf.ts"]
+}

@@ -1,0 +1,23 @@
+{
+  "name": "Web-AIOS",
+  "short_name": "Web-AIOS",
+  "description": "A fully customizable AI/Agent desktop operating system for the web.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone", "minimal-ui"],
+  "orientation": "any",
+  "background_color": "#07111f",
+  "theme_color": "#07111f",
+  "categories": ["productivity", "developer", "utilities"],
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Chat", "url": "/?app=chat", "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }] },
+    { "name": "Agent Swarm", "url": "/?app=swarm", "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }] },
+    { "name": "Code Studio", "url": "/?app=ide", "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }] }
+  ]
+}
