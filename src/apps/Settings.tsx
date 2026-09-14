@@ -245,7 +245,7 @@ export default function Settings({}: AppProps) {
               <div className="space-y-1">
                 {APPS.filter((a) => a.permissions?.length).map((a) => (
                   <div key={a.id} className="flex items-center gap-2 text-[11.5px]">
-                    <span>{a.icon}</span>
+                    <Icon name={a.icon} size={12} style={{ color: a.accent ?? "var(--accent)" }} />
                     <span className="w-32 shrink-0 truncate">{a.name}</span>
                     <span className="flex flex-wrap gap-1">
                       {a.permissions!.map((p) => <span key={p} className="os-chip !px-1.5 !py-0 !text-[9.5px]">{p}</span>)}

@@ -13,3 +13,7 @@ tsconfig.tsbuildinfo
 *\ 2.*
 *\ 2
 .env*
+
+# Rust build output. public/deflate.wasm is the committed artifact, so a clone
+# needs no Rust toolchain to build or deploy.
+wasm/**/target

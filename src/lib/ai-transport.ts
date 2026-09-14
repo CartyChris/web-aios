@@ -9,9 +9,43 @@
  *  browser can import is simpler — and more portable — than two.
  */
 
+/** A piece of one message. Text is the common case; an image part is what
+ *  makes a vision model able to *see* — a rendered 3D viewport, a screenshot,
+ *  a reference photo — instead of only reading a description of it. */
+export type ContentPart =
+  | { type: "text"; text: string }
+  | { type: "image"; dataUrl: string };
+
 export interface ChatMessage {
   role: "system" | "user" | "assistant";
-  content: string;
+  content: string | ContentPart[];
+}
+
+/** Flatten a message to plain text — for token estimates, logs and any
+ *  provider that cannot take an image. */
+export function messageText(m: ChatMessage): string {
+  return typeof m.content === "string"
+    ? m.content
+    : m.content.map((p) => (p.type === "text" ? p.text : "[image]")).join(" ");
+}
+
+/** Split `data:image/png;base64,AAAA` into its parts.
+ *
+ *  Returns null for anything that is not a base64 data URL: a remote https://
+ *  image is passed through untouched on OpenAI, and the other two dialects
+ *  cannot take a URL at all, so guessing would produce a silent failure. */
+export function splitDataUrl(url: string): { mime: string; data: string } | null {
+  const m = /^data:([^;,]+);base64,(.+)$/s.exec(url.trim());
+  return m ? { mime: m[1], data: m[2] } : null;
+}
+
+const hasImage = (messages: ChatMessage[]) =>
+  messages.some((m) => Array.isArray(m.content) && m.content.some((p) => p.type === "image"));
+
+/** True when this request needs a model that can see. Callers use it to warn
+ *  before spending a call on a model that will ignore the picture. */
+export function requiresVision(messages: ChatMessage[]): boolean {
+  return hasImage(messages);
 }
 
 export interface ChatRequest {
@@ -56,7 +90,7 @@ export function buildRequest(req: ChatRequest): { url: string; init: RequestInit
           max_tokens: req.maxTokens ?? 4096,
           temperature: req.temperature,
           ...(sys ? { system: sys } : {}),
-          messages: rest.map((m) => ({ role: m.role, content: m.content })),
+          messages: rest.map((m) => ({ role: m.role, content: toAnthropicContent(m.content) })),
           stream: req.stream ?? true,
         }),
       },
@@ -72,7 +106,7 @@ export function buildRequest(req: ChatRequest): { url: string; init: RequestInit
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           ...(sys ? { systemInstruction: { parts: [{ text: sys }] } } : {}),
-          contents: rest.map((m) => ({ role: m.role === "assistant" ? "model" : "user", parts: [{ text: m.content }] })),
+          contents: rest.map((m) => ({ role: m.role === "assistant" ? "model" : "user", parts: toGoogleParts(m.content) })),
           generationConfig: { temperature: req.temperature, maxOutputTokens: req.maxTokens ?? 4096 },
         }),
       },
@@ -92,7 +126,7 @@ export function buildRequest(req: ChatRequest): { url: string; init: RequestInit
       },
       body: JSON.stringify({
         model: req.model,
-        messages: req.messages,
+        messages: req.messages.map((m) => ({ role: m.role, content: toOpenAIContent(m.content) })),
         temperature: req.temperature,
         max_tokens: req.maxTokens ?? 4096,
         stream: req.stream ?? true,
@@ -100,6 +134,46 @@ export function buildRequest(req: ChatRequest): { url: string; init: RequestInit
       }),
     },
   };
+}
+
+/* ── Content translation ──────────────────────────────────────────────────
+   Three vendors, three shapes for the same picture. A plain string stays a
+   plain string in every dialect, so nothing changes for the text-only path
+   that every other app uses. */
+
+function toOpenAIContent(c: ChatMessage["content"]) {
+  if (typeof c === "string") return c;
+  return c.map((p) =>
+    p.type === "text"
+      ? { type: "text", text: p.text }
+      // OpenAI accepts a data: URL here directly, which is why this one needs
+      // no base64 surgery.
+      : { type: "image_url", image_url: { url: p.dataUrl } },
+  );
+}
+
+function toAnthropicContent(c: ChatMessage["content"]) {
+  if (typeof c === "string") return c;
+  return c.map((p) => {
+    if (p.type === "text") return { type: "text", text: p.text };
+    const split = splitDataUrl(p.dataUrl);
+    return split
+      ? { type: "image", source: { type: "base64", media_type: split.mime, data: split.data } }
+      : { type: "image", source: { type: "url", url: p.dataUrl } };
+  });
+}
+
+function toGoogleParts(c: ChatMessage["content"]) {
+  if (typeof c === "string") return [{ text: c }];
+  return c.map((p) => {
+    if (p.type === "text") return { text: p.text };
+    const split = splitDataUrl(p.dataUrl);
+    // Google has no URL form for inline image data, so an un-encoded image
+    // degrades to a note rather than a malformed request the model cannot read.
+    return split
+      ? { inlineData: { mimeType: split.mime, data: split.data } }
+      : { text: `[image at ${p.dataUrl}]` };
+  });
 }
 
 /** Parse one dialect's SSE payload into a plain text delta. */

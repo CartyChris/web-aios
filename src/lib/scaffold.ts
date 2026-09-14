@@ -22,6 +22,9 @@ export interface Target {
   id: string;
   name: string;
   blurb: string;
+  /** Groups the picker. "engine" targets have no browser preview by design. */
+  group: "web" | "app" | "service" | "game" | "engine";
+  icon: string;
   /** What the model is told to produce, on top of the base files. */
   brief: string;
   /** Files that are always correct and never generated. */
@@ -63,6 +66,8 @@ the project stands on its own and you can take it anywhere.
 export const TARGETS: Target[] = [
   {
     id: "single-html",
+    group: "web",
+    icon: "studio",
     name: "Single HTML file",
     blurb: "One self-contained document. No build step, opens anywhere.",
     run: "open index.html",
@@ -72,6 +77,8 @@ export const TARGETS: Target[] = [
   },
   {
     id: "vite-react",
+    group: "web",
+    icon: "ide",
     name: "React + TypeScript (Vite)",
     blurb: "A real front-end project with components, types and hot reload.",
     run: "npm install && npm run dev",
@@ -111,6 +118,8 @@ export const TARGETS: Target[] = [
   },
   {
     id: "vite-vanilla",
+    group: "web",
+    icon: "ide",
     name: "TypeScript (Vite)",
     blurb: "No framework. Canvas, DOM, games — anything that wants the platform.",
     run: "npm install && npm run dev",
@@ -133,6 +142,8 @@ export const TARGETS: Target[] = [
   },
   {
     id: "node-api",
+    group: "service",
+    icon: "server",
     name: "Node API (Express)",
     blurb: "A back end on its own: routes, middleware, JSON.",
     run: "npm install && npm run dev",
@@ -154,6 +165,8 @@ export const TARGETS: Target[] = [
   },
   {
     id: "fullstack",
+    group: "app",
+    icon: "layers",
     name: "Full stack (React + Express)",
     blurb: "Front end and API in one repo, wired together with a dev proxy.",
     run: "npm install && npm run dev",
@@ -197,6 +210,8 @@ Make the two halves actually agree: every endpoint the front end calls must exis
   },
   {
     id: "next-app",
+    group: "app",
+    icon: "layers",
     name: "Next.js (App Router)",
     blurb: "Pages plus API routes, deployable to Vercel as-is.",
     run: "npm install && npm run dev",
@@ -220,6 +235,8 @@ Make the two halves actually agree: every endpoint the front end calls must exis
   },
   {
     id: "game-canvas",
+    group: "game",
+    icon: "arcade",
     name: "Game (Canvas + TypeScript)",
     blurb: "A real game loop: fixed timestep, input, entities, render.",
     run: "npm install && npm run dev",
@@ -248,6 +265,8 @@ Make it actually playable: a start state, a fail or win state, and a way to rest
   },
   {
     id: "python-api",
+    group: "service",
+    icon: "server",
     name: "Python API (FastAPI)",
     blurb: "Typed Python service with automatic OpenAPI docs.",
     run: "pip install -r requirements.txt && uvicorn app.main:app --reload",
@@ -263,6 +282,8 @@ Make it actually playable: a start state, a fail or win state, and a way to rest
   },
   {
     id: "cli",
+    group: "service",
+    icon: "terminal",
     name: "CLI tool (Node)",
     blurb: "A command-line program with args, help and exit codes.",
     run: "npm install && node bin/cli.js --help",
@@ -281,9 +302,203 @@ Make it actually playable: a start state, a fail or win state, and a way to rest
       { path: "README.md", content: readme(name, "npm install\nnode bin/cli.js --help", "`npm link` puts it on your PATH for local use.") },
     ],
   },
+  {
+    id: "three-scene",
+    group: "game",
+    icon: "cube3d",
+    name: "three.js scene",
+    blurb: "Real 3D in the browser. Renders live here, exports as a Vite project.",
+    run: "npm install && npm run dev",
+    expects: ["src/main.ts", "src/style.css"],
+    brief: `Produce a three.js scene in TypeScript. Write src/main.ts and src/style.css.
+
+Requirements:
+- import * as THREE from "three"; OrbitControls from "three/addons/controls/OrbitControls.js".
+- Create renderer with antialias, set pixel ratio to Math.min(devicePixelRatio, 2), append to document.body.
+- Light the scene properly: at least one directional light with a hemisphere or ambient fill. An unlit scene reads as a bug.
+- Animate with requestAnimationFrame and a THREE.Clock delta — never a frame counter.
+- Handle window resize: update camera aspect, call updateProjectionMatrix, resize the renderer.
+- Dispose nothing on unload; this is a page, not a component.
+- Make it genuinely nice to look at: considered materials, shadows where they help, a background that is not pure black.`,
+    base: (name) => [
+      {
+        path: "package.json",
+        content: JSON.stringify({
+          name: slug(name), private: true, version: "0.1.0", type: "module",
+          scripts: { dev: "vite", build: "tsc -b && vite build", preview: "vite preview" },
+          dependencies: { three: "^0.180.0" },
+          devDependencies: { "@types/three": "^0.180.0", typescript: "~5.9.0", vite: "^7.3.0" },
+        }, null, 2) + "\n",
+      },
+      { path: "tsconfig.json", content: JSON.stringify({ compilerOptions: { target: "ES2022", lib: ["ES2022", "DOM"], module: "ESNext", moduleResolution: "bundler", strict: true, noEmit: true, skipLibCheck: true, isolatedModules: true }, include: ["src"] }, null, 2) + "\n" },
+      { path: "index.html", content: `<!doctype html>\n<html lang="en">\n  <head>\n    <meta charset="UTF-8" />\n    <meta name="viewport" content="width=device-width, initial-scale=1.0" />\n    <title>${name}</title>\n  </head>\n  <body>\n    <script type="module" src="/src/main.ts"></script>\n  </body>\n</html>\n` },
+      { path: ".gitignore", content: gitignore },
+      { path: "README.md", content: readme(name, "npm install && npm run dev", "three.js is a real dependency here — `npm install` fetches it. The preview inside Web-AIOS pulls it from a CDN instead, which is the only difference between the two.") },
+    ],
+  },
+  {
+    id: "r3f",
+    group: "game",
+    icon: "cube3d",
+    name: "React Three Fiber",
+    blurb: "3D as React components. Declarative scenes, live preview.",
+    run: "npm install && npm run dev",
+    expects: ["src/App.tsx", "src/main.tsx", "src/index.css"],
+    brief: `Produce a React Three Fiber scene. Write src/main.tsx (mount), src/App.tsx (the <Canvas> and scene) and src/index.css.
+
+Requirements:
+- import { Canvas, useFrame } from "@react-three/fiber". Use @react-three/drei only for OrbitControls/Environment if you need them.
+- Components are ordinary React components returning JSX elements like <mesh>, <boxGeometry />, <meshStandardMaterial />.
+- Animate with useFrame((state, delta) => ...), never setState per frame.
+- Use refs typed as THREE.Mesh etc. Never \`any\`.
+- Light it: ambientLight plus a directionalLight at minimum.
+- The Canvas must fill the viewport; put that in the CSS, not inline.`,
+    base: (name) => [
+      {
+        path: "package.json",
+        content: JSON.stringify({
+          name: slug(name), private: true, version: "0.1.0", type: "module",
+          scripts: { dev: "vite", build: "tsc -b && vite build", preview: "vite preview" },
+          dependencies: { react: "^19.2.0", "react-dom": "^19.2.0", three: "^0.180.0", "@react-three/fiber": "^9.0.0", "@react-three/drei": "^10.0.0" },
+          devDependencies: { "@types/react": "^19.2.0", "@types/react-dom": "^19.2.0", "@types/three": "^0.180.0", "@vitejs/plugin-react": "^5.1.0", typescript: "~5.9.0", vite: "^7.3.0" },
+        }, null, 2) + "\n",
+      },
+      { path: "vite.config.ts", content: `import { defineConfig } from "vite";\nimport react from "@vitejs/plugin-react";\n\nexport default defineConfig({ plugins: [react()] });\n` },
+      { path: "tsconfig.json", content: JSON.stringify({ compilerOptions: { target: "ES2022", lib: ["ES2022", "DOM", "DOM.Iterable"], module: "ESNext", moduleResolution: "bundler", jsx: "react-jsx", strict: true, noEmit: true, skipLibCheck: true, isolatedModules: true }, include: ["src"] }, null, 2) + "\n" },
+      { path: "index.html", content: `<!doctype html>\n<html lang="en">\n  <head>\n    <meta charset="UTF-8" />\n    <meta name="viewport" content="width=device-width, initial-scale=1.0" />\n    <title>${name}</title>\n  </head>\n  <body>\n    <div id="root"></div>\n    <script type="module" src="/src/main.tsx"></script>\n  </body>\n</html>\n` },
+      { path: ".gitignore", content: gitignore },
+      { path: "README.md", content: readme(name, "npm install && npm run dev", "React Three Fiber is three.js with a React reconciler on top — every `<mesh>` is a real THREE.Mesh.") },
+    ],
+  },
+  {
+    id: "pwa",
+    group: "app",
+    icon: "home",
+    name: "Installable PWA",
+    blurb: "A web app that installs to a home screen and works offline.",
+    run: "npm install && npm run dev",
+    expects: ["src/main.ts", "src/style.css", "public/sw.js"],
+    brief: `Produce an installable Progressive Web App in TypeScript. Write src/main.ts, src/style.css and public/sw.js.
+
+Requirements:
+- public/sw.js: cache-first for static assets, network-first for navigations, and a versioned cache name so a deploy invalidates cleanly. Never cache API responses.
+- src/main.ts registers the service worker only in a secure context, and handles the beforeinstallprompt event to offer an install button.
+- Store state in localStorage or IndexedDB so the app is useful with no network.
+- Respect safe-area insets with env(safe-area-inset-*) so it works full-screen on a phone.
+- Touch targets at least 44px. No hover-only interactions.`,
+    base: (name) => [
+      {
+        path: "package.json",
+        content: JSON.stringify({
+          name: slug(name), private: true, version: "0.1.0", type: "module",
+          scripts: { dev: "vite", build: "tsc -b && vite build", preview: "vite preview" },
+          devDependencies: { typescript: "~5.9.0", vite: "^7.3.0" },
+        }, null, 2) + "\n",
+      },
+      { path: "tsconfig.json", content: JSON.stringify({ compilerOptions: { target: "ES2022", lib: ["ES2022", "DOM"], module: "ESNext", moduleResolution: "bundler", strict: true, noEmit: true, skipLibCheck: true, isolatedModules: true }, include: ["src"] }, null, 2) + "\n" },
+      {
+        path: "public/manifest.webmanifest",
+        content: JSON.stringify({
+          name, short_name: slug(name).slice(0, 12), start_url: "/", display: "standalone",
+          background_color: "#0b1220", theme_color: "#0b1220",
+          icons: [{ src: "/icon.svg", sizes: "any", type: "image/svg+xml", purpose: "any maskable" }],
+        }, null, 2) + "\n",
+      },
+      { path: "public/icon.svg", content: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="#0b1220"/><path d="M20 40 32 18l12 22z" fill="none" stroke="#67e8f9" stroke-width="4" stroke-linejoin="round"/></svg>\n` },
+      { path: "index.html", content: `<!doctype html>\n<html lang="en">\n  <head>\n    <meta charset="UTF-8" />\n    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />\n    <meta name="theme-color" content="#0b1220" />\n    <link rel="manifest" href="/manifest.webmanifest" />\n    <title>${name}</title>\n  </head>\n  <body>\n    <div id="app"></div>\n    <script type="module" src="/src/main.ts"></script>\n  </body>\n</html>\n` },
+      { path: ".gitignore", content: gitignore },
+      { path: "README.md", content: readme(name, "npm install && npm run dev", "Service workers need HTTPS or localhost. `npm run build && npm run preview` is the closest thing to production.") },
+    ],
+  },
+  {
+    id: "godot",
+    group: "engine",
+    icon: "cube3d",
+    name: "Godot 4 project",
+    blurb: "GDScript, scenes and resources for the Godot editor.",
+    run: "Open project.godot in Godot 4, then press F5",
+    expects: ["scripts/player.gd", "scenes/main.tscn"],
+    brief: `Produce a Godot 4.4 project. Write GDScript under scripts/ and .tscn scene files under scenes/.
+
+Requirements:
+- GDScript 2.0 syntax: typed vars (\`var speed: float = 300.0\`), @export for inspector values, @onready for node refs.
+- Use _physics_process(delta) for movement, _process(delta) for visuals. Never mix them up.
+- CharacterBody2D/3D uses velocity and move_and_slide(), not the Godot 3 return value.
+- .tscn files must be valid: a [gd_scene load_steps=N format=3 uid="uid://..."] header, [ext_resource] blocks for scripts, then [node] blocks with parent= paths.
+- Connect signals in code with .connect(callable), the Godot 4 form.
+- Keep scenes small and composable — one responsibility per scene.`,
+    base: (name) => [
+      {
+        path: "project.godot",
+        content: `; Engine configuration file.\n; Generated by Web-AIOS AI Studio.\n\nconfig_version=5\n\n[application]\n\nconfig/name="${name}"\nrun/main_scene="res://scenes/main.tscn"\nconfig/features=PackedStringArray("4.4", "GL Compatibility")\nconfig/icon="res://icon.svg"\n\n[rendering]\n\nrenderer/rendering_method="gl_compatibility"\n`,
+      },
+      { path: "icon.svg", content: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="12" fill="#1f2937"/><circle cx="32" cy="32" r="16" fill="none" stroke="#4ade80" stroke-width="4"/></svg>\n` },
+      { path: ".gitignore", content: `.godot/\nexport_presets.cfg\n*.translation\n.DS_Store\n` },
+      { path: "README.md", content: readme(name, "Open project.godot in Godot 4.4 and press F5", "Godot will re-import assets the first time it opens the project — that is normal and takes a few seconds.\n\nYou can also drive a running Godot editor directly from AI Studio's MCP tab if you have a Godot MCP server on localhost.") },
+    ],
+  },
+  {
+    id: "unity",
+    group: "engine",
+    icon: "cube3d",
+    name: "Unity C# scripts",
+    blurb: "MonoBehaviours and ScriptableObjects to drop into Assets/.",
+    run: "Copy Assets/ into your Unity project",
+    expects: ["Assets/Scripts/PlayerController.cs"],
+    brief: `Produce Unity C# scripts targeting Unity 6 / .NET Standard 2.1. Write files under Assets/Scripts/.
+
+Requirements:
+- One public class per file, named exactly as the file.
+- Use [SerializeField] private fields rather than public fields for inspector values, with [Tooltip] where the name is not self-evident.
+- Cache component references in Awake(); never call GetComponent in Update().
+- Use Time.deltaTime in Update and Time.fixedDeltaTime in FixedUpdate; physics goes in FixedUpdate.
+- Use the new Input System (UnityEngine.InputSystem) if you need input, and say so in a comment at the top.
+- Prefer ScriptableObjects for tunable data over hard-coded constants.
+- No UnityEditor references in runtime scripts — they break the build.`,
+    base: (name) => [
+      { path: "Assets/Scripts/.gitkeep", content: "" },
+      { path: ".gitignore", content: `[Ll]ibrary/\n[Tt]emp/\n[Oo]bj/\n[Bb]uild/\n[Ll]ogs/\n*.csproj\n*.sln\n.DS_Store\n` },
+      { path: "README.md", content: readme(name, "Copy the Assets/ folder into your Unity project", "These are runtime scripts, not a full Unity project — Unity generates its own Library/, ProjectSettings/ and .meta files on first import, and shipping fabricated ones would corrupt an existing project.\n\nAI Studio's MCP tab can drive a running Unity editor directly if you have a Unity MCP bridge installed.") },
+    ],
+  },
+  {
+    id: "unreal",
+    group: "engine",
+    icon: "cube3d",
+    name: "Unreal C++ module",
+    blurb: "Actor and component classes for an Unreal 5 project.",
+    run: "Copy Source/ into your .uproject and regenerate project files",
+    expects: ["Source/Game/GameCharacter.h", "Source/Game/GameCharacter.cpp"],
+    brief: `Produce Unreal Engine 5.5 C++ gameplay code under Source/Game/.
+
+Requirements:
+- Every class pairs a .h and a .cpp. Headers end with #include "TypeName.generated.h" as the LAST include.
+- UCLASS(), UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="...") and UFUNCTION(BlueprintCallable) on anything designers touch.
+- Use the GAME_API macro on exported classes.
+- Use TObjectPtr<T> for UObject members, not raw pointers. Check IsValid() before dereferencing.
+- Tick logic goes in Tick(float DeltaTime) and must respect PrimaryActorTick.bCanEverTick.
+- Use UE_LOG with a declared log category, never printf.
+- Enhanced Input (UInputAction / UInputMappingContext) for input, not the legacy axis mappings.`,
+    base: (name) => [
+      {
+        path: "Source/Game/Game.Build.cs",
+        content: `using UnrealBuildTool;\n\npublic class Game : ModuleRules\n{\n\tpublic Game(ReadOnlyTargetRules Target) : base(Target)\n\t{\n\t\tPCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;\n\t\tPublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "InputCore", "EnhancedInput" });\n\t}\n}\n`,
+      },
+      { path: ".gitignore", content: `Binaries/\nDerivedDataCache/\nIntermediate/\nSaved/\n*.sln\n.vs/\n.DS_Store\n` },
+      { path: "README.md", content: readme(name, "Copy Source/Game into your .uproject, then right-click the .uproject and Generate Project Files", "This is a gameplay module, not a whole project — a .uproject carries engine-version and plugin state that only Unreal should write.\n\nAI Studio's MCP tab can drive a running Unreal editor if you have an Unreal MCP plugin installed.") },
+    ],
+  },
 ];
 
 export const getTarget = (id: string) => TARGETS.find((t) => t.id === id) ?? TARGETS[0];
+
+export const TARGET_GROUPS: Array<{ id: Target["group"]; label: string; hint: string }> = [
+  { id: "web", label: "Web", hint: "Pages and front ends. Previews live." },
+  { id: "app", label: "Apps", hint: "Full products — client, server, installable." },
+  { id: "game", label: "Games & 3D", hint: "Canvas, three.js, React Three Fiber." },
+  { id: "service", label: "Services", hint: "APIs and command-line tools." },
+  { id: "engine", label: "Engines", hint: "Godot, Unity, Unreal. Drive the editor over MCP." },
+];
 
 /** The delimiter convention the model writes files in.
  *

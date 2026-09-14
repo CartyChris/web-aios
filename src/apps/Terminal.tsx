@@ -124,7 +124,7 @@ export default function Terminal({}: AppProps) {
         }
 
         case "apps":
-          print(APPS.map((a) => `${a.icon} ${a.id.padEnd(13)} ${a.name.padEnd(18)} ${a.description}`).join("\n"));
+          print(APPS.map((a) => `${a.id.padEnd(13)} ${a.name.padEnd(18)} ${a.description}`).join("\n"));
           break;
         case "open": {
           const app = getApp(args[0] ?? "");

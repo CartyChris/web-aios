@@ -2,8 +2,9 @@
 
 import { useCallback, useRef, useState } from "react";
 import { useSettings } from "@/kernel/settings";
+import { getVoice } from "@/kernel/pets";
 import { getProvider, estimateCost, estimateTokens } from "./providers";
-import { streamChat, type ChatMessage } from "./ai-transport";
+import { streamChat, messageText, type ChatMessage } from "./ai-transport";
 
 export interface AskOptions {
   messages: ChatMessage[];
@@ -14,6 +15,13 @@ export interface AskOptions {
   system?: string;
   onDelta?: (delta: string, full: string) => void;
   signal?: AbortSignal;
+  /** Set false to send the system prompt exactly as given.
+   *
+   *  Everything the user talks to should sound like the same assistant, so the
+   *  chosen voice and the "about you" note are prepended by default. The pet
+   *  opts out: it has a personality of its own, and blending "deadpan" with
+   *  "thorough" produces something that is neither. */
+  persona?: boolean;
 }
 
 export interface AskResult {
@@ -35,8 +43,10 @@ export async function ask(opts: AskOptions): Promise<AskResult> {
   if (!provider) throw new Error(`Unknown provider "${providerId}".`);
 
   const model = opts.model ?? s.ai.model;
+  const baseSystem = opts.system ?? s.ai.systemPrompt;
+  const system = opts.persona === false ? baseSystem : withPersona(baseSystem, s);
   const messages: ChatMessage[] = [
-    ...(opts.system ?? s.ai.systemPrompt ? [{ role: "system" as const, content: opts.system ?? s.ai.systemPrompt }] : []),
+    ...(system ? [{ role: "system" as const, content: system }] : []),
     ...opts.messages.filter((m) => m.role !== "system"),
   ];
 
@@ -104,12 +114,23 @@ export async function ask(opts: AskOptions): Promise<AskResult> {
 
   // Providers that omit usage still need a budget estimate, so fall back to a
   // character-count approximation rather than silently charging nothing.
-  const inTok = usage.inputTokens || estimateTokens(messages.map((m) => m.content).join(" "));
+  const inTok = usage.inputTokens || estimateTokens(messages.map(messageText).join(" "));
   const outTok = usage.outputTokens || estimateTokens(text);
   const costUsd = estimateCost(model, inTok, outTok);
   useSettings.getState().setAI("spentUsd", +(s.ai.spentUsd + costUsd).toFixed(6));
 
   return { text, costUsd, ms: Math.round(performance.now() - started) };
+}
+
+/** Layer the user's chosen voice and their "about you" note over a task
+ *  prompt. The task comes first: a tone preference must not be able to talk a
+ *  model out of the thing it was actually asked to do. */
+export function withPersona(base: string, s = useSettings.getState()): string {
+  const parts = [base].filter(Boolean);
+  const voice = getVoice(s.voice);
+  if (voice && voice.id !== "direct") parts.push(voice.line);
+  if (s.aboutMe.trim()) parts.push(`About the person you are helping: ${s.aboutMe.trim()}`);
+  return parts.join("\n\n");
 }
 
 /** React wrapper with streaming text, in-flight state and cancellation. */

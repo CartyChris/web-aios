@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useSettings } from "@/kernel/settings";
 import { useVFS } from "@/kernel/vfs";
 import { APPS } from "@/kernel/registry";
-import { useStudio } from "@/apps/Studio";
+import { useUserApps } from "@/kernel/userapps";
 import { bus } from "@/kernel/bus";
 import { Icon } from "./icons";
 import { cn } from "@/lib/cn";
@@ -15,7 +15,7 @@ import { cn } from "@/lib/cn";
 export function PinPicker() {
   const settings = useSettings();
   const vfs = useVFS();
-  const userApps = useStudio((s) => s.apps);
+  const userApps = useUserApps((s) => s.apps);
   const [at, setAt] = useState<{ x: number; y: number } | null>(null);
   const [q, setQ] = useState("");
   const [tab, setTab] = useState<"apps" | "built" | "files">("apps");

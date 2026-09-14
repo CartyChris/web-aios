@@ -9,6 +9,7 @@ import { bus } from "@/kernel/bus";
 import type { AppProps } from "@/kernel/types";
 import { bytes, relTime } from "@/lib/format";
 import { Tabs } from "./_ui";
+import { Icon } from "@/shell/icons";
 
 /** System Monitor — live processes, storage, an event log and AI spend. */
 interface Ev { ts: number; event: string; payload: string }
@@ -92,7 +93,7 @@ export default function Monitor({}: AppProps) {
             <div className="grid gap-1" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(190px, 1fr))" }}>
               {APPS.map((a) => (
                 <div key={a.id} className="flex items-center gap-1.5 text-[11px]">
-                  <span>{a.icon}</span>
+                  <Icon name={a.icon} size={12} style={{ color: a.accent ?? "var(--accent)" }} />
                   <span className="min-w-0 flex-1 truncate">{a.name}</span>
                   <span className="text-[9.5px] text-[var(--muted)]">{wm.windows.filter((w) => w.appId === a.id).length || ""}</span>
                 </div>

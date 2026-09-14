@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useWM } from "@/kernel/wm";
 import { useSettings, resolveTokens } from "@/kernel/settings";
 import { getApp } from "@/kernel/registry";
-import { PETS } from "@/kernel/themes";
 import { useHydrated } from "@/lib/useHydrated";
 import { bus } from "@/kernel/bus";
 import { WindowFrame } from "./Window";
@@ -17,9 +16,11 @@ import { Wallpaper } from "./Wallpaper";
 import { MobileShell } from "./MobileShell";
 import { useViewport } from "@/lib/useViewport";
 import { cn } from "@/lib/cn";
-import { Icon, PetIcon } from "./icons";
+import { Icon } from "./icons";
+import { PetLayer } from "./pets";
 import { DesktopIcons } from "./DesktopIcons";
 import { PinPicker } from "./PinPicker";
+import { EGGS, useEggs, watchSequences } from "@/lib/easter";
 
 export function Desktop() {
   const hydrated = useHydrated();
@@ -29,6 +30,7 @@ export function Desktop() {
   const [launcher, setLauncher] = useState(false);
   const [palette, setPalette] = useState(false);
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  const funMode = settings.funMode;
 
   // ── Token application ─────────────────────────────────────────────────────
   // Every appearance setting lands on <html> as a custom property. This is the
@@ -112,6 +114,35 @@ export function Desktop() {
     return () => window.removeEventListener("keydown", onKey);
   }, [hydrated, settings.keybinds, wm, matches]);
 
+  // ── Easter eggs ───────────────────────────────────────────────────────────
+  // One listener for every sequence-based secret, gated on funMode — an OS
+  // that starts cycling colours mid-demo because someone typed the wrong word
+  // is not charming.
+  //
+  // Settings are read through getState() rather than closed over. Depending on
+  // the settings object re-subscribes this listener on every change, and the
+  // partial key sequence lives inside the subscription — so party mode, which
+  // writes an accent every 120ms, silently made every other sequence
+  // impossible to finish.
+  useEffect(() => {
+    if (!hydrated || !funMode) return;
+    return watchSequences((id) => {
+      const egg = EGGS.find((e) => e.id === id);
+      if (egg && useEggs.getState().find(id)) {
+        bus.emit("notify", { title: `Secret found: ${egg.name}`, body: egg.reveal, kind: "success" });
+      }
+      runEgg(id, useSettings.getState());
+    });
+  }, [hydrated, funMode]);
+
+  // The void: clear every icon off the desktop and something notices.
+  useEffect(() => {
+    if (!hydrated || !funMode) return;
+    if (settings.desktopItems.length === 0 && useEggs.getState().find("void")) {
+      bus.emit("notify", { title: "Secret found: The void", body: "Nothing left but the wallpaper. Restful, isn't it.", kind: "info" });
+    }
+  }, [hydrated, funMode, settings.desktopItems.length]);
+
   // ── Cross-app messaging ───────────────────────────────────────────────────
   useEffect(() => {
     const offOpen = bus.on("app:open", (p) => {
@@ -146,8 +177,6 @@ export function Desktop() {
   // swaps to the phone paradigm. Same kernel, same apps — different presentation.
   if (vp.isPhone) return <MobileShell />;
 
-  const pet = PETS.find((p) => p.id === settings.pet);
-
   return (
     <div
       className={cn("relative h-screen w-screen overflow-hidden", !settings.motion && "motion-off")}
@@ -165,17 +194,7 @@ export function Desktop() {
 
       {visible.map((w) => <WindowFrame key={w.id} win={w} />)}
 
-      {settings.petVisible && pet && pet.glyph && (
-        <button
-          className="absolute z-[2]"
-          style={{ left: `${settings.petPos.x}%`, top: `${settings.petPos.y}%`, color: "var(--accent)", animation: settings.motion ? "os-pulse 4s ease-in-out infinite" : undefined }}
-          title={`${pet.name} — click to move`}
-          aria-label={`${pet.name} desktop pet`}
-          onClick={() => settings.set("petPos", { x: 8 + Math.random() * 82, y: 18 + Math.random() * 62 })}
-        >
-          <PetIcon name={pet.glyph} size={44} />
-        </button>
-      )}
+      <PetLayer />
 
       <TopBar onLauncher={() => setLauncher((v) => !v)} onPalette={() => setPalette((v) => !v)} />
       <Dock onLauncher={() => setLauncher((v) => !v)} />
@@ -189,6 +208,50 @@ export function Desktop() {
       <MinimizedTray />
     </div>
   );
+}
+
+/** What each secret actually does.
+ *
+ *  Every one is reversible and none of them destroys anything: "gravity"
+ *  rearranges icons you can put back with Tidy, and the two visual ones wear
+ *  off or toggle. A prank that costs the user work is not a prank. */
+function runEgg(id: string, settings: ReturnType<typeof useSettings.getState>) {
+  if (id === "konami") {
+    settings.set("petVisible", true);
+    if (settings.pet === "none") settings.set("pet", "dragon");
+    settings.set("petDetail", "expressive");
+    return;
+  }
+  if (id === "matrix") {
+    const prev = { wallpaper: settings.wallpaper, theme: settings.themeId };
+    settings.applyTheme("matrix");
+    settings.set("wallpaper", "grid");
+    // Twenty seconds is long enough to enjoy and short enough that nobody has
+    // to work out how to undo it.
+    setTimeout(() => { settings.applyTheme(prev.theme); settings.set("wallpaper", prev.wallpaper); }, 20000);
+    return;
+  }
+  if (id === "party") {
+    const root = document.documentElement;
+    if (root.dataset.party === "1") { delete root.dataset.party; settings.set("accent", null); return; }
+    root.dataset.party = "1";
+    let hue = 0;
+    const tick = () => {
+      if (root.dataset.party !== "1") return;
+      hue = (hue + 7) % 360;
+      settings.set("accent", `hsl(${hue} 85% 62%)`);
+      setTimeout(tick, 120);
+    };
+    tick();
+    return;
+  }
+  if (id === "gravity") {
+    // Drop every icon to the floor, keeping its column.
+    const floor = window.innerHeight - 200;
+    settings.moveDesktopItems(
+      settings.desktopItems.map((d, i) => ({ id: d.id, x: d.x, y: floor - (i % 3) * 4 })),
+    );
+  }
 }
 
 function MinimizedTray() {
@@ -222,6 +285,7 @@ function DesktopMenu({ x, y, onClose }: { x: number; y: number; onClose: () => v
   const items: Array<{ label: string; run: () => void } | "sep"> = [
     { label: "Pin an app here…", run: () => bus.emit("desktop:pin-picker", { x, y }) },
     { label: "New AI widget…", run: () => wm.open("personalize", { title: "Personalize", icon: "personalize", singleton: true, size: { w: 1020, h: 720 }, args: { tab: "widgets", newWidget: true } }) },
+    { label: "Build something with AI…", run: () => bus.emit("app:open", { appId: "studio" }) },
     { label: "Tidy desktop icons", run: () => settings.tidyDesktop() },
     { label: settings.snapIconsToGrid ? "Free icon placement" : "Snap icons to grid", run: () => settings.set("snapIconsToGrid", !settings.snapIconsToGrid) },
     "sep",
@@ -235,11 +299,12 @@ function DesktopMenu({ x, y, onClose }: { x: number; y: number; onClose: () => v
     { label: settings.showWidgets ? "Hide widgets" : "Show widgets", run: () => settings.set("showWidgets", !settings.showWidgets) },
     { label: settings.showDesktopIcons ? "Hide desktop icons" : "Show desktop icons", run: () => settings.set("showDesktopIcons", !settings.showDesktopIcons) },
     { label: settings.motion ? "Disable animations" : "Enable animations", run: () => settings.set("motion", !settings.motion) },
+    { label: settings.petVisible ? "Put the pet away" : "Bring out a pet", run: () => { if (!settings.petVisible && settings.pet === "none") settings.set("pet", "cat"); settings.set("petVisible", !settings.petVisible); } },
   ];
   return (
     <div
       className="glass fixed z-[9800] w-52 p-1.5 shadow-2xl"
-      style={{ left: Math.min(x, window.innerWidth - 220), top: Math.min(y, window.innerHeight - 320), borderRadius: "var(--radius)" }}
+      style={{ left: Math.min(x, window.innerWidth - 220), top: Math.min(y, window.innerHeight - 380), borderRadius: "var(--radius)" }}
       onClick={(e) => e.stopPropagation()}
     >
       {items.map((it, i) =>

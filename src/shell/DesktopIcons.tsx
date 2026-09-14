@@ -5,7 +5,7 @@ import { useSettings, type DesktopItem } from "@/kernel/settings";
 import { useWM } from "@/kernel/wm";
 import { useVFS } from "@/kernel/vfs";
 import { getApp } from "@/kernel/registry";
-import { useStudio } from "@/apps/Studio";
+import { useUserApps } from "@/kernel/userapps";
 import { bus } from "@/kernel/bus";
 import { Icon } from "./icons";
 import { cn } from "@/lib/cn";
@@ -20,6 +20,13 @@ import { cn } from "@/lib/cn";
    - A drag that starts on empty desktop draws a rubber band; a drag that
      starts on an icon moves icons. The same pointerdown cannot mean both, so
      the target decides.
+   - Activation is decided here, in pointerup, rather than by an onClick or
+     onDoubleClick handler. It has to be: capturing the pointer on the surface
+     (which the drag needs) makes the browser retarget the compatibility mouse
+     events to the surface, so an icon's own click and dblclick handlers never
+     fire at all. Measured, not assumed — a real double-click on an icon
+     logged `click@SURFACE, click@SURFACE, dblclick@SURFACE` and opened
+     nothing. Owning the gesture also gets touch right for free.
    - Dragging an icon that is already part of a selection moves the whole
      selection. Dragging an unselected icon selects it first, discarding the
      old selection — which is what every desktop does and what people expect.
@@ -31,6 +38,11 @@ import { cn } from "@/lib/cn";
 const GRID = 92;
 const ICON_W = 84;
 const ICON_H = 88;
+/** Past this, the gesture was a drag and not a click. Generous enough to
+ *  forgive a shaky finger on a phone, tight enough not to swallow a real drag. */
+const TAP_SLOP = 6;
+/** Two taps inside this window count as a double-click. */
+const DOUBLE_MS = 420;
 
 interface Rect { x: number; y: number; w: number; h: number }
 
@@ -41,7 +53,7 @@ export function DesktopIcons({ topInset }: { topInset: number }) {
   const settings = useSettings();
   const wm = useWM();
   const vfs = useVFS();
-  const userApps = useStudio((s) => s.apps);
+  const userApps = useUserApps((s) => s.apps);
 
   const [selected, setSelected] = useState<string[]>([]);
   const [marquee, setMarquee] = useState<Rect | null>(null);
@@ -50,6 +62,10 @@ export function DesktopIcons({ topInset }: { topInset: number }) {
   const [renaming, setRenaming] = useState<string | null>(null);
   const surfaceRef = useRef<HTMLDivElement>(null);
   const marqueeStart = useRef<{ x: number; y: number } | null>(null);
+  // The press that is in flight: which icon, where it started, and whether it
+  // has since travelled far enough to be a drag rather than a tap.
+  const press = useRef<{ id: string; x: number; y: number; moved: boolean } | null>(null);
+  const lastTap = useRef<{ id: string; at: number }>({ id: "", at: 0 });
   // Live pixel offset during a drag, so we can translate without writing state.
   const [dragDelta, setDragDelta] = useState<{ dx: number; dy: number }>({ dx: 0, dy: 0 });
 
@@ -73,9 +89,9 @@ export function DesktopIcons({ topInset }: { topInset: number }) {
         if (!ua) return null;
         return {
           label: item.label ?? ua.name,
-          icon: "app",
           accent: "var(--accent2)",
-          // Studio hosts the runtime, so a built app opens in its sandbox.
+          icon: ua.icon || (ua.kind === "project" ? "layers" : "app"),
+          // AI Studio hosts the runtime, so an app you built opens in its sandbox.
           open: () => bus.emit("app:open", { appId: "studio", args: { runUserApp: ua.id } }),
         };
       }
@@ -126,7 +142,10 @@ export function DesktopIcons({ topInset }: { topInset: number }) {
 
       if (drag && host) {
         const box = host.getBoundingClientRect();
-        setDragDelta({ dx: e.clientX - box.left - drag.dx, dy: e.clientY - box.top - drag.dy });
+        const dx = e.clientX - box.left - drag.dx;
+        const dy = e.clientY - box.top - drag.dy;
+        if (press.current && Math.abs(dx) + Math.abs(dy) > TAP_SLOP) press.current.moved = true;
+        setDragDelta({ dx, dy });
         return;
       }
 
@@ -181,14 +200,35 @@ export function DesktopIcons({ topInset }: { topInset: number }) {
     setDragDelta({ dx: 0, dy: 0 });
   }, [drag, dragDelta, items, settings]);
 
+  /** Open one item by its desktop id. */
+  const activate = useCallback(
+    (id: string) => resolved.find((r) => r.item.id === id)?.view?.open(),
+    [resolved],
+  );
+
   const onSurfacePointerUp = useCallback(
     (e: React.PointerEvent) => {
       if (drag) commitDrag();
+
+      // Was this a tap on an icon rather than a drag? If so it activates,
+      // because nothing else in this component will ever hear about it.
+      const p = press.current;
+      press.current = null;
+      if (p && !p.moved && !renaming) {
+        const now = Date.now();
+        const isSecond = lastTap.current.id === p.id && now - lastTap.current.at < DOUBLE_MS;
+        lastTap.current = { id: p.id, at: now };
+        if (settings.iconActivation === "single" || isSecond) {
+          if (isSecond) lastTap.current = { id: "", at: 0 }; // a triple-click is not two opens
+          activate(p.id);
+        }
+      }
+
       marqueeStart.current = null;
       setMarquee(null);
       try { surfaceRef.current?.releasePointerCapture(e.pointerId); } catch { /* already released */ }
     },
-    [drag, commitDrag],
+    [drag, commitDrag, renaming, settings.iconActivation, activate],
   );
 
   /* ── Icon pointer handling ───────────────────────────────────────────── */
@@ -199,6 +239,8 @@ export function DesktopIcons({ topInset }: { topInset: number }) {
       setMenu(null);
 
       const additive = e.shiftKey || e.metaKey || e.ctrlKey;
+      // A modifier click is a selection gesture, never an activation.
+      press.current = additive ? null : { id, x: e.clientX, y: e.clientY, moved: false };
       let ids: string[];
       if (additive) {
         ids = selected.includes(id) ? selected.filter((s) => s !== id) : [...selected, id];
@@ -285,7 +327,6 @@ export function DesktopIcons({ topInset }: { topInset: number }) {
             key={item.id}
             data-desktop-icon={item.id}
             onPointerDown={(e) => onIconPointerDown(e, item.id)}
-            onDoubleClick={(e) => { e.stopPropagation(); view?.open(); }}
             onContextMenu={(e) => {
               e.preventDefault();
               e.stopPropagation();
@@ -305,7 +346,7 @@ export function DesktopIcons({ topInset }: { topInset: number }) {
               zIndex: moving ? 5 : 2,
               fontSize: `calc(1em * ${settings.iconSize})`,
             }}
-            title={view ? `${view.label} — double-click to open` : "This item's target no longer exists"}
+            title={view ? `${view.label} — ${settings.iconActivation === "single" ? "click" : "double-click"} to open` : "This item's target no longer exists"}
           >
             <Icon
               name={view?.icon ?? "ban"}

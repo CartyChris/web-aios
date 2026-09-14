@@ -18,6 +18,42 @@ import type { CSSProperties } from "react";
 const P = ({ d }: { d: string }) => <path d={d} />;
 
 export const ICONS: Record<string, React.ReactNode> = {
+  /* ── AI Studio & creation ─────────────────────────────────────────────── */
+  // AI Studio: a spark inside a frame — the thing being made and the thing making it.
+  aistudio: <><rect x="3.2" y="4.5" width="17.6" height="15" rx="2" /><P d="M12 8.4l1.35 2.85L16.2 12.6l-2.85 1.35L12 16.8l-1.35-2.85L7.8 12.6l2.85-1.35z" /></>,
+  // Asset Studio: a crate being drawn into being.
+  assetstudio: <><P d="M4 8.6 12 4.4l8 4.2v6.8L12 19.6l-8-4.2z" /><P d="M4 8.6 12 12.8l8-4.2M12 12.8v6.8" /><P d="M17.6 3.2v3.2M16 4.8h3.2" /></>,
+  // Image: a framed picture with a horizon and a sun.
+  image: <><rect x="3.4" y="5" width="17.2" height="14" rx="2" /><circle cx="8.6" cy="9.8" r="1.7" /><P d="M3.4 16.2l4.6-4 3.4 2.9 3.6-3.6 5.6 5.1" /></>,
+  // Video: a film gate with a play wedge.
+  video: <><rect x="3" y="6" width="12.5" height="12" rx="2" /><P d="M15.5 10.2 21 7.4v9.2l-5.5-2.8z" /><P d="M7.6 10.8l3.4 2.2-3.4 2.2z" /></>,
+  // 3D / engine: a wireframe cube with an axis pin.
+  cube3d: <><P d="M12 3.4 20 7.8v8.4L12 20.6 4 16.2V7.8z" /><P d="M12 12.2 20 7.8M12 12.2 4 7.8M12 12.2v8.4" /><circle cx="12" cy="12.2" r="1.1" /></>,
+  // MCP: a plug meeting a socket — one protocol, two programs.
+  mcp: <><P d="M9.4 3.6v4.2M14.6 3.6v4.2" /><P d="M6.8 7.8h10.4v3.4a5.2 5.2 0 0 1-10.4 0z" /><P d="M12 16.4v4" /><circle cx="12" cy="21.2" r="1.1" /></>,
+  // Live preview: an eye inside a viewport.
+  live: <><rect x="2.8" y="5.4" width="18.4" height="13.2" rx="2" /><P d="M6.4 12c2-2.6 3.8-3.9 5.6-3.9s3.6 1.3 5.6 3.9c-2 2.6-3.8 3.9-5.6 3.9S8.4 14.6 6.4 12z" /><circle cx="12" cy="12" r="1.5" /></>,
+  // Arcade: a cabinet with a joystick.
+  arcade: <><rect x="4.4" y="3.4" width="15.2" height="17.2" rx="2.2" /><rect x="7" y="6" width="10" height="6" rx="1" /><circle cx="9.4" cy="16.4" r="1.3" /><P d="M13.6 17.4h3.2M15.2 15.8v3.2" /></>,
+  // Pets: a paw print.
+  pet: <><ellipse cx="7.4" cy="9.2" rx="1.9" ry="2.5" /><ellipse cx="12" cy="7.4" rx="1.9" ry="2.6" /><ellipse cx="16.6" cy="9.2" rx="1.9" ry="2.5" /><P d="M12 12.4c3 0 5 2 5 4.3 0 2-1.8 3-3.4 2.4a4.6 4.6 0 0 0-3.2 0C8.8 19.7 7 18.7 7 16.7c0-2.3 2-4.3 5-4.3z" /></>,
+  // Wand: generate.
+  wand: <><P d="M4.4 19.6 14.8 9.2" /><P d="M17.6 3.4l.9 1.9 1.9.9-1.9.9-.9 1.9-.9-1.9-1.9-.9 1.9-.9z" /><P d="M7.6 4.4l.6 1.3 1.3.6-1.3.6-.6 1.3-.6-1.3-1.3-.6 1.3-.6z" /><P d="M13.6 12.8l2.8 2.8" /></>,
+  // Package / export.
+  package: <><P d="M12 3.4 20 7.6v8.8L12 20.6l-8-4.2V7.6z" /><P d="M4 7.6 12 11.8l8-4.2M12 11.8v8.8" /><P d="M8 5.5 16 9.7" /></>,
+  // Refresh / regenerate.
+  refresh: <><P d="M20 12a8 8 0 1 1-2.4-5.7" /><P d="M20.4 4v4h-4" /></>,
+  // Trophy: score, achievements, easter eggs found.
+  trophy: <><P d="M7.6 4h8.8v5.2a4.4 4.4 0 0 1-8.8 0z" /><P d="M7.6 5.6H5a2.4 2.4 0 0 0 2.6 3.6M16.4 5.6H19a2.4 2.4 0 0 1-2.6 3.6" /><P d="M12 13.6v3.2M9 20h6M9.6 16.8h4.8L15 20H9z" /></>,
+  // Sparkles: the AI-touched marker.
+  sparkles: <><P d="M9.6 3.8l1.2 3 3 1.2-3 1.2-1.2 3-1.2-3-3-1.2 3-1.2z" /><P d="M17 12.6l.8 1.9 1.9.8-1.9.8-.8 1.9-.8-1.9-1.9-.8 1.9-.8z" /><P d="M5.6 15l.6 1.5 1.5.6-1.5.6-.6 1.5-.6-1.5L3.5 17l1.5-.6z" /></>,
+  // Layers: a multi-file project.
+  layers: <><P d="M12 3.6 21 8.2l-9 4.6-9-4.6z" /><P d="M3 12.4l9 4.6 9-4.6M3 16.4l9 4.6 9-4.6" /></>,
+  // Server / backend.
+  server: <><rect x="3.4" y="4.2" width="17.2" height="6" rx="1.6" /><rect x="3.4" y="13.8" width="17.2" height="6" rx="1.6" /><P d="M7 7.2h.01M7 16.8h.01" /></>,
+  // Brush / style pass.
+  brush: <><P d="M15.4 3.6 20.4 8.6 11 18h-5v-5z" /><P d="M13.6 5.4 18.6 10.4" /><P d="M6 13v5h5" /></>,
+
   /* ── AI & agents ──────────────────────────────────────────────────────── */
   // Chat: a speech bubble with a conversation rhythm inside.
   chat: <><P d="M4 5.5h16v10.5H9l-4 3.5v-3.5H4z" /><P d="M8 9h8M8 12h5" /></>,
@@ -181,36 +217,3 @@ export function Icon({ name, size = "1em", className, style, label, strokeWidth 
   );
 }
 
-/* ── Desktop pets ──────────────────────────────────────────────────────────
-   Drawn rather than emoji for the same reason as everything else, and because
-   an emoji pet is a different animal on every platform. */
-export const PET_ICONS: Record<string, React.ReactNode> = {
-  cat: <><P d="M5.5 10.5 4.5 5l4.2 2.8a8.4 8.4 0 0 1 6.6 0L19.5 5l-1 5.5a7 7 0 1 1-13 0z" /><P d="M9.4 12.6h.01M14.6 12.6h.01" /><P d="M12 15.2v1.2M9.6 16.8h4.8" /></>,
-  dog: <><P d="M6 7.5 4.2 4.8 6.8 4l1.6 2.4a8 8 0 0 1 7.2 0L17.2 4l2.6.8L18 7.5a7.2 7.2 0 1 1-12 0z" /><P d="M9.4 12h.01M14.6 12h.01" /><P d="M12 14.4a1.8 1.8 0 0 0 0 2.8" /></>,
-  robot: <><rect x="4.5" y="7.5" width="15" height="11" rx="2.4" /><P d="M12 7.5V4.2" /><circle cx="12" cy="3.2" r="1.2" /><P d="M9 12h.01M15 12h.01" /><P d="M9.6 15.4h4.8" /><P d="M4.5 11.6H2.8M21.2 11.6h-1.7" /></>,
-  fox: <><P d="M4.6 5.2 7.8 9a7.6 7.6 0 0 1 8.4 0l3.2-3.8 1 6.6a8 8 0 1 1-16.8 0z" /><P d="M9.6 12.6h.01M14.4 12.6h.01" /><P d="M12 15v1.4" /></>,
-  slime: <><P d="M4.4 18.2c0-5.4 3.4-9.8 7.6-9.8s7.6 4.4 7.6 9.8z" /><P d="M4.4 18.2h15.2" /><P d="M9.6 14h.01M14.4 14h.01" /></>,
-  dragon: <><P d="M3.4 12.8c3-5.2 7.4-7.8 13.2-7.8l-2 3.6 4 .8-3.4 3 2.6 1.6-4.4 1.4.6 3.4-4-2.2-3 3z" /><P d="M13.4 9.4h.01" /></>,
-  ghost: <><P d="M5.4 20.4V11a6.6 6.6 0 0 1 13.2 0v9.4l-2.2-1.8-2.2 1.8-2.2-1.8-2.2 1.8-2.2-1.8z" /><P d="M9.8 10.6h.01M14.2 10.6h.01" /></>,
-  penguin: <><P d="M12 3.2a4.4 4.4 0 0 1 4.4 4.4v8.6a4.4 4.4 0 0 1-8.8 0V7.6A4.4 4.4 0 0 1 12 3.2z" /><P d="M10.4 7.4h.01M13.6 7.4h.01" /><P d="M12 9.2l-1.2 1.4h2.4z" /><P d="M7.6 20.4h3M13.4 20.4h3" /></>,
-  bunny: <><P d="M8.6 9.4C8.6 6 8 3.2 7 3.2S5.4 5.6 5.6 9.4M15.4 9.4C15.4 6 16 3.2 17 3.2s1.6 2.4 1.4 6.2" /><circle cx="12" cy="15" r="5.2" /><P d="M10.2 14h.01M13.8 14h.01" /><P d="M12 16.2v1.2M10.4 18h3.2" /></>,
-  bird: <><P d="M4 14.6c0-3.8 3-6.8 6.8-6.8h6.4l2.8-2.6v4.2a6.8 6.8 0 0 1-6.8 6.8h-2.6l-3 3.4v-3.6A3.8 3.8 0 0 1 4 14.6z" /><P d="M14.6 11h.01" /></>,
-  crab: <><P d="M6.4 6.6 8.8 9.6M17.6 6.6 15.2 9.6" /><ellipse cx="12" cy="13.4" rx="5.2" ry="4" /><P d="M10.2 12.4h.01M13.8 12.4h.01" /><P d="M6.8 13h-3M17.2 13h3M7.6 16.4l-2.6 2M16.4 16.4l2.6 2" /></>,
-  fish: <><P d="M3.6 12c3-4 6.4-6 9.6-6s5.8 2.4 7.2 6c-1.4 3.6-4 6-7.2 6s-6.6-2-9.6-6z" /><P d="M20.4 12 22 8.6v6.8z" /><P d="M14.4 10.4h.01" /></>,
-  bear: <><circle cx="7.4" cy="6.6" r="2.4" /><circle cx="16.6" cy="6.6" r="2.4" /><circle cx="12" cy="13.4" r="6.2" /><P d="M9.8 12.2h.01M14.2 12.2h.01" /><P d="M12 14.6a2 2 0 0 0 0 2.8" /></>,
-  alien: <><P d="M12 3.4c4.4 0 7 3.2 7 7 0 4.6-3.6 10.2-7 10.2S5 15 5 10.4c0-3.8 2.6-7 7-7z" /><P d="M8.6 10.2c.8-1.4 2-2 3-1.4M15.4 10.2c-.8-1.4-2-2-3-1.4" /></>,
-  mushroom: <><P d="M3.8 11.2a8.2 8.2 0 0 1 16.4 0z" /><P d="M9.4 11.2v6.2a2.6 2.6 0 0 0 5.2 0v-6.2" /><P d="M8.4 7.8h.01M14.4 6.8h.01M11.4 9h.01" /></>,
-  octo: <><circle cx="12" cy="8.8" r="5" /><P d="M9.8 8h.01M14.2 8h.01" /><P d="M7.4 12.6c-.8 3-2 4.6-3.6 5M10 13.8c-.4 3.4-1.2 5.2-2.4 5.8M14 13.8c.4 3.4 1.2 5.2 2.4 5.8M16.6 12.6c.8 3 2 4.6 3.6 5" /></>,
-};
-
-/** A desktop pet, drawn on the same grid as everything else. */
-export function PetIcon({ name, size = 44, className, style }: { name: string; size?: number; className?: string; style?: CSSProperties }) {
-  const glyph = PET_ICONS[name];
-  if (!glyph) return null;
-  return (
-    <svg viewBox="0 0 24 24" width={size} height={size} fill="none" stroke="currentColor"
-      strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" className={className} style={style} aria-hidden>
-      {glyph}
-    </svg>
-  );
-}

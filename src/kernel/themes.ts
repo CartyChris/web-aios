@@ -56,6 +56,8 @@ export const THEMES: Theme[] = [
   t("linen", "Linen", false, "#faf7f2", "#e8e0d4", "rgb(255 253 250 / 0.88)", "#fffdfa", "#2b2416", "#6b6250", "#b45309", "#0f766e"),
 ];
 
+/* Wallpapers are drawn procedurally on one canvas — see shell/Wallpaper.tsx.
+   Nothing here is an image file, so a new one costs no bytes on the wire. */
 export const WALLPAPERS = [
   { id: "mesh", name: "Aurora Mesh" },
   { id: "stars", name: "Star Field" },
@@ -71,27 +73,6 @@ export const WALLPAPERS = [
 ] as const;
 
 export type WallpaperId = (typeof WALLPAPERS)[number]["id"];
-
-/** Pets name a glyph in PET_ICONS rather than an emoji — see icons.tsx. */
-export const PETS = [
-  { id: "none", name: "None", glyph: "" },
-  { id: "cat", name: "Cat", glyph: "cat" },
-  { id: "dog", name: "Dog", glyph: "dog" },
-  { id: "robot", name: "Robot", glyph: "robot" },
-  { id: "fox", name: "Fox", glyph: "fox" },
-  { id: "slime", name: "Slime", glyph: "slime" },
-  { id: "dragon", name: "Dragon", glyph: "dragon" },
-  { id: "ghost", name: "Ghost", glyph: "ghost" },
-  { id: "octo", name: "Octopus", glyph: "octo" },
-  { id: "penguin", name: "Penguin", glyph: "penguin" },
-  { id: "bunny", name: "Bunny", glyph: "bunny" },
-  { id: "bird", name: "Bird", glyph: "bird" },
-  { id: "crab", name: "Crab", glyph: "crab" },
-  { id: "fish", name: "Fish", glyph: "fish" },
-  { id: "bear", name: "Bear", glyph: "bear" },
-  { id: "alien", name: "Alien", glyph: "alien" },
-  { id: "mushroom", name: "Mushroom", glyph: "mushroom" },
-] as const;
 
 export const FONT_STACKS = [
   { id: "system", name: "System", value: 'ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif' },

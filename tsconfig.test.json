@@ -16,6 +16,10 @@
     "src/lib/ai-transport.ts",
     "src/lib/ssrf.ts",
     "src/lib/zip.ts",
-    "src/lib/scaffold.ts"
+    "src/lib/scaffold.ts",
+    "src/lib/deflate.ts",
+    "src/lib/forge-schema.ts",
+    "src/lib/forge-render.ts",
+    "src/lib/preview.ts"
   ]
 }

@@ -1,22 +1,30 @@
 "use client";
 
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 import { bus } from "@/kernel/bus";
 import type { AppProps } from "@/kernel/types";
 import { uid, download } from "@/lib/format";
-import { Empty, ErrorNote, Tabs, CopyButton } from "./_ui";
+import { Empty, ErrorNote, Tabs, CopyButton, Spinner } from "./_ui";
+import { ask } from "@/lib/useAI";
+import { getForgeKind, extractJson } from "@/lib/forge-schema";
+import { makeProjector, partFaces, lightAt, hexToRgb, rgbCss, type Vec3 } from "@/lib/forge-render";
 import { cn } from "@/lib/cn";
 import { Icon } from "@/shell/icons";
 
 /* ────────────────────────────────────────────────────────────────────────────
-   Asset Library — ported from asset_forge_library.zip.
+   Asset Studio — grown out of the ported asset_forge_library.
 
    The original's schema is preserved exactly (id / name / kind / icon / tags /
    physics / parts), so assets exported from AssetForgePhysics import here
-   unchanged and assets built here go back out the same way. Forge 3D reads from
-   this store directly.
+   unchanged and assets built here go back out the same way. Forge 3D reads
+   from this store directly.
+
+   What is new is that you no longer have to type twenty parts by hand. Describe
+   the thing and a model composes it out of primitives; every asset gets a real
+   lit thumbnail rendered from its own geometry, so the library shows what you
+   actually made rather than a coloured square.
    ──────────────────────────────────────────────────────────────────────────── */
 
 export interface AssetPart {
@@ -142,6 +150,166 @@ export const useAssets = create<AssetState>()(
   ),
 );
 
+/** A small lit render of an asset, drawn from the same code the Forge
+ *  viewport uses.
+ *
+ *  A library of identical coloured tiles tells you nothing about what is in
+ *  it. This costs one canvas per card and draws once, not per frame. */
+function AssetThumb({ asset, size = 96 }: { asset: Asset; size?: number }) {
+  const ref = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    const canvas = ref.current;
+    if (!canvas) return;
+    const g = canvas.getContext("2d");
+    if (!g) return;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const w = canvas.clientWidth || size, h = canvas.clientHeight || size;
+    canvas.width = w * dpr; canvas.height = h * dpr;
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.clearRect(0, 0, w, h);
+
+    // Frame the asset by fitting its *projected* bounding box, not its world
+    // extent. A lamp post is four metres tall and twenty centimetres wide;
+    // scaling by the larger dimension renders it as a speck. Projecting first
+    // and fitting the result handles any proportion without a special case.
+    if (!asset.parts.length) return;
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity, minZ = Infinity, maxZ = -Infinity;
+    for (const p of asset.parts) {
+      const pos = p.position ?? [0, 0, 0];
+      const sc = p.scale ?? [1, 1, 1];
+      minX = Math.min(minX, pos[0] - sc[0] / 2); maxX = Math.max(maxX, pos[0] + sc[0] / 2);
+      minY = Math.min(minY, pos[1] - sc[1] / 2); maxY = Math.max(maxY, pos[1] + sc[1] / 2);
+      minZ = Math.min(minZ, pos[2] - sc[2] / 2); maxZ = Math.max(maxZ, pos[2] + sc[2] / 2);
+    }
+
+    const view = { yaw: 0.72, pitch: 0.5 };
+    // At zoom 1 with no pan and a zero-sized viewport, the projector returns
+    // raw offsets from the origin — which is exactly what a fit needs.
+    const unit = makeProjector({ ...view, zoom: 1, panX: 0, panY: 0 }, 0, 0);
+    let pminX = Infinity, pmaxX = -Infinity, pminY = Infinity, pmaxY = -Infinity;
+    for (const x of [minX, maxX]) for (const y of [minY, maxY]) for (const z of [minZ, maxZ]) {
+      const q = unit(x, y, z);
+      pminX = Math.min(pminX, q.x); pmaxX = Math.max(pmaxX, q.x);
+      pminY = Math.min(pminY, q.y); pmaxY = Math.max(pmaxY, q.y);
+    }
+    const zoom = Math.min((w * 0.86) / Math.max(0.001, pmaxX - pminX), (h * 0.86) / Math.max(0.001, pmaxY - pminY));
+    const project = makeProjector(
+      { ...view, zoom, panX: -((pminX + pmaxX) / 2) * zoom, panY: -((pminY + pmaxY) / 2) * zoom },
+      w, h,
+    );
+    const lights = [
+      { id: "k", name: "k", kind: "directional" as const, position: [-0.5, 1.3, 0.8] as Vec3, color: "#fff2dd", intensity: 1.1, range: 0 },
+      { id: "f", name: "f", kind: "directional" as const, position: [0.8, 0.4, -0.7] as Vec3, color: "#9cc4ff", intensity: 0.4, range: 0 },
+    ];
+
+    const faces = asset.parts.flatMap((p) => partFaces(p, [0, 0, 0], [1, 1, 1], project));
+    faces.sort((a, b) => a.depth - b.depth);
+    for (const f of faces) {
+      const [lr, lg, lb] = lightAt(f.normal, f.cx, f.cy, f.cz, lights, 0.34);
+      const [br, bg, bb] = hexToRgb(f.color);
+      g.beginPath();
+      g.moveTo(f.pts[0].x, f.pts[0].y);
+      for (let i = 1; i < f.pts.length; i++) g.lineTo(f.pts[i].x, f.pts[i].y);
+      g.closePath();
+      g.fillStyle = rgbCss(br * lr, bg * lg, bb * lb);
+      g.fill();
+      g.strokeStyle = "rgba(0,0,0,0.28)";
+      g.lineWidth = 0.5;
+      g.stroke();
+    }
+  }, [asset, size]);
+
+  return <canvas ref={ref} className="h-full w-full" aria-label={`${asset.name} preview`} />;
+}
+
+/** Describe an asset; a model composes it. */
+function AssetForge({ onCreated, setError }: { onCreated: (a: Asset) => void; setError: (e: string | null) => void }) {
+  const [prompt, setPrompt] = useState("");
+  const [kind, setKind] = useState<Asset["kind"]>("prop");
+  const [busy, setBusy] = useState(false);
+  const [reference, setReference] = useState<string | null>(null);
+
+  const run = useCallback(async () => {
+    if (!prompt.trim() || busy) return;
+    setBusy(true); setError(null);
+    try {
+      // Characters and props want different briefs — a prop composed like a
+      // person, or a person composed like a prop, is the usual failure here.
+      const brief = getForgeKind(kind === "character" ? "npc" : "asset").brief;
+      const content: Parameters<typeof ask>[0]["messages"][number]["content"] = reference
+        ? [{ type: "text", text: `${prompt}\n\nMatch the reference image: subject, palette and proportions.` }, { type: "image", dataUrl: reference }]
+        : prompt;
+      const res = await ask({ messages: [{ role: "user", content }], system: brief, maxTokens: 12000 });
+      const data = extractJson(res.text) as { entities?: Array<{ name?: string; parts?: AssetPart[]; physics?: AssetPhysics }> };
+      const first = data.entities?.[0];
+      if (!first?.parts?.length) throw new Error("The reply contained no parts.");
+      onCreated({
+        id: uid("asset"),
+        name: first.name || prompt.slice(0, 40),
+        kind,
+        icon: kind === "character" ? "agents" : kind === "light" ? "spark" : kind === "fx" ? "sparkles" : "assets",
+        tags: ["ai", kind],
+        physics: first.physics ?? { bodyType: "dynamic", collider: "box", mass: 1, friction: 0.5, restitution: 0.1, solid: true },
+        parts: first.parts.map((p, i) => ({ ...p, id: p.id ?? `p${i}`, scale: p.scale ?? [1, 1, 1], position: p.position ?? [0, 0, 0] })),
+        updatedAt: Date.now(),
+      });
+      setPrompt("");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Generation failed.");
+    } finally { setBusy(false); }
+  }, [prompt, busy, kind, reference, onCreated, setError]);
+
+  return (
+    <div className="os-card mb-3">
+      <div className="mb-1.5 flex items-center gap-1.5">
+        <Icon name="wand" size={14} style={{ color: "var(--accent)" }} />
+        <span className="text-[12.5px] font-medium">Describe an asset</span>
+        <div className="flex-1" />
+        <select value={kind} onChange={(e) => setKind(e.target.value as Asset["kind"])} className="os-input !w-auto !py-0.5 text-[10.5px]">
+          {["prop", "character", "structure", "light", "puzzle", "weapon", "vehicle", "fx"].map((k) => <option key={k} value={k}>{k}</option>)}
+        </select>
+      </div>
+      <div className="flex gap-1.5">
+        <input
+          value={prompt}
+          onChange={(e) => setPrompt(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && run()}
+          placeholder="a rusted fuel drum with a dented lid and a stencilled number"
+          className="os-input min-w-0 flex-1 !py-1 text-[12px]"
+        />
+        <label className="os-btn shrink-0 !py-1 text-[11px]" title="Attach a reference image — needs a model that can see">
+          <Icon name="image" size={11} />
+          <input
+            type="file" accept="image/*" hidden
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (!f) return;
+              if (f.size > 4 * 1024 * 1024) { setError("Pick an image under 4 MB."); return; }
+              const r = new FileReader();
+              r.onload = () => setReference(String(r.result));
+              r.readAsDataURL(f);
+              e.target.value = "";
+            }}
+          />
+        </label>
+        <button className="os-btn shrink-0 !py-1 text-[11px]" data-variant="primary" onClick={run} disabled={busy || !prompt.trim()}>
+          {busy ? "Building…" : "Build"}
+        </button>
+      </div>
+      {reference && (
+        <div className="mt-1.5 flex items-center gap-1.5 text-[10px] text-[var(--muted)]">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={reference} alt="Reference" className="h-8 w-8 rounded object-cover" />
+          Reference attached
+          <button className="opacity-60 hover:opacity-100" onClick={() => setReference(null)}><Icon name="close" size={10} /></button>
+        </div>
+      )}
+      {busy && <div className="mt-1.5"><Spinner label="Composing parts…" /></div>}
+    </div>
+  );
+}
+
 export default function Assets({}: AppProps) {
   const store = useAssets();
   const [tab, setTab] = useState("library");
@@ -159,7 +327,7 @@ export default function Assets({}: AppProps) {
 
   const create = useCallback(() => {
     const a: Asset = {
-      id: uid("asset"), name: "New asset", kind: "prop", icon: "app", tags: [],
+      id: uid("asset"), name: "New asset", kind: "prop", icon: "assets", tags: [],
       physics: { bodyType: "dynamic", collider: "box", mass: 1, friction: 0.5, restitution: 0.1, solid: true },
       parts: [{ id: uid("part"), name: "Body", shape: "box", position: [0, 0.5, 0], scale: [1, 1, 1], color: "#8b8b95", roughness: 0.7, metalness: 0.1 }],
       updatedAt: Date.now(),
@@ -197,9 +365,10 @@ export default function Assets({}: AppProps) {
       <div className="px-2.5 pt-2"><ErrorNote error={error} onDismiss={() => setError(null)} /></div>
 
       <div className="min-h-0 flex-1 overflow-y-auto p-3">
+        {tab === "library" && <AssetForge onCreated={(a) => { store.add(a); setSel(a.id); }} setError={setError} />}
         {tab === "library" && (
           filtered.length === 0 ? (
-            <Empty icon="assets" title="No assets" body="Create one, or import a .asset.json exported from AssetForge — the schema is identical." action={<button className="os-btn" onClick={store.reseed}>Restore starter set</button>} />
+            <Empty icon="assets" title="No assets" body="Describe one above, create a blank, or import a .asset.json exported from AssetForge — the schema is identical." action={<button className="os-btn" onClick={store.reseed}>Restore starter set</button>} />
           ) : (
             <div className="grid gap-2.5" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(170px, 1fr))" }}>
               {filtered.map((a) => (
@@ -208,8 +377,8 @@ export default function Assets({}: AppProps) {
                   onClick={() => { setSel(a.id); setTab("inspect"); }}
                   className={cn("os-card text-left transition hover:-translate-y-0.5", sel === a.id && "!border-[var(--accent)]")}
                 >
-                  <div className="mb-2 grid h-16 place-items-center rounded-[calc(var(--radius)*0.6)] text-3xl" style={{ background: `color-mix(in srgb, ${a.parts[0]?.color ?? "var(--accent)"} 26%, transparent)` }}>
-                    {a.icon}
+                  <div className="mb-2 h-20 overflow-hidden rounded-[calc(var(--radius)*0.6)]" style={{ background: `color-mix(in srgb, ${a.parts[0]?.color ?? "var(--accent)"} 18%, transparent)` }}>
+                    <AssetThumb asset={a} />
                   </div>
                   <div className="truncate text-[12.5px] font-medium">{a.name}</div>
                   <div className="text-[10px] text-[var(--muted)]">{a.kind} · {a.parts.length} part{a.parts.length === 1 ? "" : "s"} · {a.physics.bodyType}</div>
@@ -230,12 +399,28 @@ export default function Assets({}: AppProps) {
           ) : (
             <div className="max-w-2xl">
               <div className="mb-3 flex items-center gap-1.5">
-                <input value={asset.icon} onChange={(e) => store.patch(asset.id, { icon: e.target.value })} className="os-input !w-14 text-center !py-1 text-lg" maxLength={2} />
+                <span className="grid h-8 w-8 shrink-0 place-items-center rounded-[calc(var(--radius)*0.5)] border border-[var(--border)]" style={{ color: "var(--accent)" }}>
+                  <Icon name={asset.icon || "assets"} size={16} />
+                </span>
+                <select value={asset.icon} onChange={(e) => store.patch(asset.id, { icon: e.target.value })} className="os-input !w-auto !py-1 text-[11px]" title="Icon">
+                  {["assets", "agents", "spark", "sparkles", "cube3d", "gate", "app", "home", "labs", "star"].map((n) => <option key={n} value={n}>{n}</option>)}
+                </select>
                 <input value={asset.name} onChange={(e) => store.patch(asset.id, { name: e.target.value })} className="os-input flex-1 !py-1 font-medium" />
                 <select value={asset.kind} onChange={(e) => store.patch(asset.id, { kind: e.target.value as Asset["kind"] })} className="os-input !w-auto !py-1 text-[11px]">
                   {["prop", "character", "structure", "light", "puzzle", "weapon", "vehicle", "fx"].map((k) => <option key={k} value={k}>{k}</option>)}
                 </select>
                 <button className="os-btn !py-1 text-[11px]" onClick={() => { store.remove(asset.id); setSel(null); setTab("library"); }}>Delete</button>
+              </div>
+
+              <div className="os-card mb-3 flex items-center gap-3">
+                <div className="h-28 w-28 shrink-0 overflow-hidden rounded-[calc(var(--radius)*0.6)]" style={{ background: "color-mix(in srgb, var(--bg2) 60%, transparent)" }}>
+                  <AssetThumb asset={asset} size={112} />
+                </div>
+                <div className="min-w-0 text-[11px] leading-relaxed text-[var(--muted)]">
+                  Lit with the same code the Forge viewport uses, so this is what it will look like in a scene.
+                  Primitives are drawn as their bounding boxes here — the shape you pick is carried through to export,
+                  where a real engine honours it.
+                </div>
               </div>
 
               <div className="os-card mb-3">

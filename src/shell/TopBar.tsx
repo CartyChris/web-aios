@@ -7,10 +7,13 @@ import { getApp } from "@/kernel/registry";
 import { cn } from "@/lib/cn";
 import { relTime } from "@/lib/format";
 import { Icon } from "@/shell/icons";
+import { bus } from "@/kernel/bus";
+import { EGGS, useEggs } from "@/lib/easter";
 
 export function TopBar({ onLauncher, onPalette }: { onLauncher: () => void; onPalette: () => void }) {
   const wm = useWM();
-  const { topBarVisible, topBarItems, ai } = useSettings();
+  const { topBarVisible, topBarItems, ai, funMode } = useSettings();
+  const [clockTaps, setClockTaps] = useState(0);
   const [now, setNow] = useState(() => new Date());
   const [openMenu, setOpenMenu] = useState<"notifications" | "workspaces" | null>(null);
   const [online, setOnline] = useState(true);
@@ -138,9 +141,22 @@ export function TopBar({ onLauncher, onPalette }: { onLauncher: () => void; onPa
       )}
 
       {has("clock") && (
-        <span className="tabular-nums px-1.5 font-medium" title={now.toDateString()}>
+        <button
+          className="tabular-nums px-1.5 font-medium"
+          title={now.toDateString()}
+          onClick={() => {
+            // The clock is a button that does not announce itself. Seven taps
+            // is a secret; the eighth is just a clock again.
+            const n = clockTaps + 1;
+            setClockTaps(n);
+            if (n === 7 && funMode && useEggs.getState().find("clock")) {
+              const egg = EGGS.find((e) => e.id === "clock");
+              bus.emit("notify", { title: `Secret found: ${egg?.name}`, body: `Up since this tab loaded — ${Math.round(performance.now() / 1000)} seconds and counting.`, kind: "success" });
+            }
+          }}
+        >
           {now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-        </span>
+        </button>
       )}
     </div>
   );

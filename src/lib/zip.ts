@@ -10,7 +10,15 @@
    Two details that quietly break naive implementations are handled here: the
    CRC-32 of every entry must be correct or archives fail verification, and the
    local-header offsets in the central directory must be byte-exact.
+
+   Entries are written with method 8 (deflate) when a compressor is supplied
+   and method 0 (stored) otherwise, per entry — so an already-compressed PNG
+   that deflate cannot shrink is stored rather than made larger. Both are
+   valid ZIP, which is what makes the compressor optional rather than
+   load-bearing.
    ──────────────────────────────────────────────────────────────────────────── */
+
+import { loadCompressor } from "./deflate";
 
 export interface ZipEntry {
   /** Path inside the archive. Forward slashes; no leading slash. */
@@ -69,37 +77,52 @@ class ByteWriter {
   }
 }
 
+export interface ZipOptions {
+  when?: Date;
+  /** Optional raw-DEFLATE function. Return null to leave an entry stored. */
+  deflate?: (bytes: Uint8Array) => Uint8Array | null;
+}
+
 /** Build a ZIP archive from a list of entries. */
-export function makeZip(entries: ZipEntry[], when = new Date()): Uint8Array {
+export function makeZip(entries: ZipEntry[], opts: ZipOptions | Date = {}): Uint8Array {
+  // A Date here is the pre-compression signature, kept working so callers and
+  // tests that passed one do not silently start writing 1980-dated archives.
+  const { when = new Date(), deflate } = opts instanceof Date ? { when: opts, deflate: undefined } : opts;
   const enc = new TextEncoder();
   const { date, time } = dosDateTime(when);
   const out = new ByteWriter();
-  const central: Array<{ name: Uint8Array; crc: number; size: number; offset: number }> = [];
+  const central: Array<{ name: Uint8Array; crc: number; size: number; csize: number; method: number; offset: number }> = [];
 
   for (const entry of entries) {
     const name = enc.encode(
       entry.path.replace(/\\/g, "/").replace(/\/{2,}/g, "/").replace(/^\/+/, ""),
     );
     const data = typeof entry.content === "string" ? enc.encode(entry.content) : entry.content;
+    // The CRC is always of the ORIGINAL bytes, never the compressed ones —
+    // getting that backwards produces an archive that every tool rejects.
     const crc = crc32(data);
+    const packed = deflate ? deflate(data) : null;
+    const useDeflate = !!packed && packed.length < data.length;
+    const body = useDeflate ? packed! : data;
+    const method = useDeflate ? 8 : 0;
     const offset = out.length;
 
     // ── Local file header ──
     out.u32(0x04034b50);
     out.u16(20);            // version needed
     out.u16(0x0800);        // flags: bit 11 = UTF-8 names
-    out.u16(0);             // method 0 = stored
+    out.u16(method);        // 0 = stored, 8 = deflate
     out.u16(time);
     out.u16(date);
     out.u32(crc);
-    out.u32(data.length);   // compressed size == uncompressed when stored
-    out.u32(data.length);
+    out.u32(body.length);   // compressed size
+    out.u32(data.length);   // uncompressed size
     out.u16(name.length);
     out.u16(0);             // extra field length
     out.raw(name);
-    out.raw(data);
+    out.raw(body);
 
-    central.push({ name, crc, size: data.length, offset });
+    central.push({ name, crc, size: data.length, csize: body.length, method, offset });
   }
 
   // ── Central directory ──
@@ -109,11 +132,11 @@ export function makeZip(entries: ZipEntry[], when = new Date()): Uint8Array {
     out.u16(20);            // version made by
     out.u16(20);            // version needed
     out.u16(0x0800);
-    out.u16(0);
+    out.u16(e.method);
     out.u16(time);
     out.u16(date);
     out.u32(e.crc);
-    out.u32(e.size);
+    out.u32(e.csize);
     out.u32(e.size);
     out.u16(e.name.length);
     out.u16(0);             // extra
@@ -139,9 +162,14 @@ export function makeZip(entries: ZipEntry[], when = new Date()): Uint8Array {
   return out.concat();
 }
 
-/** Build a ZIP and hand it to the browser as a download. */
-export function downloadZip(filename: string, entries: ZipEntry[]) {
-  const bytes = makeZip(entries);
+/** Build a ZIP and hand it to the browser as a download.
+ *
+ *  Compression is attempted but never required: if the wasm module does not
+ *  load, this writes the same stored archive it always did rather than
+ *  failing the export. */
+export async function downloadZip(filename: string, entries: ZipEntry[]) {
+  const compressor = await loadCompressor();
+  const bytes = makeZip(entries, { deflate: compressor ? (b) => compressor.deflate(b) : undefined });
   // A fresh ArrayBuffer copy: some browsers refuse a Blob built over a view
   // with a non-zero byteOffset.
   const blob = new Blob([bytes.slice().buffer as ArrayBuffer], { type: "application/zip" });
@@ -154,3 +182,10 @@ export function downloadZip(filename: string, entries: ZipEntry[]) {
 }
 
 export { crc32 };
+
+/** Total byte size an archive of these entries would occupy, uncompressed.
+ *  Used to show a before/after next to the export button. */
+export function rawSize(entries: ZipEntry[]): number {
+  const enc = new TextEncoder();
+  return entries.reduce((a, e) => a + (typeof e.content === "string" ? enc.encode(e.content).length : e.content.length), 0);
+}

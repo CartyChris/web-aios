@@ -2,7 +2,8 @@
 
 import { useCallback, useRef, useState } from "react";
 import { useSettings, resolveTokens } from "@/kernel/settings";
-import { THEMES, WALLPAPERS, PETS, FONT_STACKS } from "@/kernel/themes";
+import { THEMES, WALLPAPERS, FONT_STACKS } from "@/kernel/themes";
+import { SPECIES, PET_FAMILIES, PERSONALITIES, VOICES, getSpecies } from "@/kernel/pets";
 import { PROFILES } from "@/kernel/profiles";
 import { APPS, getApp } from "@/kernel/registry";
 import { WIDGET_KINDS } from "@/shell/Widgets";
@@ -11,7 +12,8 @@ import type { AppProps } from "@/kernel/types";
 import { download } from "@/lib/format";
 import { Tabs, Slider, Toggle, Field, ErrorNote } from "./_ui";
 import { cn } from "@/lib/cn";
-import { Icon, PetIcon } from "@/shell/icons";
+import { Icon } from "@/shell/icons";
+import { PetSprite } from "@/shell/pets";
 import { WidgetBuilder } from "./WidgetBuilder";
 
 /* ────────────────────────────────────────────────────────────────────────────
@@ -48,6 +50,7 @@ export default function Personalize({}: AppProps) {
           { id: "theme", label: "Theme", icon: "personalize" },
           { id: "wallpaper", label: "Wallpaper", icon: "wallpaper" },
           { id: "layout", label: "Layout", icon: "layout" },
+          { id: "personality", label: "Personality", icon: "pet" },
           { id: "widgets", label: "Widgets", icon: "widgets" },
           { id: "tokens", label: "Tokens", icon: "tokens" },
           { id: "backup", label: "Backup", icon: "backup" },
@@ -215,21 +218,6 @@ export default function Personalize({}: AppProps) {
             <Slider label="Dim" value={s.wallpaperDim} min={0} max={0.85} step={0.05} onChange={(v) => s.set("wallpaperDim", v)} format={(v) => `${Math.round(v * 100)}%`} />
             <Toggle label="Animate wallpaper" checked={s.wallpaperAnimate} onChange={(v) => s.set("wallpaperAnimate", v)} hint="Static wallpapers cost nothing per frame." />
 
-            <div className="os-label mb-2 mt-5">Desktop pet</div>
-            <div className="grid gap-2" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(84px, 1fr))" }}>
-              {PETS.map((p) => (
-                <button
-                  key={p.id}
-                  onClick={() => { s.set("pet", p.id); s.set("petVisible", p.id !== "none"); }}
-                  className={cn("os-card !p-2 text-center", s.pet === p.id && "!border-[var(--accent)]")}
-                >
-                  <div className="flex justify-center py-1" style={{ color: "var(--accent)" }}>
-                    {p.glyph ? <PetIcon name={p.glyph} size={30} /> : <Icon name="ban" size={26} />}
-                  </div>
-                  <div className="text-[10.5px]">{p.name}</div>
-                </button>
-              ))}
-            </div>
           </div>
         )}
 
@@ -266,7 +254,7 @@ export default function Personalize({}: AppProps) {
                 <summary className="cursor-pointer text-[11.5px] text-[var(--muted)]">Add an app to the dock</summary>
                 <div className="mt-1.5 flex flex-wrap gap-1">
                   {APPS.filter((a) => !s.dockApps.includes(a.id)).map((a) => (
-                    <button key={a.id} className="os-btn !py-0.5 text-[10.5px]" onClick={() => s.toggleDockApp(a.id)}>{a.icon} {a.name}</button>
+                    <button key={a.id} className="os-btn !py-0.5 text-[10.5px]" onClick={() => s.toggleDockApp(a.id)}><Icon name={a.icon} size={10} className="mr-1" />{a.name}</button>
                   ))}
                 </div>
               </details>
@@ -306,9 +294,140 @@ export default function Personalize({}: AppProps) {
                     onClick={() => s.set("startupApps", s.startupApps.includes(a.id) ? s.startupApps.filter((x) => x !== a.id) : [...s.startupApps, a.id])}
                     className={cn("os-btn !py-0.5 text-[10.5px]", s.startupApps.includes(a.id) && "!border-[var(--accent)] !bg-[var(--accent)]/16")}
                   >
-                    {a.icon} {a.name}
+                    <Icon name={a.icon} size={10} className="mr-1" />{a.name}
                   </button>
                 ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── PERSONALITY ── */}
+        {tab === "personality" && (
+          <div className="grid max-w-5xl gap-6 lg:grid-cols-[minmax(0,1fr)_300px]">
+            <div>
+              <div className="os-label mb-1.5">Desktop pet</div>
+              <p className="mb-3 max-w-xl text-[12px] leading-relaxed text-[var(--muted)]">
+                Click it on the desktop and whichever model you have configured answers in one sentence,
+                in the voice you pick below — capped at 60 tokens, so patting the cat costs a fraction of a cent.
+                With no key, no network, or a model that errors, it falls back to its own lines instead of going quiet.
+              </p>
+
+              <div className="mb-3 flex flex-wrap items-center gap-1.5">
+                <button
+                  onClick={() => { s.set("pet", "none"); s.set("petVisible", false); }}
+                  className={cn("os-btn !py-1 text-[11px]", !s.petVisible && "!border-[var(--accent)] !bg-[var(--accent)]/16")}
+                >
+                  No pet
+                </button>
+                <span className="text-[11px] text-[var(--muted)]">{SPECIES.length} creatures</span>
+              </div>
+
+              {PET_FAMILIES.map((fam) => (
+                <div key={fam.id} className="mb-4">
+                  <div className="os-label mb-1.5">{fam.label}</div>
+                  <div className="grid gap-2" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(96px, 1fr))" }}>
+                    {SPECIES.filter((x) => x.family === fam.id).map((x) => (
+                      <button
+                        key={x.id}
+                        onClick={() => { s.set("pet", x.id); s.set("petVisible", true); }}
+                        className={cn("os-card !p-1.5 text-center", s.pet === x.id && s.petVisible && "!border-[var(--accent)] ring-1 ring-[var(--accent)]")}
+                        title={x.blurb}
+                      >
+                        <div className="flex justify-center" style={{ color: "var(--accent)" }}>
+                          <PetSprite species={x} detail={s.petDetail as "basic" | "detailed" | "expressive"} size={52} />
+                        </div>
+                        <div className="truncate text-[10.5px]">{x.name}</div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="lg:sticky lg:top-0 lg:self-start">
+              {s.petVisible && getSpecies(s.pet) && (
+                <div className="os-card mb-3 text-center">
+                  <div className="mb-1 flex justify-center" style={{ color: "var(--accent)" }}>
+                    <PetSprite species={getSpecies(s.pet)!} detail={s.petDetail as "basic" | "detailed" | "expressive"} size={110} mood="happy" />
+                  </div>
+                  <div className="text-[13px] font-medium">{s.petName || getSpecies(s.pet)!.name}</div>
+                  <div className="text-[11px] text-[var(--muted)]">{getSpecies(s.pet)!.blurb}</div>
+                </div>
+              )}
+
+              <Field label="Name it">
+                <input
+                  value={s.petName}
+                  onChange={(e) => s.set("petName", e.target.value.slice(0, 24))}
+                  placeholder={getSpecies(s.pet)?.name ?? "Pet"}
+                  className="os-input !py-1 text-[12px]"
+                />
+              </Field>
+
+              <div className="os-label mb-1.5 mt-3">Detail</div>
+              <div className="mb-3 flex gap-1.5">
+                {(["basic", "detailed", "expressive"] as const).map((d) => (
+                  <button key={d} onClick={() => s.set("petDetail", d)} className={cn("os-btn !py-1 text-[11px]", s.petDetail === d && "!border-[var(--accent)] !bg-[var(--accent)]/16")}>{d}</button>
+                ))}
+              </div>
+              <div className="mb-3 text-[10.5px] leading-relaxed text-[var(--muted)]">
+                Basic is a flat outline that takes the theme accent — it is the right look on CRT and Amiga profiles.
+                Expressive adds blinking, breathing and a swaying tail.
+              </div>
+
+              <div className="os-label mb-1.5">Behaviour</div>
+              <div className="mb-3 flex gap-1.5">
+                {(["still", "wander", "follow"] as const).map((m) => (
+                  <button key={m} onClick={() => s.set("petMotion", m)} className={cn("os-btn !py-1 text-[11px]", s.petMotion === m && "!border-[var(--accent)] !bg-[var(--accent)]/16")}>{m}</button>
+                ))}
+              </div>
+
+              <Slider label="Size" value={s.petScale} min={0.6} max={2.2} step={0.1} onChange={(v) => s.set("petScale", v)} format={(v) => `${Math.round(v * 100)}%`} />
+
+              <div className="os-label mb-1.5 mt-2">Pet personality</div>
+              <div className="mb-3 space-y-1">
+                {PERSONALITIES.map((pp) => (
+                  <button
+                    key={pp.id}
+                    onClick={() => s.set("petPersonality", pp.id)}
+                    className={cn("block w-full rounded-[calc(var(--radius)*0.5)] border px-2 py-1.5 text-left", s.petPersonality === pp.id ? "border-[var(--accent)] bg-[var(--accent)]/12" : "border-[var(--border)]")}
+                  >
+                    <div className="text-[12px]">{pp.name}</div>
+                    <div className="text-[10.5px] text-[var(--muted)]">{pp.blurb}</div>
+                  </button>
+                ))}
+              </div>
+
+              <Toggle label="Let the pet use your model" checked={s.petTalks} onChange={(v) => s.set("petTalks", v)} hint="Off means it only uses its own written lines — free, offline, and still in character." />
+
+              <div className="my-4 h-px bg-[var(--border)]" />
+
+              <div className="os-label mb-1.5">Assistant voice</div>
+              <p className="mb-2 text-[10.5px] leading-relaxed text-[var(--muted)]">
+                Prepended to the system prompt in every app that talks to a model. Separate from the pet on purpose —
+                wanting a gremlin on your wallpaper is not wanting one in your code review.
+              </p>
+              <select value={s.voice} onChange={(e) => s.set("voice", e.target.value)} className="os-input mb-1.5 !py-1 text-[12px]">
+                {VOICES.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
+              </select>
+              <div className="mb-3 text-[10.5px] italic leading-relaxed text-[var(--muted)]">
+                {VOICES.find((v) => v.id === s.voice)?.line}
+              </div>
+
+              <Field label="About you" hint="Appended to every system prompt. Your role, your stack, how you like answers.">
+                <textarea
+                  value={s.aboutMe}
+                  onChange={(e) => s.set("aboutMe", e.target.value.slice(0, 1200))}
+                  rows={4}
+                  placeholder="e.g. I write TypeScript and Rust. Skip the preamble and show me the code."
+                  className="os-input resize-y !py-1 text-[12px]"
+                />
+              </Field>
+
+              <div className="mt-3">
+                <Toggle label="Fun mode" checked={s.funMode} onChange={(v) => s.set("funMode", v)} hint="Easter eggs, secret key sequences and the hidden arcade entries." />
+                <Toggle label="Greet me on boot" checked={s.greeting} onChange={(v) => s.set("greeting", v)} />
               </div>
             </div>
           </div>

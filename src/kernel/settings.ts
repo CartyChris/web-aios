@@ -42,15 +42,39 @@ export interface Settings {
   /** Icons land on a grid when true — the tidy-desktop preference. */
   snapIconsToGrid: boolean;
   iconSize: number;
+  /** How many clicks open a desktop icon. Single is the default because it is
+   *  what a touch screen does, and this OS runs on phones. */
+  iconActivation: "single" | "double";
   widgets: WidgetInstance[];
   showWidgets: boolean;
   titlebarStyle: "mac" | "windows" | "minimal";
   windowChrome: "glass" | "solid" | "outline";
 
-  // ── Behaviour ───────────────────────────────────────────────────────────
+  // ── Personality ─────────────────────────────────────────────────────────
   pet: string;
   petVisible: boolean;
   petPos: { x: number; y: number };
+  /** How much the pet is drawn: outline, shaded, or fully rendered. */
+  petDetail: "basic" | "detailed" | "expressive";
+  petScale: number;
+  /** Idle behaviour: stay put, drift around the desktop, or follow the cursor. */
+  petMotion: "still" | "wander" | "follow";
+  /** The voice the pet answers in when you click it. */
+  petPersonality: string;
+  petName: string;
+  /** Let the pet talk to a model. Off means it uses its canned lines only. */
+  petTalks: boolean;
+
+  /** Tone the OS assistant writes in. Feeds every app's system prompt. */
+  voice: string;
+  /** Free text appended to the assistant's system prompt — who you are, what
+   *  you are working on, how you like answers. */
+  aboutMe: string;
+  greeting: boolean;
+  /** Easter eggs, secret key sequences and the arcade's hidden entries. */
+  funMode: boolean;
+
+  // ── Behaviour ───────────────────────────────────────────────────────────
   snapEnabled: boolean;
   focusFollowsMouse: boolean;
   confirmClose: boolean;
@@ -158,6 +182,7 @@ const DEFAULTS: Settings = {
   showDesktopIcons: true,
   snapIconsToGrid: false,
   iconSize: 1,
+  iconActivation: "single",
   // Placed clear of the desktop icon column on the left edge, which is 96px
   // wide — widgets defaulting to x:24 landed directly on top of it.
   widgets: [
@@ -171,6 +196,17 @@ const DEFAULTS: Settings = {
   pet: "none",
   petVisible: false,
   petPos: { x: 82, y: 70 },
+  petDetail: "detailed",
+  petScale: 1,
+  petMotion: "wander",
+  petPersonality: "helpful",
+  petName: "",
+  petTalks: true,
+
+  voice: "direct",
+  aboutMe: "",
+  greeting: true,
+  funMode: true,
   snapEnabled: true,
   focusFollowsMouse: false,
   confirmClose: false,
@@ -350,6 +386,14 @@ export const useSettings = create<SettingsState>()(
             id: `d_${ref}`, kind: "app" as const, ref, x: 24, y: 56 + i * 100,
           }));
           delete (persisted as { desktopIcons?: unknown }).desktopIcons;
+        }
+        // The pet catalogue was rebuilt around species descriptions; two old
+        // ids have no direct successor, so point them at the nearest creature
+        // rather than leaving someone with an invisible pet.
+        const RENAMED_PETS: Record<string, string> = { bird: "crow", slime: "slime" };
+        const oldPet = (persisted as { pet?: unknown })?.pet;
+        if (typeof oldPet === "string" && RENAMED_PETS[oldPet]) {
+          (persisted as Partial<Settings>).pet = RENAMED_PETS[oldPet];
         }
         // Deep-merge so a new release that adds a setting doesn't wipe the
         // user's saved profile, and vice versa.
