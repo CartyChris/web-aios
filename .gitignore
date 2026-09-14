@@ -12,3 +12,4 @@ tsconfig.tsbuildinfo
 # iCloud sync conflict duplicates
 *\ 2.*
 *\ 2
+.env*
