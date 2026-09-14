@@ -24,6 +24,9 @@ interface Body {
   size?: string;
   handle?: string;
   apiKey?: string;
+  /** Overrides the catalogue's wire model id. */
+  model?: string;
+  web?: boolean;
 }
 
 export async function POST(req: NextRequest) {
@@ -50,7 +53,9 @@ export async function POST(req: NextRequest) {
     }
     const prompt = body.prompt?.trim();
     if (!prompt) return json({ error: "A prompt is required." }, 400);
-    return json(await generate(model, baseUrl, apiKey, prompt, body.size));
+    const wire = body.model?.trim() || model.model;
+    if (!wire) return json({ error: "Pick or paste a model id first." }, 400);
+    return json(await generate({ ...model, model: wire }, baseUrl, apiKey, prompt, body.size, body.web));
   } catch (e) {
     return json({ error: e instanceof Error ? e.message : "Generation failed." }, 502);
   }
@@ -58,8 +63,42 @@ export async function POST(req: NextRequest) {
 
 /* ── Generation ───────────────────────────────────────────────────────────── */
 
-async function generate(m: MediaModel, baseUrl: string, key: string, prompt: string, size?: string): Promise<MediaJob> {
+async function generate(m: MediaModel, baseUrl: string, key: string, prompt: string, size?: string, web?: boolean): Promise<MediaJob> {
   switch (m.dialect) {
+    /* OpenRouter returns images from the ordinary chat endpoint when you ask
+       for the image modality. The picture comes back as a data URL inside the
+       message, which is why this looks nothing like the others. */
+    case "openrouter-image": {
+      const res = await fetch(`${baseUrl}/chat/completions`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${key}`,
+          "http-referer": "https://web-aios.vercel.app",
+          "x-title": "Web-AIOS",
+        },
+        body: JSON.stringify({
+          model: m.model,
+          modalities: ["image", "text"],
+          messages: [{ role: "user", content: prompt }],
+          ...(web ? { plugins: [{ id: "web", max_results: 3 }] } : {}),
+        }),
+      });
+      const data = await readJson(res) as {
+        choices?: Array<{ message?: { images?: Array<{ image_url?: { url?: string } }>; content?: string } }>;
+      };
+      const msg = data.choices?.[0]?.message;
+      const url = msg?.images?.[0]?.image_url?.url;
+      if (url) return { status: "done", mime: "image/png", dataUrl: url };
+      // A model that can only talk will answer in words. Say so rather than
+      // showing an empty frame.
+      throw new Error(
+        msg?.content
+          ? `That model replied with text instead of an image. Pick one with the image badge in the model picker. It said: ${msg.content.slice(0, 160)}`
+          : "The provider returned no image.",
+      );
+    }
+
     /* OpenAI-compatible: one POST, base64 back. xAI speaks this too. */
     case "openai-image": {
       const res = await fetch(`${baseUrl}/images/generations`, {

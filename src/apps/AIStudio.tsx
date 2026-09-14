@@ -117,6 +117,7 @@ export default function AIStudio({ args }: AppProps) {
 function BuildTab() {
   const vfs = useVFS();
   const userApps = useUserApps();
+  const [group, setGroup] = useState<(typeof TARGET_GROUPS)[number]["id"]>("web");
   const [targetId, setTargetId] = useState("single-html");
   const [prompt, setPrompt] = useState("");
   const [files, setFiles] = useState<ProjectFile[] | null>(null);
@@ -264,23 +265,37 @@ function BuildTab() {
       {/* ── Target picker ── */}
       <div className="shrink-0 border-b border-[var(--border)] px-2.5 py-2">
         <ErrorNote error={error} onDismiss={() => setError(null)} />
-        <div className="mb-2 flex flex-wrap gap-2">
+        {/* Two steps instead of one wall: what kind of thing, then which one.
+            Fifteen targets shown at once is a specification, not a choice. */}
+        <div className="mb-1.5 flex gap-1 overflow-x-auto">
           {TARGET_GROUPS.map((g) => (
-            <div key={g.id} className="min-w-0">
-              <div className="os-label mb-1 !text-[9px]">{g.label}</div>
-              <div className="flex flex-wrap gap-1">
-                {TARGETS.filter((t) => t.group === g.id).map((t) => (
-                  <button
-                    key={t.id}
-                    onClick={() => { setTargetId(t.id); setFiles(null); setRuntimeError(null); }}
-                    title={t.blurb}
-                    className={cn("os-btn !py-1 text-[11px]", targetId === t.id && "!border-[var(--accent)] !bg-[var(--accent)]/16")}
-                  >
-                    <Icon name={t.icon} size={11} className="mr-1" />{t.name}
-                  </button>
-                ))}
-              </div>
-            </div>
+            <button
+              key={g.id}
+              onClick={() => {
+                setGroup(g.id);
+                const first = TARGETS.find((t) => t.group === g.id);
+                if (first) { setTargetId(first.id); setFiles(null); setRuntimeError(null); }
+              }}
+              title={g.hint}
+              className={cn(
+                "shrink-0 rounded-full px-3 py-1 text-[11.5px] transition",
+                group === g.id ? "bg-[var(--accent)]/20 text-[var(--text)] ring-1 ring-[var(--accent)]" : "text-[var(--muted)] hover:bg-white/6",
+              )}
+            >
+              {g.label}
+            </button>
+          ))}
+        </div>
+        <div className="mb-1.5 flex flex-wrap gap-1">
+          {TARGETS.filter((t) => t.group === group).map((t) => (
+            <button
+              key={t.id}
+              onClick={() => { setTargetId(t.id); setFiles(null); setRuntimeError(null); }}
+              title={t.blurb}
+              className={cn("os-btn !py-1 text-[11px]", targetId === t.id && "!border-[var(--accent)] !bg-[var(--accent)]/16")}
+            >
+              <Icon name={t.icon} size={11} className="mr-1" />{t.name}
+            </button>
           ))}
         </div>
         <div className="mb-1.5 text-[10.5px] text-[var(--muted)]">{target.blurb}</div>
@@ -464,6 +479,7 @@ function MediaTab({ kind }: { kind: "image" | "video" }) {
   const [modelId, setModelId] = useState(models[0].id);
   const [prompt, setPrompt] = useState("");
   const [size, setSize] = useState<string>("");
+  const [customModel, setCustomModel] = useState("");
   const [busy, setBusy] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -479,14 +495,21 @@ function MediaTab({ kind }: { kind: "image" | "video" }) {
     const ctrl = new AbortController();
     abort.current = ctrl;
     try {
-      const first = await generateMedia({ modelId, prompt, size: size || model.sizes?.[0], apiKey, signal: ctrl.signal });
+      const first = await generateMedia({
+        modelId, prompt,
+        size: size || model.sizes?.[0],
+        apiKey,
+        model: model.custom ? customModel.trim() : undefined,
+        web: settings.ai.webAccess,
+        signal: ctrl.signal,
+      });
       const done = await awaitMedia(modelId, first, { apiKey, signal: ctrl.signal, onTick: setElapsed });
       if (done.status === "error" || !done.dataUrl) throw new Error(done.error ?? "Generation failed.");
       setItems((prev) => [{ id: uid("m"), url: done.dataUrl!, prompt: done.revisedPrompt || prompt, model: model.name, kind, at: Date.now() }, ...prev]);
     } catch (e) {
       if ((e as Error).name !== "AbortError") setError(e instanceof Error ? e.message : "Generation failed.");
     } finally { setBusy(false); abort.current = null; }
-  }, [prompt, busy, modelId, size, model, apiKey, kind]);
+  }, [prompt, busy, modelId, size, model, apiKey, kind, customModel, settings.ai.webAccess]);
 
   /** Data URLs go into the OS filesystem so every other app can reach them —
    *  that is what makes a generated image an asset rather than a screenshot. */
@@ -515,7 +538,21 @@ function MediaTab({ kind }: { kind: "image" | "video" }) {
             {model.provider}{apiKey ? " · key" : " · no key"}
           </span>
         </div>
-        {model.note && <div className="mb-2 text-[10.5px] text-[var(--muted)]">{model.note}</div>}
+        {model.custom && (
+          <input
+            value={customModel}
+            onChange={(e) => setCustomModel(e.target.value)}
+            placeholder="openrouter model id, e.g. google/gemini-3-pro-image"
+            className="os-input mb-2 !py-1 font-[family-name:var(--font-mono)] text-[11px]"
+          />
+        )}
+        {model.note && <div className="mb-2 text-[10.5px] leading-snug text-[var(--muted)]">{model.note}</div>}
+        {kind === "video" && (
+          <div className="mb-2 text-[10.5px] leading-snug text-[var(--muted)]">
+            OpenRouter does not host video generation — of its 445 models, none declare video output — so video goes
+            direct to Google or OpenAI with that provider&rsquo;s own key. Images can go either way.
+          </div>
+        )}
         <div className="flex gap-1.5">
           <textarea
             value={prompt}
@@ -526,7 +563,7 @@ function MediaTab({ kind }: { kind: "image" | "video" }) {
             className="os-input min-w-0 flex-1 resize-y !py-1 text-[12px]"
           />
           <div className="flex shrink-0 flex-col gap-1">
-            <button className="os-btn !py-1 text-[11px]" data-variant="primary" onClick={run} disabled={busy || !prompt.trim()}>
+            <button className="os-btn !py-1 text-[11px]" data-variant="primary" onClick={run} disabled={busy || !prompt.trim() || (model.custom && !customModel.trim())}>
               <Icon name="wand" size={11} className="mr-1" />{busy ? "Working…" : "Generate"}
             </button>
             {busy && <button className="os-btn !py-1 text-[11px]" onClick={() => abort.current?.abort()}>Cancel</button>}

@@ -41,9 +41,11 @@ A real desktop metaphor in the browser, not a dashboard that looks like one:
   three.js are transpiled and linked *in your browser*, so a generated project runs
   before you have installed anything. Install it and it becomes a real app with a
   desktop icon, still exportable as source.
-- **Forge 3D** — describe assets, NPCs, player models, whole maps, particle effects or
-  a lighting setup, and a model builds them. Then **let it look**: the viewport renders
-  to a PNG and goes back to a vision model, which can see that the roof floats and fix it.
+- **Forge 3D** — a real WebGL world builder. Describe assets, NPCs, player models, whole
+  maps, particle effects or a lighting setup and a model builds them out of nine
+  primitives with rotations, PBR materials, transparency and soft shadows. Then **let it
+  look**: the viewport renders to a PNG and goes back to a vision model, which can see
+  that the roof floats and fix it.
 - **Asset Studio** — describe a prop and a model composes it out of primitives, with a
   real lit thumbnail rendered from its own geometry.
 - **28 apps**, every one code-split and loaded on first open.
@@ -66,7 +68,12 @@ A real desktop metaphor in the browser, not a dashboard that looks like one:
   platform, carry their own colour that fights the active theme, and sit on a baseline
   instead of a grid. Every icon inherits its app's accent and re-colours with the theme.
 - **Provider-agnostic AI** — 12 providers including local Ollama and LM Studio, with BYO
-  keys that never leave your browser.
+  keys that never leave your browser. Click the model in the top bar for a searchable
+  list of **every** model the provider offers — 445 on OpenRouter, listed without a key,
+  each showing context window, price and whether it can see or draw.
+- **Live web access** — on by default. OpenRouter can hand *any* model a web search
+  tool, so an answer about something that changed last week is not a guess from a
+  training cutoff.
 - **Phone shell** — below 768px the OS becomes a phone OS: home screen, pages, app
   switcher, safe-area insets. Same kernel, same apps.
 
@@ -83,7 +90,7 @@ A real desktop metaphor in the browser, not a dashboard that looks like one:
 | Types | TypeScript 5.9 strict | — |
 | Transport | Hand-rolled multi-dialect streaming client | See below — text *and* vision |
 | Compression | Rust → WebAssembly (`wasm/deflate`) | ~12 KB of wasm instead of 40-90 KB of JS, fetched only on export |
-| 3D | Software painter on a 2D canvas | Zero dependency, identical on a phone, real per-face lighting |
+| 3D | three.js (WebGL) | A depth buffer, real primitives, PBR materials and soft shadows — see below |
 
 **Why not the Vercel AI SDK.** Ollama and LM Studio run on the user's own localhost,
 which a serverless function physically cannot reach — those calls have to leave from the
@@ -167,6 +174,47 @@ dependency sentinel, design system, game feel)
 Browser · Media · Media Deck · Personalize · Settings · System Monitor · Bridge
 
 ---
+
+## Why Forge 3D is WebGL now
+
+It used to be a software painter: project every face, sort by centroid depth, fill back
+to front. That is fine for a handful of boxes and wrong the moment a scene has a large
+flat surface. A ground plane's centroid can sit *nearer* than a river lying on top of it,
+so the ground paints last and the river disappears — and only from some angles, because
+it depends entirely on where the centroids land. No amount of tuning fixes a painter's
+algorithm; a per-pixel depth test does.
+
+Moving to the GPU brought the rest of what was missing: every primitive is now the shape
+it says it is rather than its bounding box, parts rotate, materials have roughness and
+metalness and transparency, and there are shadows — which are most of what tells you an
+object is sitting on the ground instead of floating above it.
+
+**The geometry contract.** Every primitive is normalised to fit exactly inside a 1×1×1
+box centred on its own origin, so `scale: [2, 0.4, 3]` means two metres wide, forty
+centimetres tall, three deep — for a sphere exactly as much as for a box. Without that a
+model has to know a cone's height is its `height` parameter but a capsule's is
+`length + 2 × radius`, and it will get it wrong. There is a test asserting it for all
+nine shapes.
+
+`wedge` and `pyramid` exist because a roof is the single most common thing anyone asks
+for and neither a box nor a cone is a roof.
+
+## Why generated maps used to arrive in one heap
+
+The map brief said `"entities": [ ...entities... ]` and never defined what an entity
+*was*. The model was never told an entity has a `position`, so it never wrote one, every
+object defaulted to `[0,0,0]`, and a fourteen-object village rendered as one object with
+thirteen more hidden inside it.
+
+Three things fix it, and all three are tested:
+
+1. Every brief now writes out the entity shape in full, with a worked example carrying
+   real numbers, and says plainly that this is the field that decides whether the scene
+   works.
+2. Coercion is forgiving. `["12", "0", "-8"]` is a position, not garbage — models write
+   numbers as strings often enough that rejecting them silently re-creates the same heap.
+3. If a reply still comes back stacked, it is detected and spread onto a ring, and you
+   are told it happened rather than left wondering why your village is one object.
 
 ## How AI Studio actually previews a project
 
@@ -268,7 +316,7 @@ Everything below was run against this code, not assumed.
 
 | Check | Result |
 | --- | --- |
-| `npm test` | **77/77 pass** — transport, vision translation, SSRF guard, DEFLATE, ZIP, the browser bundler, 3D lighting and particles, project scaffolds |
+| `npm test` | **96/96 pass** — transport, vision translation, SSRF guard, DEFLATE, ZIP, the browser bundler, 3D geometry and scene building, model-output coercion, project scaffolds |
 | `tsc --noEmit` | clean |
 | `next build` (from a deleted `.next`) | clean, zero warnings |
 | `eslint .` | **0 errors, 0 warnings** |
@@ -277,14 +325,20 @@ Everything below was run against this code, not assumed.
 | WASM in a real browser | fetched as `application/wasm`, instantiated, compressed — 20 KB module |
 | **Live preview: React + TypeScript** | a typed multi-file project renders, `useState` increments 0 → 3, a relative import of a second module resolves, imported CSS applies |
 | **Live preview: three.js** | a lit torus knot renders in WebGL with `OrbitControls` resolved from the addons path to the same pinned version |
-| **Forge 3D lighting** | with the key light at 0 / 1.05 / 2.8 the crate's top face reads 66 / 206 / 255, and the face pointing away from it stays at 72 throughout — the N·L term is real, not a gradient |
-| **Forge 3D ambient** | at ambient 0 the unlit face is 19; at 0.9 it is 167 |
-| Forge 3D particles | emitters spawn, age, fall under gravity, blend additively, and honour a pool budget |
-| Asset thumbnails | six seed assets render as lit geometry, framed by their projected bounding box |
+| **The disappearing river** | a river plane lying 2cm above a 70m ground plane, sampled across a full orbit and two pitch changes: **9/9 camera angles keep it visible** (31k → 4.4k → 40k pixels as it foreshortens, never 0). Under the old painter's algorithm it vanished from most angles |
+| **Forge 3D geometry contract** | all nine primitives measured: each fits a 1×1×1 box centred on its origin, so `scale` is size in metres for every shape. A 4m cylinder measures 4.00m tall |
+| Forge 3D rotations | 90 in the document produces exactly π/2 on the object |
+| Forge 3D camera framing | with a 200m ground plane present, the framing distance is **>4× closer** than framing the full bounds — it frames the village, not the grass |
+| Forge 3D particles | emitters spawn, age, fall under gravity per second not per frame, and honour a pool budget |
+| Forge 3D persistence | the open scene survives a reload and a viewport resize (7 objects · 22 parts · 3 lights · 1 fx, intact) |
+| Asset thumbnails | six seed assets render as lit three.js geometry with contact shadows, through one shared WebGL context |
+| **Model picker** | **445 of 445** OpenRouter models listed live, with no key; typing "image" narrows to 274; each row shows context window, price, and vision/tools/image badges |
+| OpenRouter video | verified there are **zero** video-output models across all 445 — so video stays on the direct providers and the UI says so rather than offering a dead option |
 | Arcade | Snake 0 → 10 with death detection · 2048 0 → 304 across 24 moves · Minesweeper 144 cells, flood-fill reveal · Breakout 3 lives |
 | Easter eggs | Konami summons a dragon · "matrix" swaps the theme and reverts · "drop" drops every icon to the floor · "party" toggles cleanly on and off |
 | Desktop pet | click produces a speech bubble; with no key it falls back to a written line instead of an error |
 | All 28 apps mount and render | opened every one from the OS terminal: 29 surfaces (Terminal twice), **0 blank panes**, 0 stuck loaders |
+| Phone at 402 × 874 | Forge 3D stacks viewport over panel, touch-sized controls, scene survives the resize |
 | Console on boot and through a full session | **0 errors** |
 | Calculator expression parser | 6/6 including right-associative `2^3^2 = 512` |
 | SSRF guard | 10/10 attack vectors refused (incl. `169.254.169.254`, `::1`, `file://`) |
@@ -294,7 +348,18 @@ Everything below was run against this code, not assumed.
 | Widget sandbox | frame is `allow-scripts` only; reaching the parent throws `SecurityError` |
 | ZIP output | `unzip -t` verifies CRCs; method 8 and method 0 entries both parse |
 
-### Three bugs this pass found by measuring rather than guessing
+### The 3D pass, and what the tests caught in it
+
+Two defects surfaced while writing the tests for the new renderer, both silent:
+
+- **The torus broke the geometry contract.** Its tube is 0.3 deep, so `scale.z` meant
+  0.3 × what you asked for. Nothing errors; rings are just quietly the wrong thickness
+  forever. Normalised like everything else.
+- **`stackedCount` undercounted by one.** It only scanned forward, so with every object
+  at the origin the last one had nothing after it and was reported as fine — in the exact
+  case the function exists to catch.
+
+### Three bugs an earlier pass found by measuring rather than guessing
 
 1. **Desktop icons did nothing when clicked.** `setPointerCapture` on the surface — which
    the drag needs — makes the browser retarget the compatibility mouse events to the

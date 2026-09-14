@@ -23,6 +23,7 @@ export async function POST(req: NextRequest) {
     maxTokens?: number;
     apiKey?: string;
     baseUrl?: string;
+    web?: boolean;
   };
   try {
     body = await req.json();
@@ -60,6 +61,7 @@ export async function POST(req: NextRequest) {
           messages: body.messages!,
           temperature: body.temperature,
           maxTokens: body.maxTokens,
+          web: body.web,
           signal: req.signal,
         })) {
           if (chunk.delta) send({ delta: chunk.delta });

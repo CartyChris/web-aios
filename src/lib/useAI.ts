@@ -15,6 +15,9 @@ export interface AskOptions {
   system?: string;
   onDelta?: (delta: string, full: string) => void;
   signal?: AbortSignal;
+  /** Force live web access on or off for this one call. Defaults to the
+   *  Settings preference. */
+  web?: boolean;
   /** Set false to send the system prompt exactly as given.
    *
    *  Everything the user talks to should sound like the same assistant, so the
@@ -66,6 +69,7 @@ export async function ask(opts: AskOptions): Promise<AskResult> {
       dialect: provider.dialect, baseUrl, apiKey, model, messages,
       temperature: opts.temperature ?? s.ai.temperature,
       maxTokens: opts.maxTokens ?? s.ai.maxTokens,
+      web: opts.web ?? s.ai.webAccess,
       signal: opts.signal,
     })) {
       if (chunk.delta) { text += chunk.delta; opts.onDelta?.(chunk.delta, text); }
@@ -82,6 +86,7 @@ export async function ask(opts: AskOptions): Promise<AskResult> {
         maxTokens: opts.maxTokens ?? s.ai.maxTokens,
         apiKey: apiKey || undefined,
         baseUrl: s.ai.baseUrls[providerId] || undefined,
+        web: opts.web ?? s.ai.webAccess,
       }),
       signal: opts.signal,
     });

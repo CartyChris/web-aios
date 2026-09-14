@@ -9,11 +9,13 @@ import { relTime } from "@/lib/format";
 import { Icon } from "@/shell/icons";
 import { bus } from "@/kernel/bus";
 import { EGGS, useEggs } from "@/lib/easter";
+import { ModelPicker } from "./ModelPicker";
 
 export function TopBar({ onLauncher, onPalette }: { onLauncher: () => void; onPalette: () => void }) {
   const wm = useWM();
   const { topBarVisible, topBarItems, ai, funMode } = useSettings();
   const [clockTaps, setClockTaps] = useState(0);
+  const [picker, setPicker] = useState(false);
   const [now, setNow] = useState(() => new Date());
   const [openMenu, setOpenMenu] = useState<"notifications" | "workspaces" | null>(null);
   const [online, setOnline] = useState(true);
@@ -92,10 +94,17 @@ export function TopBar({ onLauncher, onPalette }: { onLauncher: () => void; onPa
       )}
 
       {has("ai") && (
-        <span className="os-chip hidden lg:inline-flex" title={`${ai.provider} · ${ai.model}`}>
-          <Icon name="spark" size={11} /> {ai.model}
-        </span>
+        <button
+          className="os-chip hidden lg:inline-flex hover:!border-[var(--accent)]"
+          title={`${ai.provider} · ${ai.model} — click to change`}
+          onClick={() => setPicker(true)}
+        >
+          <Icon name="spark" size={11} />
+          <span className="max-w-44 truncate">{ai.model}</span>
+          {ai.webAccess && <Icon name="network" size={9} style={{ opacity: 0.65 }} />}
+        </button>
       )}
+      {picker && <ModelPicker onClose={() => setPicker(false)} />}
 
       {has("net") && (
         <span className={cn("os-chip", !online && "!border-[var(--danger)] !bg-[var(--danger)]/15")} title={online ? "Online" : "Offline"}>

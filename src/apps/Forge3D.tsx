@@ -7,63 +7,46 @@ import { bus } from "@/kernel/bus";
 import type { AppProps } from "@/kernel/types";
 import { uid, download } from "@/lib/format";
 import { ask } from "@/lib/useAI";
-import { Tabs, Empty, ErrorNote, CopyButton, Spinner, Markdown } from "./_ui";
-import { FORGE_KINDS, getForgeKind, extractJson } from "@/lib/forge-schema";
+import { ErrorNote, Spinner, Markdown } from "./_ui";
 import {
-  makeProjector, partFaces, lightAt, stepParticles, hexToRgb, rgbCss, shade,
-  type Light, type Emitter, type Particle, type Camera, type Vec3, type Face,
-} from "@/lib/forge-render";
+  FORGE_KINDS, getForgeKind, extractJson, num, vec3, stackedCount, spreadOverlapping,
+} from "@/lib/forge-schema";
+import { ForgeViewport } from "@/lib/forge-viewport";
+import type { SceneDoc, SceneEntity, ScenePart } from "@/lib/forge-scene";
+import type { Light, Emitter, Vec3 } from "@/lib/forge-render";
 import { cn } from "@/lib/cn";
 import { Icon } from "@/shell/icons";
 
 /* ────────────────────────────────────────────────────────────────────────────
-   Forge 3D.
+   Forge 3D — build a world with a model, then let it look at what it built.
 
-   A world editor where the model builds and then *looks at what it built*.
+   The viewport is WebGL now (lib/forge-viewport.ts). The previous software
+   painter sorted whole faces by centroid depth, which is fine until a scene
+   has a large flat surface: a ground plane's centroid can sit closer than a
+   river lying on top of it, so the ground draws last and the river vanishes —
+   and only from some angles, because it depends entirely on where the
+   centroids land. A depth buffer is the fix, and it comes with real geometry,
+   rotations, PBR materials and shadows, which is the rest of what was missing.
 
-   Two things make this more than a prompt box bolted to a scene graph:
-
-   - Real lighting. Every face carries a true normal and is shaded by the
-     actual light set, so "make it moonlit with a fire on the left" changes the
-     picture rather than a slider. Particles are a real CPU system, so fire
-     layers and drifts the way fire does.
-   - Vision. The viewport renders to a PNG and goes back to the model as an
-     image. A model describing a scene from JSON is guessing at what it looks
-     like; a model looking at the render can see that the roof floats, that
-     everything is the same shade of grey, that the composition is flat. That
-     is the difference between generating a scene and art-directing one.
-
-   The render loop never touches React state. It reads refs and draws. The
-   previous version called setScene() from inside draw() to advance physics,
-   which re-rendered the whole app on every simulated frame and tore down the
-   loop's own effect — the single biggest cost in this file, now gone.
+   The panel is three things, in the order you need them: make something, look
+   at what is there, change how it is lit. Everything else is one menu.
    ──────────────────────────────────────────────────────────────────────────── */
 
-export interface Entity {
-  id: string;
-  name: string;
+export interface Entity extends SceneEntity {
   assetId: string | null;
-  position: Vec3;
-  rotation: Vec3;
-  scale: Vec3;
-  visible: boolean;
   parts: AssetPart[];
   physics?: Asset["physics"];
 }
 
-export interface Scene {
+export interface Scene extends SceneDoc {
   name: string;
   entities: Entity[];
-  lights: Light[];
-  fx: Emitter[];
   gravity: number;
-  ambient: number;
-  sky: string;
 }
 
 const DEFAULT_LIGHTS: Light[] = [
-  { id: "key", name: "Key (sun)", kind: "directional", position: [-0.6, 1.4, 0.8], color: "#fff4e0", intensity: 1.05, range: 0, on: true },
-  { id: "fill", name: "Sky fill", kind: "directional", position: [0.7, 0.5, -0.9], color: "#8fb8ff", intensity: 0.38, range: 0, on: true },
+  { id: "key", name: "Key", kind: "directional", position: [-0.7, 1.35, 0.85], color: "#fff1dc", intensity: 1.15, range: 0, on: true },
+  { id: "fill", name: "Sky fill", kind: "directional", position: [0.8, 0.55, -0.9], color: "#93b9ff", intensity: 0.42, range: 0, on: true },
 ];
 
 const BLANK: Scene = {
@@ -72,134 +55,169 @@ const BLANK: Scene = {
   lights: DEFAULT_LIGHTS.map((l) => ({ ...l })),
   fx: [],
   gravity: -9.81,
-  ambient: 0.32,
-  sky: "#0b1a2e",
+  ambient: 0.34,
+  sky: "#93b7d8",
+  fog: 260,
 };
 
-/** Normalise whatever a model returned into an Entity we can actually draw.
- *  Every field is defaulted, because one missing `scale` should not throw away
- *  a scene that is otherwise perfectly good. */
+/* ── Normalising what a model returns ─────────────────────────────────────── */
+
+function toPart(raw: unknown, i: number): AssetPart & ScenePart {
+  const p = (raw ?? {}) as Record<string, unknown>;
+  return {
+    id: typeof p.id === "string" ? p.id : `p${i}`,
+    name: typeof p.name === "string" ? p.name : `Part ${i + 1}`,
+    shape: (typeof p.shape === "string" ? p.shape : "box") as AssetPart["shape"],
+    position: vec3(p.position, [0, 0, 0]),
+    rotation: vec3(p.rotation, [0, 0, 0]),
+    scale: vec3(p.scale, [1, 1, 1]),
+    color: typeof p.color === "string" ? p.color : "#8b8b95",
+    roughness: typeof p.roughness !== "undefined" ? num(p.roughness, 0.72) : undefined,
+    metalness: typeof p.metalness !== "undefined" ? num(p.metalness, 0.05) : undefined,
+    emissive: typeof p.emissive === "string" ? p.emissive : undefined,
+    opacity: typeof p.opacity !== "undefined" ? num(p.opacity, 1) : undefined,
+  };
+}
+
 function toEntity(raw: unknown): Entity | null {
-  const e = raw as Partial<Entity> & { parts?: unknown };
-  if (!e || !Array.isArray(e.parts) || e.parts.length === 0) return null;
-  const v3 = (v: unknown, d: Vec3): Vec3 =>
-    Array.isArray(v) && v.length === 3 && v.every((n) => typeof n === "number" && Number.isFinite(n)) ? (v as Vec3) : d;
+  const e = (raw ?? {}) as Record<string, unknown>;
+  const parts = Array.isArray(e.parts) ? e.parts : null;
+  if (!parts || parts.length === 0) return null;
   return {
     id: uid("ent"),
     name: typeof e.name === "string" ? e.name : "Object",
     assetId: null,
-    position: v3(e.position, [0, 0, 0]),
-    rotation: v3(e.rotation, [0, 0, 0]),
-    scale: v3(e.scale, [1, 1, 1]),
+    position: vec3(e.position, [0, 0, 0]),
+    rotation: vec3(e.rotation, [0, 0, 0]),
+    scale: vec3(e.scale, [1, 1, 1]),
     visible: true,
-    physics: e.physics,
-    parts: (e.parts as AssetPart[])
-      .filter((p) => p && typeof p === "object")
-      .map((p, i) => ({
-        id: p.id ?? `p${i}`,
-        name: p.name ?? `Part ${i + 1}`,
-        shape: p.shape ?? "box",
-        position: v3(p.position, [0, 0, 0]),
-        rotation: p.rotation,
-        scale: v3(p.scale, [1, 1, 1]),
-        color: typeof p.color === "string" ? p.color : "#8b8b95",
-        roughness: p.roughness,
-        metalness: p.metalness,
-        emissive: p.emissive,
-      })),
+    physics: e.physics as Asset["physics"] | undefined,
+    parts: parts.map(toPart),
   };
 }
 
 function toLight(raw: unknown): Light | null {
-  const l = raw as Partial<Light>;
-  if (!l || !Array.isArray(l.position) || l.position.length !== 3) return null;
+  const l = (raw ?? {}) as Record<string, unknown>;
+  if (!Array.isArray(l.position) && typeof l.position !== "object") return null;
   return {
     id: uid("lt"),
     name: typeof l.name === "string" ? l.name : "Light",
     kind: l.kind === "point" ? "point" : "directional",
-    position: l.position as Vec3,
+    position: vec3(l.position, [0, 5, 0]),
     color: typeof l.color === "string" ? l.color : "#ffffff",
-    intensity: typeof l.intensity === "number" ? Math.max(0, Math.min(4, l.intensity)) : 1,
-    range: typeof l.range === "number" ? l.range : 12,
+    intensity: Math.max(0, Math.min(4, num(l.intensity, 1))),
+    range: num(l.range, 14),
     on: true,
   };
 }
 
 function toEmitter(raw: unknown): Emitter | null {
-  const e = raw as Partial<Emitter>;
-  if (!e || !Array.isArray(e.position) || e.position.length !== 3) return null;
-  const num = (v: unknown, d: number, lo: number, hi: number) =>
-    typeof v === "number" && Number.isFinite(v) ? Math.max(lo, Math.min(hi, v)) : d;
+  const e = (raw ?? {}) as Record<string, unknown>;
+  if (!Array.isArray(e.position) && typeof e.position !== "object") return null;
+  const clamped = (v: unknown, d: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, num(v, d)));
   return {
     id: uid("fx"),
     name: typeof e.name === "string" ? e.name : "Emitter",
-    position: e.position as Vec3,
+    position: vec3(e.position, [0, 1, 0]),
     color: typeof e.color === "string" ? e.color : "#ffb347",
     color2: typeof e.color2 === "string" ? e.color2 : "#4a2010",
-    // Clamped, not trusted: a model that writes rate 100000 should produce a
-    // busy effect, not a locked-up tab.
-    rate: num(e.rate, 30, 1, 200),
-    life: num(e.life, 1.4, 0.1, 10),
-    speed: num(e.speed, 1.6, 0, 20),
-    spread: num(e.spread, 0.35, 0, 1),
-    size: num(e.size, 0.12, 0.01, 1.5),
-    gravity: num(e.gravity, 0.6, -30, 30),
+    // Clamped, not trusted: rate 100000 should give a busy effect, not a
+    // locked-up tab.
+    rate: clamped(e.rate, 30, 1, 200),
+    life: clamped(e.life, 1.4, 0.1, 10),
+    speed: clamped(e.speed, 1.6, 0, 20),
+    spread: clamped(e.spread, 0.35, 0, 1),
+    size: clamped(e.size, 0.12, 0.01, 1.5),
+    gravity: clamped(e.gravity, 0.6, -30, 30),
     blend: e.blend === "normal" ? "normal" : "add",
     on: true,
   };
 }
 
+/* ══════════════════════════════════════════════════════════════════════════ */
+
+/** The open scene survives a reload.
+ *
+ *  It did not before, and closing the window threw away however long you had
+ *  spent building — which makes a scene feel disposable and stops anyone
+ *  investing in one. Stored under its own key rather than in the settings
+ *  store because a scene is work, not a preference. */
+const SCENE_KEY = "webaios.forge.scene.v1";
+
+function loadScene(): Scene {
+  if (typeof localStorage === "undefined") return BLANK;
+  try {
+    const raw = localStorage.getItem(SCENE_KEY);
+    if (!raw) return BLANK;
+    const parsed = JSON.parse(raw) as Partial<Scene>;
+    if (!Array.isArray(parsed.entities)) return BLANK;
+    return {
+      ...BLANK,
+      ...parsed,
+      lights: parsed.lights?.length ? parsed.lights : DEFAULT_LIGHTS.map((l) => ({ ...l })),
+      fx: parsed.fx ?? [],
+    };
+  } catch {
+    return BLANK;
+  }
+}
+
 export default function Forge3D({ args }: AppProps) {
   const assets = useAssets();
   const vfs = useVFS();
-  const [scene, setScene] = useState<Scene>(BLANK);
+  const [scene, setScene] = useState<Scene>(loadScene);
   const [sel, setSel] = useState<string | null>(null);
-  const [tab, setTab] = useState("forge");
+  const [panel, setPanel] = useState<"make" | "scene" | "look">("make");
   const [error, setError] = useState<string | null>(null);
-  const [cam, setCam] = useState<Camera>({ yaw: 0.7, pitch: 0.55, zoom: 46, panX: 0, panY: 0 });
-  const [playing, setPlaying] = useState(false);
-  const [showFx, setShowFx] = useState(true);
   const [fps, setFps] = useState(0);
+  const [grid, setGrid] = useState(true);
+  const [menu, setMenu] = useState(false);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const dragRef = useRef<{ x: number; y: number; yaw: number; pitch: number; pan: boolean; panX: number; panY: number } | null>(null);
+  const viewportRef = useRef<ForgeViewport | null>(null);
 
-  // Everything the render loop reads lives in a ref. The loop is started once
-  // and never restarted, so orbiting the camera costs one frame of drawing
-  // rather than a React render plus an effect teardown.
-  const sceneRef = useRef(scene);
-  const camRef = useRef(cam);
-  const selRef = useRef(sel);
-  const playRef = useRef(playing);
-  const fxRef = useRef(showFx);
-  const particles = useRef<Particle[]>([]);
-  const velocities = useRef<Map<string, number>>(new Map());
-  const simY = useRef<Map<string, number>>(new Map());
-
-  // Written after render rather than during it. Assigning a ref in the render
-  // body is a concurrent-rendering hazard — React may render a component it
-  // then throws away, and the loop would draw from state that never committed.
+  // One viewport for the life of the window. It owns its own frame loop and
+  // never re-reads React state, so orbiting costs nothing above a draw call.
   useEffect(() => {
-    sceneRef.current = scene;
-    camRef.current = cam;
-    selRef.current = sel;
-    playRef.current = playing;
-    fxRef.current = showFx;
-  });
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const vp = new ForgeViewport(canvas, { onFps: setFps, onSelect: setSel });
+    viewportRef.current = vp;
+    return () => { vp.dispose(); viewportRef.current = null; };
+  }, []);
+
+  useEffect(() => { viewportRef.current?.setScene(scene); }, [scene]);
+
+  // Persist on a trailing timer: a slider drag fires this thirty times a
+  // second, and writing a whole scene to localStorage that often is a
+  // measurable stall.
+  useEffect(() => {
+    const t = setTimeout(() => {
+      try { localStorage.setItem(SCENE_KEY, JSON.stringify(scene)); } catch { /* quota — not worth interrupting for */ }
+    }, 600);
+    return () => clearTimeout(t);
+  }, [scene]);
+  useEffect(() => { viewportRef.current?.select(sel); }, [sel]);
+  useEffect(() => { viewportRef.current?.setGridVisible(grid); }, [grid]);
 
   const spawn = useCallback((assetId: string) => {
     const a = assets.assets.find((x) => x.id === assetId);
     if (!a) return;
-    const e: Entity = {
-      id: uid("ent"), name: a.name, assetId: a.id,
-      position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1],
-      visible: true, parts: a.parts, physics: a.physics,
-    };
-    setScene((s) => ({ ...s, entities: [...s.entities, e] }));
-    setSel(e.id);
+    setScene((s) => {
+      // Drop it somewhere free rather than on top of whatever is at the origin.
+      const ring = s.entities.length;
+      const angle = ring * 2.4;
+      const e: Entity = {
+        id: uid("ent"), name: a.name, assetId: a.id,
+        position: [Math.round(Math.cos(angle) * (2 + ring * 1.4) * 10) / 10, 0, Math.round(Math.sin(angle) * (2 + ring * 1.4) * 10) / 10],
+        rotation: [0, Math.round(Math.random() * 360), 0], scale: [1, 1, 1],
+        visible: true, parts: a.parts, physics: a.physics,
+      };
+      setSel(e.id);
+      return { ...s, entities: [...s.entities, e] };
+    });
   }, [assets.assets]);
 
-  // Asset Studio can launch us with something to place; do it once.
   const spawnArg = args?.spawnAsset as string | undefined;
   const [spawnedArg, setSpawnedArg] = useState<string | undefined>(undefined);
   if (spawnArg && spawnArg !== spawnedArg) {
@@ -208,364 +226,142 @@ export default function Forge3D({ args }: AppProps) {
   }
 
   const entity = scene.entities.find((e) => e.id === sel) ?? null;
-
   const patch = useCallback((id: string, p: Partial<Entity>) => {
     setScene((s) => ({ ...s, entities: s.entities.map((e) => (e.id === id ? { ...e, ...p } : e)) }));
   }, []);
 
-  /* ── Render loop ───────────────────────────────────────────────────────── */
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const g = canvas.getContext("2d", { alpha: false });
-    if (!g) return;
+  const capture = useCallback((max?: number) => viewportRef.current?.capture(max) ?? null, []);
+  const exportScene = useCallback(() => JSON.stringify({ __forge3d: 3, scene }, null, 2), [scene]);
 
-    let raf = 0;
-    let last = performance.now();
-    let frames = 0, fpsClock = last;
-
-    const draw = (now: number) => {
-      const dt = Math.min(0.05, (now - last) / 1000);
-      last = now;
-      frames++;
-      if (now - fpsClock > 500) { setFps(Math.round((frames * 1000) / (now - fpsClock))); frames = 0; fpsClock = now; }
-
-      const s = sceneRef.current;
-      const c = camRef.current;
-      const dpr = Math.min(window.devicePixelRatio || 1, 2);
-      const w = canvas.clientWidth, h = canvas.clientHeight;
-      if (canvas.width !== w * dpr || canvas.height !== h * dpr) {
-        canvas.width = w * dpr; canvas.height = h * dpr;
-      }
-      g.setTransform(dpr, 0, 0, dpr, 0, 0);
-
-      const project = makeProjector(c, w, h);
-      const lights = s.lights.filter((l) => l.on !== false);
-
-      // Sky
-      const grad = g.createLinearGradient(0, 0, 0, h);
-      grad.addColorStop(0, s.sky);
-      grad.addColorStop(1, shade(s.sky, -0.5));
-      g.fillStyle = grad;
-      g.fillRect(0, 0, w, h);
-
-      // Ground grid
-      g.strokeStyle = "rgba(255,255,255,0.075)";
-      g.lineWidth = 1;
-      const N = 14;
-      g.beginPath();
-      for (let i = -N; i <= N; i++) {
-        const a = project(i, 0, -N), b = project(i, 0, N);
-        const p = project(-N, 0, i), q = project(N, 0, i);
-        g.moveTo(a.x, a.y); g.lineTo(b.x, b.y);
-        g.moveTo(p.x, p.y); g.lineTo(q.x, q.y);
-      }
-      g.stroke();
-
-      for (const [axis, color] of [[[1, 0, 0], "#ff5f57"], [[0, 1, 0], "#28c840"], [[0, 0, 1], "#60a5fa"]] as const) {
-        const o = project(0, 0, 0);
-        const p = project(axis[0] * 3, axis[1] * 3, axis[2] * 3);
-        g.strokeStyle = color; g.lineWidth = 1.5;
-        g.beginPath(); g.moveTo(o.x, o.y); g.lineTo(p.x, p.y); g.stroke();
-      }
-
-      // Physics runs into a ref, not into state — that is what keeps this loop
-      // independent of React. It is committed back to the scene on stop.
-      if (playRef.current) {
-        for (const e of s.entities) {
-          if (e.physics?.bodyType !== "dynamic") continue;
-          const y0 = simY.current.get(e.id) ?? e.position[1];
-          let v = (velocities.current.get(e.id) ?? 0) + s.gravity * dt;
-          let y = y0 + v * dt;
-          if (y <= 0) { y = 0; v = -v * (e.physics.restitution ?? 0); if (Math.abs(v) < 0.3) v = 0; }
-          velocities.current.set(e.id, v);
-          simY.current.set(e.id, y);
-        }
-      }
-
-      // Faces, painter's algorithm.
-      const faces: Array<Face & { selected: boolean }> = [];
-      for (const e of s.entities) {
-        if (!e.visible) continue;
-        const y = playRef.current ? simY.current.get(e.id) ?? e.position[1] : e.position[1];
-        const origin: Vec3 = [e.position[0], y, e.position[2]];
-        const selected = e.id === selRef.current;
-        for (const part of e.parts) {
-          for (const f of partFaces(part, origin, e.scale, project)) faces.push({ ...f, selected });
-        }
-      }
-      faces.sort((a, b) => a.depth - b.depth);
-
-      for (const f of faces) {
-        const [lr, lg, lb] = lightAt(f.normal, f.cx, f.cy, f.cz, lights, s.ambient);
-        const [br, bg, bb] = hexToRgb(f.color);
-        g.beginPath();
-        g.moveTo(f.pts[0].x, f.pts[0].y);
-        for (let i = 1; i < f.pts.length; i++) g.lineTo(f.pts[i].x, f.pts[i].y);
-        g.closePath();
-        g.fillStyle = rgbCss(br * lr, bg * lg, bb * lb);
-        g.fill();
-        if (f.emissive) {
-          const [er, eg, eb] = hexToRgb(f.emissive);
-          g.globalAlpha = 0.4;
-          g.fillStyle = rgbCss(er, eg, eb);
-          g.fill();
-          g.globalAlpha = 1;
-        }
-        g.strokeStyle = f.selected ? "#67e8f9" : "rgba(0,0,0,0.3)";
-        g.lineWidth = f.selected ? 1.8 : 0.5;
-        g.stroke();
-      }
-
-      // Light gizmos, so a light you cannot see is still a thing you can find.
-      for (const l of s.lights) {
-        const p = l.kind === "point" ? project(...l.position) : project(l.position[0] * 5, l.position[1] * 5, l.position[2] * 5);
-        g.beginPath();
-        g.arc(p.x, p.y, 5, 0, Math.PI * 2);
-        g.fillStyle = l.on === false ? "rgba(128,128,128,0.4)" : l.color;
-        g.fill();
-        g.strokeStyle = "rgba(0,0,0,0.5)";
-        g.lineWidth = 1;
-        g.stroke();
-      }
-
-      // Particles
-      if (fxRef.current && s.fx.length) {
-        const pool = stepParticles(particles.current, s.fx, dt);
-        const drawn = pool
-          .map((p) => ({ p, s: project(p.x, p.y, p.z) }))
-          .sort((a, b) => a.s.depth - b.s.depth);
-        for (const { p, s: ps } of drawn) {
-          const e = s.fx[p.emitter];
-          if (!e) continue;
-          const t = p.age / p.life;
-          const [r1, g1, b1] = hexToRgb(e.color);
-          const [r2, g2, b2] = hexToRgb(e.color2);
-          g.globalCompositeOperation = e.blend === "add" ? "lighter" : "source-over";
-          g.globalAlpha = Math.max(0, 1 - t) * (e.blend === "add" ? 0.85 : 0.6);
-          g.fillStyle = rgbCss(r1 + (r2 - r1) * t, g1 + (g2 - g1) * t, b1 + (b2 - b1) * t);
-          g.beginPath();
-          g.arc(ps.x, ps.y, Math.max(0.6, e.size * c.zoom * (1 - t * 0.4)), 0, Math.PI * 2);
-          g.fill();
-        }
-        g.globalAlpha = 1;
-        g.globalCompositeOperation = "source-over";
-      } else if (particles.current.length) {
-        particles.current.length = 0;
-      }
-
-      raf = requestAnimationFrame(draw);
-    };
-
-    raf = requestAnimationFrame(draw);
-    return () => cancelAnimationFrame(raf);
+  // Menu actions are stable callbacks rather than closures built inside the
+  // render body: reading viewportRef while rendering is a concurrent-mode
+  // hazard, and the lint that catches it is right.
+  const frameScene = useCallback(() => viewportRef.current?.frameScene(), []);
+  const saveToFiles = useCallback(() => {
+    vfs.write(`/scenes/${scene.name.replace(/\s+/g, "_")}.json`, exportScene(), { appId: "forge3d" });
+    bus.emit("notify", { title: "Scene saved to Files", kind: "success" });
+  }, [vfs, scene.name, exportScene]);
+  const exportJson = useCallback(
+    () => download(`${scene.name.replace(/\s+/g, "_")}.json`, exportScene(), "application/json"),
+    [scene.name, exportScene],
+  );
+  const clearScene = useCallback(() => {
+    setScene((s) => ({ ...BLANK, name: s.name, lights: DEFAULT_LIGHTS.map((l) => ({ ...l })) }));
+    setSel(null);
   }, []);
 
-  /** Commit the simulation back into the scene when play stops, so what you
-   *  see is what you then edit. */
-  const togglePlay = useCallback(() => {
-    if (playing) {
-      setScene((s) => ({
-        ...s,
-        entities: s.entities.map((e) => {
-          const y = simY.current.get(e.id);
-          return y === undefined ? e : { ...e, position: [e.position[0], y, e.position[2]] as Vec3 };
-        }),
-      }));
-    }
-    velocities.current.clear();
-    simY.current.clear();
-    setPlaying((p) => !p);
-  }, [playing]);
-
-  /* ── Vision capture ────────────────────────────────────────────────────── */
-
-  /** The viewport as a PNG a vision model can look at.
-   *
-   *  Downscaled to 896px: image tokens scale with area, and nothing in this
-   *  renderer carries detail that survives past that anyway. */
-  const capture = useCallback((max = 896): string | null => {
-    const src = canvasRef.current;
-    if (!src || !src.width) return null;
-    const scale = Math.min(1, max / Math.max(src.width, src.height));
-    const off = document.createElement("canvas");
-    off.width = Math.round(src.width * scale);
-    off.height = Math.round(src.height * scale);
-    const g = off.getContext("2d");
-    if (!g) return null;
-    g.drawImage(src, 0, 0, off.width, off.height);
-    return off.toDataURL("image/png");
-  }, []);
-
-  const exportScene = useCallback(() => JSON.stringify({ __forge3d: 2, scene }, null, 2), [scene]);
+  const partCount = useMemo(() => scene.entities.reduce((a, e) => a + e.parts.length, 0), [scene.entities]);
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex shrink-0 flex-wrap items-center gap-1.5 border-b border-[var(--border)] px-2.5 py-1.5">
-        <input value={scene.name} onChange={(e) => setScene((s) => ({ ...s, name: e.target.value }))} className="os-input !w-40 !py-1 text-[12px] font-medium" />
-        <button className={cn("os-btn !py-1 text-[11px]", playing && "!border-[var(--accent)] !bg-[var(--accent)]/16")} onClick={togglePlay}>
-          <Icon name={playing ? "stop" : "play"} size={11} className="mr-1" />{playing ? "Stop" : "Play"}
-        </button>
-        <button className={cn("os-btn !py-1 text-[11px]", showFx && scene.fx.length > 0 && "!border-[var(--accent)]")} onClick={() => setShowFx((v) => !v)} title="Toggle particle effects">
-          <Icon name="sparkles" size={11} className="mr-1" />FX
-        </button>
-        <button className="os-btn !py-1 text-[11px]" onClick={() => setCam({ yaw: 0.7, pitch: 0.55, zoom: 46, panX: 0, panY: 0 })}>Reset view</button>
+      {/* ── Title bar: the name, the state of things, and one menu ── */}
+      <div className="flex shrink-0 items-center gap-2 border-b border-[var(--border)] px-2.5 py-1.5">
+        <input
+          value={scene.name}
+          onChange={(e) => setScene((s) => ({ ...s, name: e.target.value }))}
+          className="min-w-0 max-w-52 flex-1 rounded-md border border-transparent bg-transparent px-1.5 py-1 text-[13px] font-medium outline-none hover:border-[var(--border)] focus:border-[var(--accent)]"
+          aria-label="Scene name"
+        />
         <div className="flex-1" />
-        <span className="os-chip tabular-nums" title="Render loop frame rate">{fps} fps</span>
-        <span className="os-chip">{scene.entities.length} obj · {scene.lights.length} lights · {scene.fx.length} fx</span>
-        <button className="os-btn !py-1 text-[11px]" onClick={() => { vfs.write(`/scenes/${scene.name.replace(/\s+/g, "_")}.json`, exportScene(), { appId: "forge3d" }); bus.emit("notify", { title: "Scene saved to Files", kind: "success" }); }}>Save</button>
-        <button className="os-btn !py-1 text-[11px]" onClick={() => download(`${scene.name.replace(/\s+/g, "_")}.json`, exportScene(), "application/json")}>Export</button>
-        <label className="os-btn !py-1 text-[11px]">
-          Import
-          <input
-            type="file" accept="application/json" hidden
-            onChange={async (e) => {
-              const f = e.target.files?.[0];
-              if (!f) return;
-              try {
-                const parsed = JSON.parse(await f.text());
-                const sc = parsed.scene ?? parsed;
-                if (!Array.isArray(sc.entities)) throw new Error("No entities array found.");
-                setScene({ ...BLANK, ...sc, lights: sc.lights ?? DEFAULT_LIGHTS, fx: sc.fx ?? [] });
-              } catch (err) { setError(err instanceof Error ? err.message : "Import failed."); }
-              e.target.value = "";
-            }}
-          />
-        </label>
+        <span className="os-chip tabular-nums" title="Objects · parts · lights · effects">
+          {scene.entities.length} · {partCount}p · {scene.lights.length}L · {scene.fx.length}fx
+        </span>
+        <span className="os-chip tabular-nums hidden sm:inline-flex" title="Viewport frame rate">{fps} fps</span>
+        <div className="relative">
+          <button className="os-btn !py-1 text-[11px]" onClick={() => setMenu((m) => !m)} title="Scene menu">
+            <Icon name="menu" size={12} />
+          </button>
+          {menu && (
+            <>
+              <div className="fixed inset-0 z-[40]" onClick={() => setMenu(false)} />
+              <div className="glass absolute right-0 top-full z-[50] mt-1 w-48 p-1.5 shadow-2xl" style={{ borderRadius: "var(--radius)" }}>
+                <MenuItem icon="save" label="Save to Files" onClick={() => { saveToFiles(); setMenu(false); }} />
+                <MenuItem icon="download" label="Export .json" onClick={() => { exportJson(); setMenu(false); }} />
+                <MenuItem icon="grid" label={grid ? "Hide grid" : "Show grid"} onClick={() => { setGrid((g) => !g); setMenu(false); }} />
+                <MenuItem icon="eye" label="Frame scene" onClick={() => { frameScene(); setMenu(false); }} />
+                <MenuItem icon="trash" label="Clear scene" onClick={() => { clearScene(); setMenu(false); }} />
+                <label className="flex w-full cursor-pointer items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[12px] hover:bg-[var(--accent)]/18">
+                  <Icon name="folder" size={12} />Import .json
+                  <input
+                    type="file" accept="application/json" hidden
+                    onChange={async (e) => {
+                      const f = e.target.files?.[0];
+                      setMenu(false);
+                      if (!f) return;
+                      try {
+                        const parsed = JSON.parse(await f.text());
+                        const sc = parsed.scene ?? parsed;
+                        if (!Array.isArray(sc.entities)) throw new Error("No entities array found.");
+                        setScene({ ...BLANK, ...sc, lights: sc.lights?.length ? sc.lights : DEFAULT_LIGHTS, fx: sc.fx ?? [] });
+                        setTimeout(frameScene, 60);
+                      } catch (err) { setError(err instanceof Error ? err.message : "Import failed."); }
+                      e.target.value = "";
+                    }}
+                  />
+                </label>
+              </div>
+            </>
+          )}
+        </div>
       </div>
 
-      <div className="px-2.5 pt-2"><ErrorNote error={error} onDismiss={() => setError(null)} /></div>
+      {error && <div className="px-2.5 pt-2"><ErrorNote error={error} onDismiss={() => setError(null)} /></div>}
 
       <div className="app-split flex min-h-0 flex-1">
-        <div className="relative min-w-0 flex-1">
-          <canvas
-            ref={canvasRef}
-            className="h-full w-full cursor-grab touch-none active:cursor-grabbing"
-            onPointerDown={(e) => {
-              (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-              dragRef.current = { x: e.clientX, y: e.clientY, yaw: cam.yaw, pitch: cam.pitch, pan: e.shiftKey || e.button === 1, panX: cam.panX, panY: cam.panY };
-            }}
-            onPointerMove={(e) => {
-              const d = dragRef.current;
-              if (!d) return;
-              if (d.pan) setCam((c) => ({ ...c, panX: d.panX + (e.clientX - d.x), panY: d.panY + (e.clientY - d.y) }));
-              else setCam((c) => ({ ...c, yaw: d.yaw + (e.clientX - d.x) * 0.008, pitch: Math.max(0.05, Math.min(1.45, d.pitch + (e.clientY - d.y) * 0.006)) }));
-            }}
-            onPointerUp={() => (dragRef.current = null)}
-            onWheel={(e) => setCam((c) => ({ ...c, zoom: Math.max(8, Math.min(180, c.zoom * (e.deltaY > 0 ? 0.92 : 1.08))) }))}
-          />
-          <div className="pointer-events-none absolute bottom-2 left-2 rounded px-2 py-1 text-[10px] text-[var(--muted)]" style={{ background: "color-mix(in srgb, var(--bg) 70%, transparent)" }}>
-            drag orbit · shift-drag pan · scroll zoom
+        {/* ── Viewport ── */}
+        <div className="relative min-w-0 flex-1 bg-black">
+          <canvas ref={canvasRef} className="block h-full w-full touch-none" />
+          {scene.entities.length === 0 && (
+            <div className="pointer-events-none absolute inset-0 grid place-items-center">
+              <div className="max-w-xs text-center">
+                <Icon name="cube3d" size={34} style={{ opacity: 0.35 }} />
+                <div className="mt-2 text-[13px] font-medium opacity-70">Nothing here yet</div>
+                <div className="mt-1 text-[11.5px] text-[var(--muted)]">
+                  Describe a place, a prop or a character on the right and it gets built here.
+                </div>
+              </div>
+            </div>
+          )}
+          <div className="pointer-events-none absolute bottom-2 left-2 rounded px-2 py-1 text-[10px] text-[var(--muted)]" style={{ background: "color-mix(in srgb, var(--bg) 62%, transparent)" }}>
+            drag orbit · right-drag pan · scroll zoom · click to select
           </div>
         </div>
 
-        <div className="app-aside flex w-72 shrink-0 flex-col border-l border-[var(--border)]">
-          <Tabs
-            tabs={[
-              { id: "forge", label: "Forge", icon: "wand" },
-              { id: "scene", label: "Scene", icon: "layers" },
-              { id: "light", label: "Light", icon: "spark" },
-              { id: "props", label: "Inspect", icon: "tune" },
-            ]}
-            active={tab}
-            onChange={setTab}
-          />
-          <div className="min-h-0 flex-1 overflow-y-auto p-2">
-            {tab === "forge" && <ForgePanel scene={scene} setScene={setScene} setSel={setSel} setError={setError} capture={capture} />}
+        {/* ── Panel ── */}
+        <div className="app-aside flex w-[19rem] shrink-0 flex-col border-l border-[var(--border)]">
+          <div className="flex shrink-0 gap-1 border-b border-[var(--border)] p-1.5">
+            {([["make", "Make", "wand"], ["scene", "Scene", "layers"], ["look", "Look", "spark"]] as const).map(([id, label, icon]) => (
+              <button
+                key={id}
+                onClick={() => setPanel(id)}
+                className={cn(
+                  "flex flex-1 items-center justify-center gap-1.5 rounded-lg py-1.5 text-[12px] transition",
+                  panel === id ? "bg-[var(--accent)]/18 text-[var(--text)] ring-1 ring-[var(--accent)]" : "text-[var(--muted)] hover:bg-white/6",
+                )}
+              >
+                <Icon name={icon} size={12} />{label}
+              </button>
+            ))}
+          </div>
 
-            {tab === "scene" && (
-              <>
-                {scene.entities.length === 0 && <div className="py-6 text-center text-[11px] text-[var(--muted)]">Empty scene. Describe something on the Forge tab, or drop in an asset.</div>}
-                {scene.entities.map((e) => (
-                  <div key={e.id} className={cn("mb-0.5 flex items-center gap-1.5 rounded px-2 py-1", sel === e.id ? "bg-[var(--accent)]/16" : "hover:bg-white/6")}>
-                    <button onClick={() => patch(e.id, { visible: !e.visible })} className="opacity-70" title={e.visible ? "Hide" : "Show"}>
-                      <Icon name={e.visible ? "eye" : "eyeoff"} size={11} />
-                    </button>
-                    <button onClick={() => { setSel(e.id); setTab("props"); }} className="min-w-0 flex-1 truncate text-left text-[11.5px]">{e.name}</button>
-                    <span className="shrink-0 text-[9px] text-[var(--muted)]">{e.parts.length}</span>
-                    <button className="opacity-50 hover:opacity-100" onClick={() => { setScene((s) => ({ ...s, entities: s.entities.filter((x) => x.id !== e.id) })); if (sel === e.id) setSel(null); }}>
-                      <Icon name="close" size={11} />
-                    </button>
-                  </div>
-                ))}
-
-                <div className="mt-3 border-t border-[var(--border)] pt-2">
-                  <div className="os-label mb-1.5">Asset Studio</div>
-                  {assets.assets.length === 0 ? (
-                    <div className="text-[11px] text-[var(--muted)]">No assets yet.</div>
-                  ) : (
-                    <div className="grid grid-cols-3 gap-1">
-                      {assets.assets.slice(0, 12).map((a) => (
-                        <button key={a.id} onClick={() => spawn(a.id)} className="os-card !p-1.5 text-center" title={`Place ${a.name}`}>
-                          <Icon name={a.icon || "assets"} size={16} style={{ color: "var(--accent)" }} />
-                          <div className="truncate text-[9.5px]">{a.name}</div>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                  <button className="os-btn mt-1.5 w-full !py-1 text-[11px]" onClick={() => bus.emit("app:open", { appId: "assets" })}>
-                    Open Asset Studio
-                  </button>
-                </div>
-              </>
+          <div className="min-h-0 flex-1 overflow-y-auto p-2.5">
+            {panel === "make" && (
+              <MakePanel
+                scene={scene}
+                setScene={setScene}
+                setSel={setSel}
+                setError={setError}
+                capture={capture}
+                reframe={frameScene}
+              />
             )}
-
-            {tab === "light" && <LightPanel scene={scene} setScene={setScene} />}
-
-            {tab === "props" && (
-              !entity ? (
-                <Empty icon="search" title="Nothing selected" body="Pick an object on the Scene tab." />
-              ) : (
-                <>
-                  <input value={entity.name} onChange={(e) => patch(entity.id, { name: e.target.value })} className="os-input mb-2 !py-1 text-[12px] font-medium" />
-                  {(["position", "rotation", "scale"] as const).map((field) => (
-                    <div key={field} className="mb-2">
-                      <div className="os-label mb-1">{field}</div>
-                      <div className="flex gap-1">
-                        {[0, 1, 2].map((axis) => (
-                          <input
-                            key={axis} type="number" step={field === "scale" ? 0.1 : 0.25}
-                            value={entity[field][axis]}
-                            onChange={(ev) => { const v = [...entity[field]] as Vec3; v[axis] = Number(ev.target.value); patch(entity.id, { [field]: v }); }}
-                            className="os-input !py-1 text-[11px]"
-                          />
-                        ))}
-                      </div>
-                    </div>
-                  ))}
-                  <div className="mb-2 text-[11px] text-[var(--muted)]">
-                    {entity.parts.length} part{entity.parts.length === 1 ? "" : "s"} · {entity.physics?.bodyType ?? "no physics"}
-                  </div>
-                  <div className="flex flex-wrap gap-1">
-                    <button
-                      className="os-btn !px-2 !py-0.5 text-[10.5px]"
-                      onClick={() => {
-                        const c: Entity = { ...entity, id: uid("ent"), position: [entity.position[0] + 1.5, entity.position[1], entity.position[2]] };
-                        setScene((s) => ({ ...s, entities: [...s.entities, c] }));
-                        setSel(c.id);
-                      }}
-                    >
-                      Duplicate
-                    </button>
-                    <button
-                      className="os-btn !px-2 !py-0.5 text-[10.5px]"
-                      title="Save this object to Asset Studio so you can reuse it"
-                      onClick={() => {
-                        assets.add({
-                          id: uid("asset"), name: entity.name, kind: "prop", icon: "assets", tags: ["forge"],
-                          physics: entity.physics ?? { bodyType: "static", collider: "box", mass: 0, friction: 0.6, restitution: 0.1, solid: true },
-                          parts: entity.parts, updatedAt: Date.now(),
-                        });
-                        bus.emit("notify", { title: `"${entity.name}" saved to Asset Studio`, kind: "success" });
-                      }}
-                    >
-                      Save as asset
-                    </button>
-                    <CopyButton text={JSON.stringify(entity, null, 2)} label="Copy" className="!px-2 !py-0.5 !text-[10.5px]" />
-                  </div>
-                </>
-              )
+            {panel === "scene" && (
+              <ScenePanel
+                scene={scene} setScene={setScene} sel={sel} setSel={setSel}
+                entity={entity} patch={patch} assets={assets} spawn={spawn}
+              />
             )}
+            {panel === "look" && <LookPanel scene={scene} setScene={setScene} />}
           </div>
         </div>
       </div>
@@ -573,18 +369,30 @@ export default function Forge3D({ args }: AppProps) {
   );
 }
 
+/** One row of the scene menu. A component rather than a mapped array of
+ *  closures: building those in the render body counts as calling a ref reader
+ *  during render, which concurrent rendering does not guarantee is safe. */
+function MenuItem({ icon, label, onClick }: { icon: string; label: string; onClick: () => void }) {
+  return (
+    <button onClick={onClick} className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[12px] hover:bg-[var(--accent)]/18">
+      <Icon name={icon} size={12} />{label}
+    </button>
+  );
+}
+
 /* ══════════════════════════════════════════════════════════════════════════
-   The Forge panel — build with a model, then let it look
+   MAKE — describe it, build it, then let the model look at it
    ══════════════════════════════════════════════════════════════════════════ */
 
-function ForgePanel({ scene, setScene, setSel, setError, capture }: {
+function MakePanel({ scene, setScene, setSel, setError, capture, reframe }: {
   scene: Scene;
   setScene: React.Dispatch<React.SetStateAction<Scene>>;
   setSel: (id: string | null) => void;
   setError: (e: string | null) => void;
   capture: (max?: number) => string | null;
+  reframe: () => void;
 }) {
-  const [kindId, setKindId] = useState("asset");
+  const [kindId, setKindId] = useState("map");
   const [prompt, setPrompt] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [critique, setCritique] = useState<string | null>(null);
@@ -592,64 +400,76 @@ function ForgePanel({ scene, setScene, setSel, setError, capture }: {
   const [reference, setReference] = useState<string | null>(null);
   const kind = getForgeKind(kindId);
 
-  /** A compact text description of what is already in the scene. Sent
-   *  alongside the render so the model can reason about names and numbers as
-   *  well as pixels — it cannot read a coordinate off an image. */
   const sceneSummary = useCallback(() => JSON.stringify({
-    sky: scene.sky,
-    ambient: scene.ambient,
+    sky: scene.sky, ambient: scene.ambient, fog: scene.fog,
     lights: scene.lights.map(({ name, kind: k, position, color, intensity, range }) => ({ name, kind: k, position, color, intensity, range })),
-    entities: scene.entities.map((e) => ({ name: e.name, position: e.position, scale: e.scale, parts: e.parts.length })),
+    entities: scene.entities.map((e) => ({ name: e.name, position: e.position, rotation: e.rotation, parts: e.parts.length })),
     fx: scene.fx.map((f) => ({ name: f.name, position: f.position, blend: f.blend })),
   }), [scene]);
 
-  /** Merge whatever the model returned into the scene.
-   *
-   *  Counting happens before the update rather than inside it: a state updater
-   *  must be pure, and one that also increments a variable outside itself runs
-   *  twice in development and reports double. */
-  const applyResult = useCallback((data: unknown) => {
-    const d = data as { entities?: unknown[]; lights?: unknown[]; fx?: unknown[]; sky?: string; ambient?: number };
-    const ents = Array.isArray(d.entities) ? d.entities.map(toEntity).filter((e): e is Entity => !!e) : [];
+  /** Merge what came back. Counting happens before the update because a state
+   *  updater must be pure. */
+  const applyResult = useCallback((data: unknown, opts: { replace?: boolean } = {}) => {
+    const d = (data ?? {}) as Record<string, unknown>;
+    let ents = Array.isArray(d.entities) ? d.entities.map(toEntity).filter((e): e is Entity => !!e) : [];
     const lts = Array.isArray(d.lights) ? d.lights.map(toLight).filter((l): l is Light => !!l) : [];
     const ems = Array.isArray(d.fx) ? d.fx.map(toEmitter).filter((e): e is Emitter => !!e) : [];
-    const added = ents.length + lts.length + ems.length;
 
+    // A model that ignores the placement rules produces a heap at the origin
+    // where every object is inside every other one. Rescue it and say so,
+    // rather than handing back a scene that looks like one object.
+    let rescued = 0;
+    if (ents.length > 1) {
+      const positions = ents.map((e) => e.position);
+      rescued = stackedCount(positions);
+      if (rescued > 0) {
+        const spread = spreadOverlapping(positions);
+        ents = ents.map((e, i) => ({ ...e, position: spread[i] }));
+      }
+    }
+
+    const added = ents.length + lts.length + ems.length;
     setScene((s) => ({
       ...s,
-      // A map replaces the world; a single object joins it.
-      entities: ents.length ? (kindId === "map" ? ents : [...s.entities, ...ents]) : s.entities,
+      entities: ents.length ? (opts.replace ? ents : [...s.entities, ...ents]) : s.entities,
       lights: lts.length ? lts : s.lights,
       fx: ems.length ? (kindId === "fx" ? [...s.fx, ...ems] : ems) : s.fx,
       sky: typeof d.sky === "string" && /^#[0-9a-f]{6}$/i.test(d.sky) ? d.sky : s.sky,
-      ambient: typeof d.ambient === "number" ? Math.max(0, Math.min(1, d.ambient)) : s.ambient,
+      ambient: typeof d.ambient !== "undefined" ? Math.max(0, Math.min(1, num(d.ambient, s.ambient))) : s.ambient,
+      fog: typeof d.fog !== "undefined" ? Math.max(0, num(d.fog, s.fog ?? 260)) : s.fog,
     }));
-    if (ents.length) setSel(ents[ents.length - 1].id);
+    if (ents.length) { setSel(ents[ents.length - 1].id); setTimeout(reframe, 80); }
 
-    if (added === 0) setError("The reply parsed, but contained nothing this scene can use. Try again, or pick a stronger model.");
-    else bus.emit("notify", { title: `Added ${added} item${added === 1 ? "" : "s"}`, kind: "success" });
-  }, [kindId, setScene, setSel, setError]);
+    if (added === 0) {
+      setError("The reply parsed but contained nothing this scene can use. Try again, or pick a stronger model.");
+    } else if (rescued > 0) {
+      bus.emit("notify", {
+        title: `Added ${added} item${added === 1 ? "" : "s"}`,
+        body: `${rescued} arrived stacked at the same spot and were spread out — the model ignored the placement rule. Another pass usually fixes it properly.`,
+        kind: "warn",
+      });
+    } else {
+      bus.emit("notify", { title: `Added ${added} item${added === 1 ? "" : "s"}`, kind: "success" });
+    }
+  }, [kindId, setScene, setSel, setError, reframe]);
 
   const build = useCallback(async () => {
     if (!prompt.trim() || busy) return;
     setBusy("build"); setError(null); setCritique(null);
     try {
       const needsScene = kindId === "lighting" || kindId === "fx";
+      const text = `${prompt}${reference ? "\n\nMatch the reference image: its subject, palette, mood and proportions." : ""}${needsScene ? `\n\nCurrent scene:\n${sceneSummary()}` : ""}`;
       const content: Parameters<typeof ask>[0]["messages"][number]["content"] = reference
-        ? [
-            { type: "text", text: `${prompt}\n\nMatch the reference image: its subject, palette, mood and proportions.${needsScene ? `\n\nCurrent scene:\n${sceneSummary()}` : ""}` },
-            { type: "image", dataUrl: reference },
-          ]
-        : `${prompt}${needsScene ? `\n\nCurrent scene:\n${sceneSummary()}` : ""}`;
-
-      const res = await ask({ messages: [{ role: "user", content }], system: kind.brief, maxTokens: 16000 });
-      applyResult(extractJson(res.text));
+        ? [{ type: "text", text }, { type: "image", dataUrl: reference }]
+        : text;
+      // Scenes are long. A map with sixteen detailed entities does not fit in
+      // 16k, and a truncated reply is a wasted call.
+      const res = await ask({ messages: [{ role: "user", content }], system: kind.brief, maxTokens: 32000 });
+      applyResult(extractJson(res.text), { replace: kindId === "map" });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Generation failed.");
     } finally { setBusy(null); }
   }, [prompt, busy, kind, kindId, reference, sceneSummary, setError, applyResult]);
-
-  /* ── Vision ────────────────────────────────────────────────────────────── */
 
   const look = useCallback(async (andFix: boolean) => {
     if (busy) return;
@@ -659,19 +479,21 @@ function ForgePanel({ scene, setScene, setSel, setError, capture }: {
     setBusy(andFix ? "fix" : "look"); setError(null); setCritique(null);
     try {
       const res = await ask({
-        maxTokens: andFix ? 16000 : 700,
+        maxTokens: andFix ? 32000 : 700,
         system: andFix
-          ? `You are an art director with the power to edit the scene. You are shown a render of a 3D scene and its data.
+          ? `You are an art director who can edit the scene. You are shown a render and the scene data.
 
-First, look at the image and find what is actually wrong: objects floating or sunk into the ground, wrong relative scale, a flat or muddy palette, everything at one height, lighting with no direction, an empty composition.
+Look at the IMAGE first and find what is actually wrong: objects floating or sunk into the ground, objects stacked in one place, wrong relative scale, a flat or muddy palette, everything at one height, lighting with no direction, an empty or unbalanced composition.
 
-Then fix it. Return ONE json block containing only what should change:
-{ "sky": "#rrggbb", "ambient": 0..1, "lights": [...], "entities": [...] }
-Include "entities" ONLY if you are rebuilding the layout — doing so replaces every object, so include all of them if you do.
+Then fix it. Return ONE json block with only what should change:
+{ "sky": "#rrggbb", "ambient": 0..1, "fog": number, "lights": [...], "entities": [...] }
+
+Include "entities" ONLY if you are rebuilding the layout — doing so REPLACES every object, so include all of them, each with its own distinct "position" in metres. Do not return entities all at the same position.
+
 Before the json, write two sentences saying what you saw and what you changed.`
           : `You are an art director reviewing a render of a 3D scene. You are shown the image and the scene data.
 
-Say what is actually visible and what is wrong with it. Be specific and concrete — "the roof floats about half a metre above the walls", not "check your alignment". Comment on composition, scale, palette and lighting. Three to five bullets, no preamble, no praise padding. End with the single highest-value change to make next.`,
+Say what is actually visible and what is wrong with it. Be specific and concrete — "the roof floats about half a metre above the walls", not "check your alignment". Cover composition, scale, palette and lighting. Three to five bullets, no preamble, no praise padding. End with the single highest-value change to make next.`,
         messages: [{
           role: "user",
           content: [
@@ -682,7 +504,7 @@ Say what is actually visible and what is wrong with it. Be specific and concrete
       });
       setCritique(res.text.replace(/```json[\s\S]*?```/g, "").trim() || "(no comment)");
       if (andFix) {
-        try { applyResult(extractJson(res.text)); }
+        try { applyResult(extractJson(res.text), { replace: true }); }
         catch { setError("It described changes but returned no usable JSON. The critique is still worth reading."); }
       }
     } catch (e) {
@@ -692,21 +514,25 @@ Say what is actually visible and what is wrong with it. Be specific and concrete
 
   return (
     <div>
-      <div className="os-label mb-1.5">What to make</div>
-      <div className="mb-2 grid grid-cols-3 gap-1">
+      <div className="mb-2 grid grid-cols-3 gap-1.5">
         {FORGE_KINDS.map((k) => (
           <button
             key={k.id}
             onClick={() => setKindId(k.id)}
             title={k.blurb}
-            className={cn("os-card !p-1.5 text-center", kindId === k.id && "!border-[var(--accent)] ring-1 ring-[var(--accent)]")}
+            className={cn(
+              "flex flex-col items-center gap-1 rounded-lg border px-1 py-2 text-[10px] transition",
+              kindId === k.id
+                ? "border-[var(--accent)] bg-[var(--accent)]/14"
+                : "border-[var(--border)] hover:bg-white/5",
+            )}
           >
-            <Icon name={k.icon} size={15} style={{ color: "var(--accent)" }} />
-            <div className="truncate text-[9.5px]">{k.name}</div>
+            <Icon name={k.icon} size={16} style={{ color: kindId === k.id ? "var(--accent)" : "var(--muted)" }} />
+            <span className="truncate">{k.name}</span>
           </button>
         ))}
       </div>
-      <div className="mb-2 text-[10.5px] leading-snug text-[var(--muted)]">{kind.blurb}</div>
+      <p className="mb-2 text-[11px] leading-snug text-[var(--muted)]">{kind.blurb}</p>
 
       <textarea
         value={prompt}
@@ -714,24 +540,24 @@ Say what is actually visible and what is wrong with it. Be specific and concrete
         onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) build(); }}
         rows={3}
         placeholder={kind.placeholder}
-        className="os-input mb-1.5 resize-y !py-1 text-[11.5px]"
+        className="os-input mb-2 resize-y !py-1.5 text-[12px]"
       />
 
       {reference && (
-        <div className="mb-1.5 flex items-center gap-1.5 rounded-[calc(var(--radius)*0.5)] border border-[var(--accent)] p-1">
+        <div className="mb-2 flex items-center gap-2 rounded-lg border border-[var(--accent)] p-1.5">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={reference} alt="Reference" className="h-10 w-10 shrink-0 rounded object-cover" />
-          <span className="min-w-0 flex-1 text-[10px] text-[var(--muted)]">Reference image attached — needs a model that can see.</span>
-          <button className="shrink-0 opacity-60 hover:opacity-100" onClick={() => setReference(null)}><Icon name="close" size={11} /></button>
+          <img src={reference} alt="Reference" className="h-9 w-9 shrink-0 rounded object-cover" />
+          <span className="min-w-0 flex-1 text-[10px] leading-snug text-[var(--muted)]">Reference attached — needs a model that can see.</span>
+          <button className="shrink-0 opacity-60 hover:opacity-100" onClick={() => setReference(null)} aria-label="Remove reference"><Icon name="close" size={11} /></button>
         </div>
       )}
 
-      <div className="mb-2 flex gap-1">
-        <button className="os-btn flex-1 !py-1 text-[11px]" data-variant="primary" onClick={build} disabled={!!busy || !prompt.trim()}>
-          <Icon name="wand" size={11} className="mr-1" />{busy === "build" ? "Building…" : "Build"}
+      <div className="mb-3 flex gap-1.5">
+        <button className="os-btn flex-1 !py-1.5 text-[12px]" data-variant="primary" onClick={build} disabled={!!busy || !prompt.trim()}>
+          <Icon name="wand" size={12} className="mr-1.5" />{busy === "build" ? "Building…" : "Build"}
         </button>
-        <label className="os-btn shrink-0 !py-1 text-[11px]" title="Attach a reference image for a vision model to work from">
-          <Icon name="image" size={11} />
+        <label className="os-btn shrink-0 !py-1.5" title="Attach a reference image for a vision model to work from">
+          <Icon name="image" size={12} />
           <input
             type="file" accept="image/*" hidden
             onChange={(e) => {
@@ -747,18 +573,21 @@ Say what is actually visible and what is wrong with it. Be specific and concrete
         </label>
       </div>
 
-      <div className="mt-3 border-t border-[var(--border)] pt-2">
-        <div className="os-label mb-1">Let it look</div>
-        <p className="mb-1.5 text-[10px] leading-relaxed text-[var(--muted)]">
-          Renders the viewport and sends the picture to your model. A model reading JSON is guessing at what the scene
-          looks like; one looking at the render can see that the roof floats. Needs a model with vision.
+      <div className="rounded-lg border border-[var(--border)] p-2">
+        <div className="mb-1 flex items-center gap-1.5">
+          <Icon name="eye" size={12} style={{ color: "var(--accent)" }} />
+          <span className="text-[12px] font-medium">Let it look</span>
+        </div>
+        <p className="mb-2 text-[10.5px] leading-relaxed text-[var(--muted)]">
+          Renders the viewport and sends the picture to your model. Reading JSON it is guessing at what the scene
+          looks like; looking at the render it can see that the roof floats. Needs a model with vision.
         </p>
-        <div className="flex gap-1">
+        <div className="flex gap-1.5">
           <button className="os-btn flex-1 !py-1 text-[11px]" onClick={() => look(false)} disabled={!!busy || scene.entities.length === 0}>
-            <Icon name="eye" size={11} className="mr-1" />{busy === "look" ? "Looking…" : "Review"}
+            {busy === "look" ? "Looking…" : "Review"}
           </button>
           <button className="os-btn flex-1 !py-1 text-[11px]" onClick={() => look(true)} disabled={!!busy || scene.entities.length === 0}>
-            <Icon name="brush" size={11} className="mr-1" />{busy === "fix" ? "Fixing…" : "Review & fix"}
+            {busy === "fix" ? "Fixing…" : "Review & fix"}
           </button>
         </div>
       </div>
@@ -767,11 +596,11 @@ Say what is actually visible and what is wrong with it. Be specific and concrete
 
       {shot && (critique || busy === "look" || busy === "fix") && (
         /* eslint-disable-next-line @next/next/no-img-element */
-        <img src={shot} alt="What the model was shown" className="mt-2 w-full rounded-[calc(var(--radius)*0.5)] border border-[var(--border)]" />
+        <img src={shot} alt="What the model was shown" className="mt-2 w-full rounded-lg border border-[var(--border)]" />
       )}
 
       {critique && (
-        <div className="os-card mt-2 !p-2">
+        <div className="mt-2 rounded-lg border border-[var(--border)] p-2">
           <div className="os-label mb-1">What it saw</div>
           <Markdown text={critique} className="!text-[11px]" />
         </div>
@@ -781,55 +610,202 @@ Say what is actually visible and what is wrong with it. Be specific and concrete
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
-   Lights and particles
+   SCENE — what is in it, and the selected object
    ══════════════════════════════════════════════════════════════════════════ */
 
-function LightPanel({ scene, setScene }: { scene: Scene; setScene: React.Dispatch<React.SetStateAction<Scene>> }) {
+function ScenePanel({ scene, setScene, sel, setSel, entity, patch, assets, spawn }: {
+  scene: Scene;
+  setScene: React.Dispatch<React.SetStateAction<Scene>>;
+  sel: string | null;
+  setSel: (id: string | null) => void;
+  entity: Entity | null;
+  patch: (id: string, p: Partial<Entity>) => void;
+  assets: { assets: Asset[]; add: (a: Asset) => void };
+  spawn: (id: string) => void;
+}) {
+  return (
+    <div>
+      <div className="os-label mb-1.5">Objects ({scene.entities.length})</div>
+      {scene.entities.length === 0 && (
+        <p className="mb-3 text-[11px] leading-relaxed text-[var(--muted)]">
+          Nothing placed. Describe something on the Make tab, or drop in an asset below.
+        </p>
+      )}
+      <div className="mb-3 space-y-0.5">
+        {scene.entities.map((e) => (
+          <div key={e.id} className={cn("flex items-center gap-1.5 rounded-md px-1.5 py-1", sel === e.id ? "bg-[var(--accent)]/16" : "hover:bg-white/6")}>
+            <button onClick={() => patch(e.id, { visible: !e.visible })} className="opacity-60 hover:opacity-100" title={e.visible ? "Hide" : "Show"}>
+              <Icon name={e.visible ? "eye" : "eyeoff"} size={11} />
+            </button>
+            <button onClick={() => setSel(e.id)} className="min-w-0 flex-1 truncate text-left text-[11.5px]">{e.name}</button>
+            <span className="shrink-0 text-[9px] text-[var(--muted)]" title={`${e.parts.length} parts`}>{e.parts.length}</span>
+            <button
+              className="opacity-40 hover:opacity-100"
+              onClick={() => { setScene((s) => ({ ...s, entities: s.entities.filter((x) => x.id !== e.id) })); if (sel === e.id) setSel(null); }}
+              aria-label={`Delete ${e.name}`}
+            >
+              <Icon name="close" size={11} />
+            </button>
+          </div>
+        ))}
+      </div>
+
+      {entity && (
+        <div className="mb-3 rounded-lg border border-[var(--accent)] p-2">
+          <input
+            value={entity.name}
+            onChange={(e) => patch(entity.id, { name: e.target.value })}
+            className="os-input mb-2 !py-1 text-[12px] font-medium"
+          />
+          {(["position", "rotation", "scale"] as const).map((field) => (
+            <div key={field} className="mb-1.5">
+              <div className="os-label mb-1 !text-[9px]">{field}{field === "rotation" ? " (degrees)" : field === "position" ? " (metres)" : ""}</div>
+              <div className="flex gap-1">
+                {[0, 1, 2].map((axis) => (
+                  <input
+                    key={axis} type="number" step={field === "scale" ? 0.1 : field === "rotation" ? 5 : 0.5}
+                    value={entity[field][axis]}
+                    onChange={(ev) => { const v = [...entity[field]] as Vec3; v[axis] = Number(ev.target.value); patch(entity.id, { [field]: v }); }}
+                    className="os-input !py-1 text-[11px]"
+                    aria-label={`${field} ${"xyz"[axis]}`}
+                  />
+                ))}
+              </div>
+            </div>
+          ))}
+          <div className="mt-2 flex flex-wrap gap-1">
+            <button
+              className="os-btn !px-2 !py-0.5 text-[10.5px]"
+              onClick={() => {
+                const c: Entity = { ...entity, id: uid("ent"), position: [entity.position[0] + 3, entity.position[1], entity.position[2]] };
+                setScene((s) => ({ ...s, entities: [...s.entities, c] }));
+                setSel(c.id);
+              }}
+            >
+              Duplicate
+            </button>
+            <button
+              className="os-btn !px-2 !py-0.5 text-[10.5px]"
+              title="Save this object to Asset Studio so you can reuse it"
+              onClick={() => {
+                assets.add({
+                  id: uid("asset"), name: entity.name, kind: "prop", icon: "assets", tags: ["forge"],
+                  physics: entity.physics ?? { bodyType: "static", collider: "box", mass: 0, friction: 0.6, restitution: 0.1, solid: true },
+                  parts: entity.parts, updatedAt: Date.now(),
+                });
+                bus.emit("notify", { title: `"${entity.name}" saved to Asset Studio`, kind: "success" });
+              }}
+            >
+              Save as asset
+            </button>
+          </div>
+        </div>
+      )}
+
+      <div className="os-label mb-1.5">Asset Studio</div>
+      {assets.assets.length === 0 ? (
+        <p className="text-[11px] text-[var(--muted)]">No assets yet.</p>
+      ) : (
+        <div className="grid grid-cols-3 gap-1.5">
+          {assets.assets.slice(0, 12).map((a) => (
+            <button key={a.id} onClick={() => spawn(a.id)} className="rounded-lg border border-[var(--border)] p-1.5 text-center hover:bg-white/5" title={`Place ${a.name}`}>
+              <Icon name={a.icon || "assets"} size={15} style={{ color: "var(--accent)" }} />
+              <div className="truncate text-[9.5px]">{a.name}</div>
+            </button>
+          ))}
+        </div>
+      )}
+      <button className="os-btn mt-2 w-full !py-1 text-[11px]" onClick={() => bus.emit("app:open", { appId: "assets" })}>
+        Open Asset Studio
+      </button>
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   LOOK — sky, light, atmosphere, particles
+   ══════════════════════════════════════════════════════════════════════════ */
+
+const SKY_PRESETS: Array<{ name: string; sky: string; ambient: number; fog: number; lights: Array<Partial<Light>> }> = [
+  { name: "Noon", sky: "#9cc4e8", ambient: 0.55, fog: 320, lights: [{ color: "#fffaf0", intensity: 1.35, position: [-0.4, 2.4, 0.7] }, { color: "#bcd8ff", intensity: 0.45, position: [0.8, 0.6, -0.8] }] },
+  { name: "Golden", sky: "#e8b97f", ambient: 0.34, fog: 220, lights: [{ color: "#ffca7a", intensity: 1.5, position: [-1.4, 0.65, 0.5] }, { color: "#7fa8e0", intensity: 0.34, position: [1, 0.7, -0.7] }] },
+  { name: "Dusk", sky: "#4a4b74", ambient: 0.26, fog: 170, lights: [{ color: "#ff9d6e", intensity: 0.9, position: [-1.6, 0.35, 0.3] }, { color: "#6f86d8", intensity: 0.5, position: [0.7, 1, -0.9] }] },
+  { name: "Night", sky: "#101a2e", ambient: 0.16, fog: 130, lights: [{ color: "#9fb7ff", intensity: 0.55, position: [-0.5, 1.6, -0.9] }, { color: "#38507f", intensity: 0.25, position: [1, 0.4, 0.8] }] },
+  { name: "Overcast", sky: "#b9c0c8", ambient: 0.68, fog: 240, lights: [{ color: "#e8eef5", intensity: 0.75, position: [-0.3, 2.8, 0.4] }, { color: "#c6cfda", intensity: 0.4, position: [0.6, 1.2, -0.6] }] },
+  { name: "Studio", sky: "#1a1c22", ambient: 0.3, fog: 0, lights: [{ color: "#ffffff", intensity: 1.5, position: [-0.8, 1.4, 1.1] }, { color: "#8fa8d8", intensity: 0.6, position: [1.2, 0.5, -0.9] }] },
+];
+
+function LookPanel({ scene, setScene }: { scene: Scene; setScene: React.Dispatch<React.SetStateAction<Scene>> }) {
   const setLight = (id: string, p: Partial<Light>) =>
     setScene((s) => ({ ...s, lights: s.lights.map((l) => (l.id === id ? { ...l, ...p } : l)) }));
   const setFx = (id: string, p: Partial<Emitter>) =>
     setScene((s) => ({ ...s, fx: s.fx.map((f) => (f.id === id ? { ...f, ...p } : f)) }));
 
-  const totalParticles = useMemo(
+  const live = useMemo(
     () => Math.round(scene.fx.reduce((a, f) => a + (f.on === false ? 0 : f.rate * f.life), 0)),
     [scene.fx],
   );
 
+  const applyPreset = (p: (typeof SKY_PRESETS)[number]) =>
+    setScene((s) => ({
+      ...s,
+      sky: p.sky,
+      ambient: p.ambient,
+      fog: p.fog,
+      // Presets retune the two primary lights and leave anything you added.
+      lights: s.lights.map((l, i) => (p.lights[i] ? { ...l, ...p.lights[i] } as Light : l)),
+    }));
+
   return (
     <div>
-      <div className="mb-2">
-        <label className="mb-1.5 block text-[11px]">
-          Sky
-          <input type="color" value={scene.sky} onChange={(e) => setScene((s) => ({ ...s, sky: e.target.value }))} className="ml-1.5 h-6 w-10 cursor-pointer rounded border border-[var(--border)] bg-transparent align-middle" />
+      <div className="os-label mb-1.5">Time of day</div>
+      <div className="mb-3 grid grid-cols-3 gap-1.5">
+        {SKY_PRESETS.map((p) => (
+          <button
+            key={p.name}
+            onClick={() => applyPreset(p)}
+            className={cn("rounded-lg border p-1 text-[10px] transition hover:-translate-y-0.5", scene.sky === p.sky ? "border-[var(--accent)]" : "border-[var(--border)]")}
+          >
+            <span className="mb-1 block h-6 w-full rounded" style={{ background: `linear-gradient(${p.sky}, color-mix(in srgb, ${p.sky} 45%, #000))` }} />
+            {p.name}
+          </button>
+        ))}
+      </div>
+
+      <div className="mb-3 space-y-1.5">
+        <label className="flex items-center gap-2 text-[11px]">
+          <span className="w-16 shrink-0 text-[var(--muted)]">Sky</span>
+          <input type="color" value={scene.sky} onChange={(e) => setScene((s) => ({ ...s, sky: e.target.value }))} className="h-6 w-10 cursor-pointer rounded border border-[var(--border)] bg-transparent" />
         </label>
         <label className="block text-[11px]">
-          Ambient {scene.ambient.toFixed(2)}
+          <span className="text-[var(--muted)]">Ambient</span> {scene.ambient.toFixed(2)}
           <input type="range" min={0} max={1} step={0.01} value={scene.ambient} onChange={(e) => setScene((s) => ({ ...s, ambient: Number(e.target.value) }))} className="w-full accent-[var(--accent)]" />
         </label>
         <label className="block text-[11px]">
-          Gravity {scene.gravity.toFixed(2)}
-          <input type="range" min={-30} max={0} step={0.1} value={scene.gravity} onChange={(e) => setScene((s) => ({ ...s, gravity: Number(e.target.value) }))} className="w-full accent-[var(--accent)]" />
+          <span className="text-[var(--muted)]">Fog</span> {scene.fog ? `${Math.round(scene.fog)}m` : "off"}
+          <input type="range" min={0} max={600} step={10} value={scene.fog ?? 0} onChange={(e) => setScene((s) => ({ ...s, fog: Number(e.target.value) }))} className="w-full accent-[var(--accent)]" />
         </label>
       </div>
 
-      <div className="os-label mb-1 mt-3 flex items-center justify-between">
+      <div className="os-label mb-1.5 flex items-center justify-between">
         <span>Lights ({scene.lights.length})</span>
         <button
           className="os-btn !px-1.5 !py-0 !text-[10px]"
-          onClick={() => setScene((s) => ({ ...s, lights: [...s.lights, { id: uid("lt"), name: "Point light", kind: "point", position: [0, 3, 0], color: "#ffd9a0", intensity: 1.4, range: 8, on: true }] }))}
+          title="Add a point light"
+          onClick={() => setScene((s) => ({ ...s, lights: [...s.lights, { id: uid("lt"), name: "Point light", kind: "point", position: [0, 3, 0], color: "#ffd9a0", intensity: 1.4, range: 10, on: true }] }))}
         >
           <Icon name="plus" size={10} />
         </button>
       </div>
       {scene.lights.map((l) => (
-        <div key={l.id} className="os-card mb-1.5 !p-2">
+        <div key={l.id} className="mb-1.5 rounded-lg border border-[var(--border)] p-2">
           <div className="mb-1 flex items-center gap-1.5">
-            <button onClick={() => setLight(l.id, { on: l.on === false })} title={l.on === false ? "Enable" : "Disable"}>
+            <button onClick={() => setLight(l.id, { on: l.on === false })} title={l.on === false ? "Enable" : "Disable"} className="opacity-70 hover:opacity-100">
               <Icon name={l.on === false ? "eyeoff" : "eye"} size={11} />
             </button>
             <input value={l.name} onChange={(e) => setLight(l.id, { name: e.target.value })} className="min-w-0 flex-1 bg-transparent text-[11.5px] outline-none" />
             <input type="color" value={l.color} onChange={(e) => setLight(l.id, { color: e.target.value })} className="h-5 w-7 cursor-pointer rounded border border-[var(--border)] bg-transparent" />
-            <button className="opacity-50 hover:opacity-100" onClick={() => setScene((s) => ({ ...s, lights: s.lights.filter((x) => x.id !== l.id) }))}>
+            <button className="opacity-40 hover:opacity-100" onClick={() => setScene((s) => ({ ...s, lights: s.lights.filter((x) => x.id !== l.id) }))} aria-label="Delete light">
               <Icon name="close" size={11} />
             </button>
           </div>
@@ -837,6 +813,7 @@ function LightPanel({ scene, setScene }: { scene: Scene; setScene: React.Dispatc
             {(["directional", "point"] as const).map((k) => (
               <button key={k} onClick={() => setLight(l.id, { kind: k })} className={cn("os-btn !px-1.5 !py-0 !text-[9.5px]", l.kind === k && "!border-[var(--accent)] !bg-[var(--accent)]/16")}>{k}</button>
             ))}
+            <span className="ml-auto self-center text-[9px] text-[var(--muted)]">{l.kind === "directional" ? "direction" : "position"}</span>
           </div>
           <div className="mb-1 flex gap-1">
             {[0, 1, 2].map((axis) => (
@@ -844,6 +821,7 @@ function LightPanel({ scene, setScene }: { scene: Scene; setScene: React.Dispatc
                 key={axis} type="number" step={0.25} value={l.position[axis]}
                 onChange={(e) => { const v = [...l.position] as Vec3; v[axis] = Number(e.target.value); setLight(l.id, { position: v }); }}
                 className="os-input !py-0.5 text-[10px]"
+                aria-label={`light ${"xyz"[axis]}`}
               />
             ))}
           </div>
@@ -854,42 +832,52 @@ function LightPanel({ scene, setScene }: { scene: Scene; setScene: React.Dispatc
           {l.kind === "point" && (
             <label className="block text-[10px]">
               Range {l.range.toFixed(0)}m
-              <input type="range" min={1} max={60} step={1} value={l.range} onChange={(e) => setLight(l.id, { range: Number(e.target.value) })} className="w-full accent-[var(--accent)]" />
+              <input type="range" min={1} max={80} step={1} value={l.range} onChange={(e) => setLight(l.id, { range: Number(e.target.value) })} className="w-full accent-[var(--accent)]" />
             </label>
           )}
         </div>
       ))}
 
-      <div className="os-label mb-1 mt-3 flex items-center justify-between">
+      <div className="os-label mb-1.5 mt-3 flex items-center justify-between">
         <span>Particles ({scene.fx.length})</span>
         <span className="flex items-center gap-1.5">
-          {totalParticles > 0 && <span className="!normal-case">~{totalParticles} live</span>}
+          {live > 0 && <span className="!normal-case">~{live} live</span>}
           <button
             className="os-btn !px-1.5 !py-0 !text-[10px]"
-            title="Add an emitter by hand"
-            onClick={() => setScene((s) => ({ ...s, fx: [...s.fx, { id: uid("fx"), name: "Emitter", position: [0, 0.4, 0], color: "#ffb347", color2: "#5a1d05", rate: 40, life: 1.5, speed: 1.8, spread: 0.3, size: 0.12, gravity: 0.8, blend: "add", on: true }] }))}
+            title="Add an emitter"
+            onClick={() => setScene((s) => ({ ...s, fx: [...s.fx, { id: uid("fx"), name: "Emitter", position: [0, 0.6, 0], color: "#ffb347", color2: "#5a1d05", rate: 40, life: 1.5, speed: 1.8, spread: 0.3, size: 0.12, gravity: 0.8, blend: "add", on: true }] }))}
           >
             <Icon name="plus" size={10} />
           </button>
         </span>
       </div>
       {scene.fx.length === 0 && (
-        <div className="text-[10.5px] leading-relaxed text-[var(--muted)]">
-          None yet. Ask the Forge tab for &ldquo;a crackling campfire&rdquo; and it will layer the emitters for you, or add one by hand and tune it.
-        </div>
+        <p className="text-[10.5px] leading-relaxed text-[var(--muted)]">
+          None yet. Ask the Make tab for &ldquo;a crackling campfire&rdquo; and it will layer the emitters for you.
+        </p>
       )}
       {scene.fx.map((f) => (
-        <div key={f.id} className="os-card mb-1.5 !p-2">
+        <div key={f.id} className="mb-1.5 rounded-lg border border-[var(--border)] p-2">
           <div className="mb-1 flex items-center gap-1.5">
-            <button onClick={() => setFx(f.id, { on: f.on === false })}>
+            <button onClick={() => setFx(f.id, { on: f.on === false })} className="opacity-70 hover:opacity-100">
               <Icon name={f.on === false ? "eyeoff" : "eye"} size={11} />
             </button>
             <input value={f.name} onChange={(e) => setFx(f.id, { name: e.target.value })} className="min-w-0 flex-1 bg-transparent text-[11.5px] outline-none" />
             <input type="color" value={f.color} onChange={(e) => setFx(f.id, { color: e.target.value })} className="h-5 w-6 cursor-pointer rounded border border-[var(--border)] bg-transparent" title="Colour at birth" />
             <input type="color" value={f.color2} onChange={(e) => setFx(f.id, { color2: e.target.value })} className="h-5 w-6 cursor-pointer rounded border border-[var(--border)] bg-transparent" title="Colour at death" />
-            <button className="opacity-50 hover:opacity-100" onClick={() => setScene((s) => ({ ...s, fx: s.fx.filter((x) => x.id !== f.id) }))}>
+            <button className="opacity-40 hover:opacity-100" onClick={() => setScene((s) => ({ ...s, fx: s.fx.filter((x) => x.id !== f.id) }))} aria-label="Delete emitter">
               <Icon name="close" size={11} />
             </button>
+          </div>
+          <div className="mb-1 flex gap-1">
+            {[0, 1, 2].map((axis) => (
+              <input
+                key={axis} type="number" step={0.5} value={f.position[axis]}
+                onChange={(e) => { const v = [...f.position] as Vec3; v[axis] = Number(e.target.value); setFx(f.id, { position: v }); }}
+                className="os-input !py-0.5 text-[10px]"
+                aria-label={`emitter ${"xyz"[axis]}`}
+              />
+            ))}
           </div>
           <div className="grid grid-cols-2 gap-x-2">
             {([["rate", 1, 200, 1], ["life", 0.1, 8, 0.1], ["speed", 0, 16, 0.1], ["size", 0.01, 1, 0.01], ["spread", 0, 1, 0.02], ["gravity", -12, 12, 0.1]] as const).map(([key, lo, hi, step]) => (

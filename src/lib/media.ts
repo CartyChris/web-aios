@@ -15,10 +15,13 @@
    ──────────────────────────────────────────────────────────────────────────── */
 
 export type MediaKind = "image" | "video";
-export type MediaDialect = "openai-image" | "google-image" | "google-veo" | "openai-video";
+export type MediaDialect = "openai-image" | "google-image" | "google-veo" | "openai-video" | "openrouter-image";
 
 export interface MediaModel {
   id: string;
+  /** True when the id is whatever the user typed rather than a catalogue
+   *  entry — OpenRouter adds image models faster than any list can track. */
+  custom?: boolean;
   name: string;
   provider: string;
   kind: MediaKind;
@@ -57,6 +60,30 @@ export const MEDIA_MODELS: MediaModel[] = [
     model: "grok-2-image-1212", approxUsd: 0.07,
     note: "OpenAI-compatible endpoint, so it needs no special handling.",
   },
+  /* OpenRouter routes image generation through the ordinary chat endpoint:
+     ask for the "image" modality and the picture comes back as a data URL in
+     the message. One key, one endpoint, and every image model any vendor
+     ships on OpenRouter becomes available without new code here. */
+  {
+    id: "or-gemini-3-pro-image", name: "Gemini 3 Pro Image", provider: "openrouter", kind: "image", dialect: "openrouter-image",
+    model: "google/gemini-3-pro-image", approxUsd: 0.04,
+    note: "Through OpenRouter. Conversational editing — describe a change and it redraws the same subject.",
+  },
+  {
+    id: "or-gemini-flash-image", name: "Gemini 3.1 Flash Image", provider: "openrouter", kind: "image", dialect: "openrouter-image",
+    model: "google/gemini-3.1-flash-image", approxUsd: 0.02,
+    note: "Through OpenRouter. Fast and cheap; good for iterating on a look.",
+  },
+  {
+    id: "or-gpt-image", name: "GPT-5 Image", provider: "openrouter", kind: "image", dialect: "openrouter-image",
+    model: "openai/gpt-5-image", approxUsd: 0.05,
+    note: "Through OpenRouter. Strongest of these at text inside an image.",
+  },
+  {
+    id: "or-custom", name: "Any OpenRouter model…", provider: "openrouter", kind: "image", dialect: "openrouter-image",
+    model: "", custom: true,
+    note: "Paste any OpenRouter model id that can output images. The picker marks those with an image badge.",
+  },
   {
     id: "veo-3", name: "Veo 3", provider: "google", kind: "video", dialect: "google-veo",
     model: "veo-3.0-generate-preview", approxUsd: 0.4,
@@ -89,6 +116,10 @@ interface GenerateArgs {
   prompt: string;
   size?: string;
   apiKey?: string;
+  /** Overrides the catalogue's wire model — used by the "any model" entry. */
+  model?: string;
+  /** Give the generating model live web access where the provider supports it. */
+  web?: boolean;
   signal?: AbortSignal;
 }
 
@@ -104,8 +135,8 @@ async function post(body: Record<string, unknown>, signal?: AbortSignal): Promis
   return json;
 }
 
-export function generateMedia({ modelId, prompt, size, apiKey, signal }: GenerateArgs): Promise<MediaJob> {
-  return post({ op: "generate", modelId, prompt, size, apiKey }, signal);
+export function generateMedia({ modelId, prompt, size, apiKey, model, web, signal }: GenerateArgs): Promise<MediaJob> {
+  return post({ op: "generate", modelId, prompt, size, apiKey, model, web }, signal);
 }
 
 export function pollMedia(modelId: string, handle: string, apiKey?: string, signal?: AbortSignal): Promise<MediaJob> {

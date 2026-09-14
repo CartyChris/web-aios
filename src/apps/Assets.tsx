@@ -9,7 +9,7 @@ import { uid, download } from "@/lib/format";
 import { Empty, ErrorNote, Tabs, CopyButton, Spinner } from "./_ui";
 import { ask } from "@/lib/useAI";
 import { getForgeKind, extractJson } from "@/lib/forge-schema";
-import { makeProjector, partFaces, lightAt, hexToRgb, rgbCss, type Vec3 } from "@/lib/forge-render";
+import { renderThumbnail, invalidateThumbnail } from "@/lib/forge-thumbnail";
 import { cn } from "@/lib/cn";
 import { Icon } from "@/shell/icons";
 
@@ -150,77 +150,35 @@ export const useAssets = create<AssetState>()(
   ),
 );
 
-/** A small lit render of an asset, drawn from the same code the Forge
- *  viewport uses.
+/** A small render of an asset, drawn by the same engine as the Forge viewport.
  *
- *  A library of identical coloured tiles tells you nothing about what is in
- *  it. This costs one canvas per card and draws once, not per frame. */
-function AssetThumb({ asset, size = 96 }: { asset: Asset; size?: number }) {
-  const ref = useRef<HTMLCanvasElement>(null);
+ *  Rendered offscreen through one shared WebGL context — a canvas per card
+ *  exhausts the browser's context limit at around sixteen and then previews
+ *  start silently disappearing. */
+function AssetThumb({ asset, size = 256 }: { asset: Asset; size?: number }) {
+  const [url, setUrl] = useState<string | null>(null);
 
   useEffect(() => {
-    const canvas = ref.current;
-    if (!canvas) return;
-    const g = canvas.getContext("2d");
-    if (!g) return;
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    const w = canvas.clientWidth || size, h = canvas.clientHeight || size;
-    canvas.width = w * dpr; canvas.height = h * dpr;
-    g.setTransform(dpr, 0, 0, dpr, 0, 0);
-    g.clearRect(0, 0, w, h);
-
-    // Frame the asset by fitting its *projected* bounding box, not its world
-    // extent. A lamp post is four metres tall and twenty centimetres wide;
-    // scaling by the larger dimension renders it as a speck. Projecting first
-    // and fitting the result handles any proportion without a special case.
-    if (!asset.parts.length) return;
-    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity, minZ = Infinity, maxZ = -Infinity;
-    for (const p of asset.parts) {
-      const pos = p.position ?? [0, 0, 0];
-      const sc = p.scale ?? [1, 1, 1];
-      minX = Math.min(minX, pos[0] - sc[0] / 2); maxX = Math.max(maxX, pos[0] + sc[0] / 2);
-      minY = Math.min(minY, pos[1] - sc[1] / 2); maxY = Math.max(maxY, pos[1] + sc[1] / 2);
-      minZ = Math.min(minZ, pos[2] - sc[2] / 2); maxZ = Math.max(maxZ, pos[2] + sc[2] / 2);
-    }
-
-    const view = { yaw: 0.72, pitch: 0.5 };
-    // At zoom 1 with no pan and a zero-sized viewport, the projector returns
-    // raw offsets from the origin — which is exactly what a fit needs.
-    const unit = makeProjector({ ...view, zoom: 1, panX: 0, panY: 0 }, 0, 0);
-    let pminX = Infinity, pmaxX = -Infinity, pminY = Infinity, pmaxY = -Infinity;
-    for (const x of [minX, maxX]) for (const y of [minY, maxY]) for (const z of [minZ, maxZ]) {
-      const q = unit(x, y, z);
-      pminX = Math.min(pminX, q.x); pmaxX = Math.max(pmaxX, q.x);
-      pminY = Math.min(pminY, q.y); pmaxY = Math.max(pmaxY, q.y);
-    }
-    const zoom = Math.min((w * 0.86) / Math.max(0.001, pmaxX - pminX), (h * 0.86) / Math.max(0.001, pmaxY - pminY));
-    const project = makeProjector(
-      { ...view, zoom, panX: -((pminX + pmaxX) / 2) * zoom, panY: -((pminY + pmaxY) / 2) * zoom },
-      w, h,
-    );
-    const lights = [
-      { id: "k", name: "k", kind: "directional" as const, position: [-0.5, 1.3, 0.8] as Vec3, color: "#fff2dd", intensity: 1.1, range: 0 },
-      { id: "f", name: "f", kind: "directional" as const, position: [0.8, 0.4, -0.7] as Vec3, color: "#9cc4ff", intensity: 0.4, range: 0 },
-    ];
-
-    const faces = asset.parts.flatMap((p) => partFaces(p, [0, 0, 0], [1, 1, 1], project));
-    faces.sort((a, b) => a.depth - b.depth);
-    for (const f of faces) {
-      const [lr, lg, lb] = lightAt(f.normal, f.cx, f.cy, f.cz, lights, 0.34);
-      const [br, bg, bb] = hexToRgb(f.color);
-      g.beginPath();
-      g.moveTo(f.pts[0].x, f.pts[0].y);
-      for (let i = 1; i < f.pts.length; i++) g.lineTo(f.pts[i].x, f.pts[i].y);
-      g.closePath();
-      g.fillStyle = rgbCss(br * lr, bg * lg, bb * lb);
-      g.fill();
-      g.strokeStyle = "rgba(0,0,0,0.28)";
-      g.lineWidth = 0.5;
-      g.stroke();
-    }
+    // Rendering is synchronous and touches the GPU, so it is deferred out of
+    // the commit — a library of thirty assets would otherwise block paint.
+    let alive = true;
+    const t = setTimeout(() => {
+      if (!alive) return;
+      invalidateThumbnail(asset.id);
+      setUrl(renderThumbnail({ id: asset.id, updatedAt: asset.updatedAt, parts: asset.parts }, size));
+    }, 0);
+    return () => { alive = false; clearTimeout(t); };
   }, [asset, size]);
 
-  return <canvas ref={ref} className="h-full w-full" aria-label={`${asset.name} preview`} />;
+  if (!url) {
+    return (
+      <div className="grid h-full w-full place-items-center opacity-25">
+        <Icon name={asset.icon || "assets"} size={22} />
+      </div>
+    );
+  }
+  /* eslint-disable-next-line @next/next/no-img-element */
+  return <img src={url} alt={`${asset.name} preview`} className="h-full w-full object-contain" />;
 }
 
 /** Describe an asset; a model composes it. */

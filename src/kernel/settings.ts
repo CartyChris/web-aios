@@ -127,6 +127,12 @@ export interface AISettings {
   /** Hard ceiling so a runaway swarm cannot silently burn a budget. */
   budgetUsd: number;
   spentUsd: number;
+  /** Give the model live web access wherever the provider offers it.
+   *
+   *  On by default: a model answering from a training cutoff about something
+   *  that changed last week is the single most common way an answer is
+   *  confidently wrong, and OpenRouter can hand any model a search tool. */
+  webAccess: boolean;
 }
 
 export const DEFAULT_KEYBINDS: Record<string, string> = {
@@ -224,6 +230,7 @@ const DEFAULTS: Settings = {
     streaming: true,
     budgetUsd: 10,
     spentUsd: 0,
+    webAccess: true,
   },
 };
 

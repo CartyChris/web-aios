@@ -5,6 +5,7 @@
     "moduleResolution": "nodenext",
     "outDir": ".test-build",
     "rootDir": "src/lib",
+    "esModuleInterop": true,
     "strict": true,
     "skipLibCheck": true,
     "noEmit": false,
@@ -20,6 +21,8 @@
     "src/lib/deflate.ts",
     "src/lib/forge-schema.ts",
     "src/lib/forge-render.ts",
-    "src/lib/preview.ts"
+    "src/lib/preview.ts",
+    "src/lib/forge-geometry.ts",
+    "src/lib/forge-scene.ts"
   ]
 }

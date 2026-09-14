@@ -58,6 +58,10 @@ export interface ChatRequest {
   maxTokens?: number;
   stream?: boolean;
   signal?: AbortSignal;
+  /** Give the model live web access. OpenRouter-only — see buildRequest. */
+  web?: boolean;
+  /** Ask for an image back as well as text (OpenRouter image models). */
+  wantImage?: boolean;
 }
 
 export interface ChatChunk {
@@ -113,6 +117,15 @@ export function buildRequest(req: ChatRequest): { url: string; init: RequestInit
     };
   }
 
+  // OpenRouter's web plugin is what gives any model live search, whether or
+  // not the underlying vendor has its own. It is sent only to OpenRouter:
+  // every other OpenAI-compatible host ignores unknown keys in theory and
+  // rejects the request in practice.
+  const isOpenRouter = /openrouter\.ai/i.test(base);
+  const extras: Record<string, unknown> = {};
+  if (isOpenRouter && req.web) extras.plugins = [{ id: "web", max_results: 5 }];
+  if (isOpenRouter && req.wantImage) extras.modalities = ["image", "text"];
+
   return {
     url: `${base}/chat/completions`,
     init: {
@@ -131,6 +144,7 @@ export function buildRequest(req: ChatRequest): { url: string; init: RequestInit
         max_tokens: req.maxTokens ?? 4096,
         stream: req.stream ?? true,
         ...(req.stream ? { stream_options: { include_usage: true } } : {}),
+        ...extras,
       }),
     },
   };
