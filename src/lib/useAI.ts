@@ -3,6 +3,7 @@
 import { useCallback, useRef, useState } from "react";
 import { useSettings } from "@/kernel/settings";
 import { getVoice } from "@/kernel/pets";
+import { bus } from "@/kernel/bus";
 import { getProvider, estimateCost, estimateTokens } from "./providers";
 import { streamChat, messageText, type ChatMessage } from "./ai-transport";
 
@@ -18,6 +19,10 @@ export interface AskOptions {
   /** Force live web access on or off for this one call. Defaults to the
    *  Settings preference. */
   web?: boolean;
+  /** Where this call belongs in a trace. Optional everywhere: an app that
+   *  knows nothing about the harness still gets a span, just an unparented
+   *  one. */
+  trace?: { parentId?: string; runId?: string; role?: string; name?: string };
   /** Set false to send the system prompt exactly as given.
    *
    *  Everything the user talks to should sound like the same assistant, so the
@@ -32,6 +37,39 @@ export interface AskResult {
   costUsd: number;
   ms: number;
 }
+
+/* ────────────────────────────────────────────────────────────────────────────
+   Tracing.
+
+   Every model call in this OS goes through ask(), which is the only reason
+   the runtime layer is affordable: one function to instrument instead of
+   twenty call sites, and no app has to know tracing exists. Observatory has
+   subscribed to the "span" event since it was written and, until now, nothing
+   in the codebase ever published one — a viewer with no producer.
+
+   Two events per call, the same id both times. The first is emitted before the
+   request so a call that hangs or throws is still visible as an open span;
+   Observatory upserts by id, so the second replaces it. A span only written on
+   success would make exactly the runs you need to debug the ones that leave no
+   trace.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+/** Parent for calls made by code that cannot pass `trace` down — a swarm
+ *  worker deep inside a helper, say. The harness sets it around a run. */
+let ambientParent: { parentId?: string; runId?: string } | null = null;
+
+export function withTraceParent<T>(ctx: { parentId?: string; runId?: string } | null, fn: () => T): T {
+  const previous = ambientParent;
+  ambientParent = ctx;
+  try {
+    return fn();
+  } finally {
+    ambientParent = previous;
+  }
+}
+
+let spanSeq = 0;
+const nextSpanId = () => `sp_${(spanSeq++).toString(36)}_${Math.floor(performance.now()).toString(36)}`;
 
 /** Route one chat call to the right place.
  *
@@ -60,6 +98,22 @@ export async function ask(opts: AskOptions): Promise<AskResult> {
   const started = performance.now();
   let text = "";
   let usage = { inputTokens: 0, outputTokens: 0 };
+
+  const spanId = nextSpanId();
+  const spanParent = opts.trace?.parentId ?? ambientParent?.parentId ?? null;
+  const spanName = opts.trace?.name ?? `${providerId} · ${model}`;
+  const emitSpan = (fields: Record<string, unknown>) =>
+    bus.emit("span", {
+      id: spanId,
+      parentId: spanParent,
+      name: spanName,
+      kind: "model",
+      startedAt: Date.now(),
+      runId: opts.trace?.runId ?? ambientParent?.runId,
+      role: opts.trace?.role ?? "llm",
+      ...fields,
+    });
+  emitSpan({});
 
   const baseUrl = s.ai.baseUrls[providerId] || provider.baseUrl;
   const apiKey = s.ai.keys[providerId] ?? "";
@@ -92,9 +146,14 @@ export async function ask(opts: AskOptions): Promise<AskResult> {
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({ error: `${res.status} ${res.statusText}` }));
-      throw new Error(err.error ?? "Request failed.");
+      const message = err.error ?? "Request failed.";
+      emitSpan({ endedAt: Date.now(), error: message });
+      throw new Error(message);
     }
-    if (!res.body) throw new Error("No response stream.");
+    if (!res.body) {
+      emitSpan({ endedAt: Date.now(), error: "No response stream." });
+      throw new Error("No response stream.");
+    }
 
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
@@ -123,8 +182,14 @@ export async function ask(opts: AskOptions): Promise<AskResult> {
   const outTok = usage.outputTokens || estimateTokens(text);
   const costUsd = estimateCost(model, inTok, outTok);
   useSettings.getState().setAI("spentUsd", +(s.ai.spentUsd + costUsd).toFixed(6));
+  const ms = Math.round(performance.now() - started);
 
-  return { text, costUsd, ms: Math.round(performance.now() - started) };
+  // Truncated: a span is a receipt, and a receipt that carries every token of
+  // every reply will exhaust the origin's storage quota and take unrelated
+  // stores down with it.
+  emitSpan({ endedAt: Date.now(), tokensIn: inTok, tokensOut: outTok, costUsd, text: text.slice(0, 4000) });
+
+  return { text, costUsd, ms };
 }
 
 /** Layer the user's chosen voice and their "about you" note over a task

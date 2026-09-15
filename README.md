@@ -48,7 +48,11 @@ A real desktop metaphor in the browser, not a dashboard that looks like one:
   that the roof floats and fix it.
 - **Asset Studio** — describe a prop and a model composes it out of primitives, with a
   real lit thumbnail rendered from its own geometry.
-- **28 apps**, every one code-split and loaded on first open.
+- **A real agent harness** — a ReAct loop built from scratch over three modules: an LLM
+  module, a tool module, and the loop that encapsulates both. Ten tools, nine of them
+  deterministic. Every run has a definition of done that can fail, every destructive tool
+  asks a named person first, and every step leaves a span.
+- **29 apps**, every one code-split and loaded on first open.
 - **An arcade** — Snake, Breakout, 2048 and Minesweeper, keyboard and touch, plus eight
   secrets hidden around the OS.
 - **17 selectable OS profiles** — Web-AIOS, WebOS All-Out, GenAI-OS, NovaOS, Aurora
@@ -216,6 +220,52 @@ Three things fix it, and all three are tested:
 3. If a reply still comes back stacked, it is detected and spread onto a ring, and you
    are told it happened rather than left wondering why your village is one object.
 
+## The harness
+
+An agent is not a model. It is a controlled workflow, and the model is the smallest,
+most swappable part of it. `src/lib/harness/` is the rest, in six layers:
+
+| Layer | The production question it answers | Where |
+| --- | --- | --- |
+| Trigger | What started this, and was it a duplicate? | `types.ts` — every run carries a `TriggerEvent` with a dedupe key |
+| Orchestration | How far may the agent go? | `loop.ts` + `config.ts` — **every limit is a field on `LoopConfig`**, never a literal |
+| Tools | Which numbers are computed, not improvised? | `tools.ts` — 9 of 10 are deterministic |
+| Trusted context | What may it see, and what was withheld? | `context.ts` — a cache-stable prefix and a ledger of everything dropped |
+| Control | Who decides it is done? | `dod.ts` — a definition of done that can fail, and approvals |
+| Runtime | Can I read the receipt of a bad run? | `trace.ts` + span emission in `ask()` |
+
+Everything under `src/lib/harness/` imports nothing from `@/`, touches no `window`, and
+never calls `Date.now()` or `Math.random()` directly — dependencies arrive as parameters.
+That is what makes 204 tests possible against a scripted fake model, with no browser.
+
+**Traces are the receipts.** `ask()` now emits a span for every model call in the whole
+OS — open before the request, closed after, same id, so a call that hangs or throws is
+still visible. Observatory had subscribed to `bus.on("span")` since it was written and
+nothing had ever published one: a viewer with no producer.
+
+**A run that cannot be judged is not allowed to start.** `dodValidate` rejects a
+definition of done with no criterion that can fail, because one that always passes is
+worse than none — it manufactures confidence. And a run that exhausts its step cap
+answers **empty**, never a best guess: a fabricated answer at the limit is how a harness
+reports success it did not achieve.
+
+**The improvement loop closes in one action.** `taskFromFailure` turns a production
+failure plus a signed correction into a golden-set task. An unsigned correction is
+refused — it is an opinion, not a decision.
+
+## The integrity gate
+
+`npm run check` is adapted from GlassBox's `check.py` and catches what a type-checker and
+a linter cannot: wiring that is perfectly well-typed and points at nothing. It verifies
+every `<Icon name>` resolves (the component falls back silently, so a typo is otherwise
+invisible), every `appId` exists in the registry, every lazy import resolves on disk,
+every persist key is unique, no emoji, and no stray `console.log` outside a template
+literal. It found two real bugs on its first run.
+
+`window.__aios` is the external control surface, also from GlassBox — the stores, the
+registry, the bus, `ask`, plus `open`/`snapshot`/`waitFor`. Without it, verifying this OS
+means poking at the DOM and hoping the shape has not changed.
+
 ## How AI Studio actually previews a project
 
 A single HTML file previews itself. Everything else would normally need
@@ -316,7 +366,7 @@ Everything below was run against this code, not assumed.
 
 | Check | Result |
 | --- | --- |
-| `npm test` | **96/96 pass** — transport, vision translation, SSRF guard, DEFLATE, ZIP, the browser bundler, 3D geometry and scene building, model-output coercion, project scaffolds |
+| `npm test` | **204/204 pass** — transport, vision translation, SSRF guard, DEFLATE, ZIP, the browser bundler, 3D geometry and scene building, model-output coercion, project scaffolds |
 | `tsc --noEmit` | clean |
 | `next build` (from a deleted `.next`) | clean, zero warnings |
 | `eslint .` | **0 errors, 0 warnings** |

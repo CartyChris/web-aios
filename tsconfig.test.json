@@ -23,6 +23,21 @@
     "src/lib/forge-render.ts",
     "src/lib/preview.ts",
     "src/lib/forge-geometry.ts",
-    "src/lib/forge-scene.ts"
+    "src/lib/forge-scene.ts",
+    "src/lib/harness/types.ts",
+    "src/lib/harness/config.ts",
+    "src/lib/harness/protocol.ts",
+    "src/lib/harness/exemplars.ts",
+    "src/lib/harness/loop.ts",
+    "src/lib/harness/tools.ts",
+    "src/lib/harness/fixtures.ts",
+    "src/lib/harness/dod.ts",
+    "src/lib/harness/bid.ts",
+    "src/lib/harness/trace.ts",
+    "src/lib/harness/context.ts",
+    "src/lib/harness/resilience.ts",
+    "src/lib/harness/evals.ts",
+    "src/lib/harness/tasks.ts",
+    "src/lib/harness/models.ts"
   ]
 }

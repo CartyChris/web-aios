@@ -278,6 +278,17 @@ export const APPS: AppManifest[] = [
     accent: "#a78bfa",
   },
   {
+    id: "harness",
+    name: "Harness",
+    icon: "harness",
+    category: "ai",
+    description: "A ReAct agent loop with deterministic tools, a definition of done, approvals and a trace of every step.",
+    component: lazy(() => import("@/apps/Harness")),
+    defaultSize: { w: 1040, h: 720 },
+    permissions: ["ai", "storage", "files"],
+    accent: "#4ade80",
+  },
+  {
     id: "observatory",
     name: "Observatory",
     icon: "observatory",

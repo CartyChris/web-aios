@@ -261,7 +261,7 @@ was exported with baked into \`:root\` — override those to restyle it.
                 <button className="os-btn !px-2 !py-0.5 text-[10.5px]" onClick={() => exportWidget(w)}>Export</button>
                 <button
                   className="os-btn !px-2 !py-0.5 text-[10.5px]"
-                  onClick={() => { vfs.write(`/widgets/${w.name.replace(/[^\w -]/g, "")}.html`, widgetStandalone(w, resolveTokens(settings)), { appId: "widgets" }); bus.emit("notify", { title: "Saved to Files", kind: "success" }); }}
+                  onClick={() => { vfs.write(`/widgets/${w.name.replace(/[^\w -]/g, "")}.html`, widgetStandalone(w, resolveTokens(settings)), { appId: "personalize" }); bus.emit("notify", { title: "Saved to Files", kind: "success" }); }}
                 >
                   Save
                 </button>

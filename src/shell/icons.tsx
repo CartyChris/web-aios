@@ -35,6 +35,8 @@ export const ICONS: Record<string, React.ReactNode> = {
   live: <><rect x="2.8" y="5.4" width="18.4" height="13.2" rx="2" /><P d="M6.4 12c2-2.6 3.8-3.9 5.6-3.9s3.6 1.3 5.6 3.9c-2 2.6-3.8 3.9-5.6 3.9S8.4 14.6 6.4 12z" /><circle cx="12" cy="12" r="1.5" /></>,
   // Arcade: a cabinet with a joystick.
   arcade: <><rect x="4.4" y="3.4" width="15.2" height="17.2" rx="2.2" /><rect x="7" y="6" width="10" height="6" rx="1" /><circle cx="9.4" cy="16.4" r="1.3" /><P d="M13.6 17.4h3.2M15.2 15.8v3.2" /></>,
+  // Harness: a bounded frame around a core, with the four tethers that hold it.
+  harness: <><rect x="3.4" y="3.4" width="17.2" height="17.2" rx="3" /><circle cx="12" cy="12" r="3.2" /><P d="M12 3.4v5.4M12 15.2v5.4M3.4 12h5.4M15.2 12h5.4" /></>,
   // Pets: a paw print.
   pet: <><ellipse cx="7.4" cy="9.2" rx="1.9" ry="2.5" /><ellipse cx="12" cy="7.4" rx="1.9" ry="2.6" /><ellipse cx="16.6" cy="9.2" rx="1.9" ry="2.5" /><P d="M12 12.4c3 0 5 2 5 4.3 0 2-1.8 3-3.4 2.4a4.6 4.6 0 0 0-3.2 0C8.8 19.7 7 18.7 7 16.7c0-2.3 2-4.3 5-4.3z" /></>,
   // Wand: generate.

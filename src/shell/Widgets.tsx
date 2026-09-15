@@ -238,7 +238,7 @@ function StickyWidget() {
   return (
     <textarea
       value={text}
-      onChange={(e) => { setText(e.target.value); vfs.write(path, e.target.value, { appId: "widget" }); }}
+      onChange={(e) => { setText(e.target.value); vfs.write(path, e.target.value, { appId: "personalize" }); }}
       placeholder="Sticky note…"
       className="h-full w-full resize-none bg-transparent text-[12px] outline-none"
     />

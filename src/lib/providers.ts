@@ -152,3 +152,17 @@ export function estimateCost(model: string, inTok: number, outTok: number): numb
 /** Cheap token estimate — ~4 chars/token is close enough for a budget meter and
  *  costs nothing, unlike shipping a tokenizer to the browser. */
 export const estimateTokens = (text: string): number => Math.ceil(text.length / 4);
+
+/** A model to verify with that is not the model that produced the work.
+ *
+ *  A verifier running the producer's own weights agrees with it far more often
+ *  than an independent one does, and that agreement is indistinguishable from
+ *  success. Where the provider offers an alternative, take it.
+ *
+ *  Returns `shared: true` when it could not find one, so a caller can say so
+ *  rather than implying an independence it does not have. */
+export function pickJudgeModel(providerId: string, producerModel: string): { model: string; shared: boolean } {
+  const provider = getProvider(providerId);
+  const alt = provider?.models.find((m) => m !== producerModel);
+  return alt ? { model: alt, shared: false } : { model: producerModel, shared: true };
+}

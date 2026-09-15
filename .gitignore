@@ -9,9 +9,11 @@ next-env.d.ts
 .test-build
 tsconfig.tsbuildinfo
 
-# iCloud sync conflict duplicates
-*\ 2.*
-*\ 2
+# iCloud sync conflict duplicates. iCloud numbers them upward, so the pattern
+# has to cover more than "2" — a stray "CURRENT 3" inside .next/ once took the
+# dev server down with an opaque "Failed to open database".
+*\ [0-9]
+*\ [0-9].*
 .env*
 
 # Rust build output. public/deflate.wasm is the committed artifact, so a clone

@@ -4,6 +4,7 @@ import { useCallback, useRef, useState } from "react";
 import { useVFS } from "@/kernel/vfs";
 import { bus } from "@/kernel/bus";
 import { ask } from "@/lib/useAI";
+import { pickJudgeModel } from "@/lib/providers";
 import { useSettings } from "@/kernel/settings";
 import type { AppProps } from "@/kernel/types";
 import { uid, download } from "@/lib/format";
@@ -82,9 +83,19 @@ export default function Loop({}: AppProps) {
         cost += action.costUsd;
 
         // ── VERIFY ──
-        // Deliberately given the objective and the result, but NOT the plan or
-        // the reasoning — a verifier shown the argument for something tends to
-        // agree with it.
+        // Independence here is three separate things, and the loop is only as
+        // honest as the weakest of them:
+        //   what it sees  — the objective and the result, never the plan or the
+        //                   reasoning; a verifier shown the argument for
+        //                   something tends to agree with it.
+        //   how it speaks — persona: false. The OS voice ("be terse", "be
+        //                   deadpan") is a preference for talking to the user,
+        //                   and letting it reach a verifier changes a
+        //                   correctness judgement for cosmetic reasons.
+        //   whose weights — a different model where the provider has one. A
+        //                   model grading its own output agrees with itself.
+        const ai = useSettings.getState().ai;
+        const judge = pickJudgeModel(ai.provider, ai.model);
         setPhase(`Iteration ${n} · verifying`);
         setLive("");
         const verify = await ask({
@@ -95,6 +106,8 @@ Return ONLY JSON: {"pass": true|false, "reason": "<one or two sentences>"}
 
 Pass only if the result actually achieves the objective. A plausible-sounding description of work is not work. Incomplete, hedged, or placeholder output fails. Say specifically what is missing.`,
           maxTokens: 400, signal: ctrl.signal,
+          model: judge.model,
+          persona: false,
         });
         cost += verify.costUsd;
 
@@ -106,6 +119,11 @@ Pass only if the result actually achieves the objective. A plausible-sounding de
           verdict = { pass: Boolean(parsed.pass), reason: String(parsed.reason ?? "") };
         } catch {
           verdict = { pass: false, reason: "Verifier did not return parseable JSON — treating as unverified rather than assuming success." };
+        }
+        // Say so when the check is weaker than it looks, rather than letting a
+        // same-model pass read like an independent one.
+        if (judge.shared && verdict.pass) {
+          verdict = { ...verdict, reason: `${verdict.reason} (Verified by the same model that produced it — ${ai.provider} offers no alternative, so this is a weaker check than an independent one.)` };
         }
 
         // ── LEARN ──

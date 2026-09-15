@@ -2,15 +2,16 @@
   "name": "web-aios",
   "version": "1.0.0",
   "private": true,
-  "description": "Web-AIOS — a fully customizable AI/Agent desktop operating system for the web.",
+  "description": "Web-AIOS \u2014 a fully customizable AI/Agent desktop operating system for the web.",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "test": "tsc -p tsconfig.test.json && node --test 'tests/*.test.mjs'",
-    "pretest": "rm -rf .test-build"
+    "test": "node scripts/check.mjs && tsc -p tsconfig.test.json && node --test 'tests/*.test.mjs'",
+    "pretest": "rm -rf .test-build",
+    "check": "node scripts/check.mjs"
   },
   "dependencies": {
     "clsx": "2.1.1",

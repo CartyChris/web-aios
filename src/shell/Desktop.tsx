@@ -21,6 +21,7 @@ import { PetLayer } from "./pets";
 import { DesktopIcons } from "./DesktopIcons";
 import { PinPicker } from "./PinPicker";
 import { EGGS, useEggs, watchSequences } from "@/lib/easter";
+import { installAiosApi } from "@/lib/aios-api";
 
 export function Desktop() {
   const hydrated = useHydrated();
@@ -43,6 +44,11 @@ export function Desktop() {
     root.dataset.motion = settings.motion ? "1" : "0";
     root.style.colorScheme = ["sakura", "paper", "daylight", "linen"].includes(settings.themeId) ? "light" : "dark";
   }, [hydrated, settings]);
+
+  // ── External control surface ──────────────────────────────────────────────
+  // Installed as early as the shell mounts so automation, the console and the
+  // harness all have the same way in. See lib/aios-api.ts for why this exists.
+  useEffect(() => { installAiosApi(); }, []);
 
   // ── Startup apps ──────────────────────────────────────────────────────────
   useEffect(() => {
