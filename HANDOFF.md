@@ -4,58 +4,64 @@ Paste this whole file as your first message in a fresh Claude Code session to pi
 where the last one left off without breaking anything.
 
 Every number and claim below was verified against the code at commit `a98e7e7`. The counts
-in §1 and the gate output in §5 were re-run on **2026-09-16**; the test count was last
-observed green on **2026-09-15** and could not be re-run today for the reason in §0.
-If a later handoff exists, trust file contents over any of them.
+in §1, the gate output in §5 and the full test suite (**204 pass, 0 fail**) were all re-run
+on **2026-09-16**. If a later handoff exists, trust file contents over any of them.
 
 ---
 
-## 0. READ THIS FIRST — the machine is currently unable to build
+## 0. If a build seems to hang, read this before debugging your change
 
-As of 2026-09-16 this working copy **cannot run `tsc`, `next build`, or `npm test`**. They
-hang indefinitely. The code is fine; the machine is not.
+This working copy lives in an **iCloud-synced `Desktop` folder**. macOS evicts synced files
+it thinks are cold, replacing their contents with stubs. When a build then touches a few
+hundred evicted files, every first read blocks on an iCloud fetch — so `tsc`, `next build`
+and `npm test` can appear to hang for minutes, then work perfectly on the next run once the
+files are rehydrated.
 
-**Diagnosis (measured, not guessed):**
+**That is the whole failure mode. It is transient, and it is not your change.**
+
+Measured on 2026-09-16, in this order:
 
 ```bash
 ls -lO node_modules/typescript/lib/tsc.js
-# -rw-r--r--@ 1 chriscarty staff  -  267 Sep 14 11:23   <-- size column is "-"
-df -h .
-# /dev/disk3s5  460Gi  412Gi  14Gi  97%              <-- 97% full
+# -rw-r--r--@ 1 chriscarty staff  -  267        <-- size column "-" = dataless stub
+du -sh node_modules
+# 10M                                           <-- should be ~500MB+; stubs allocate nothing
+
+npx tsc -p tsconfig.test.json                   # 1st attempt: hung past 150s, killed
+npx tsc -p tsconfig.test.json                   # after rehydration: completed, clean
+node --test 'tests/*.test.mjs'                  # 204 tests, 204 pass, 0 fail
+du -sh node_modules
+# 16M                                           <-- partially rehydrated
 ```
 
-A `-` in the size column means the file is **dataless**: iCloud has evicted its contents
-and left a stub. `node_modules/typescript/lib/typescript.js` and
-`node_modules/next/dist/bin/next` report `compressed,dataless` too — the toolchain itself
-is gone. Any process that reads them blocks waiting on an iCloud fetch that never
-completes, because the disk is 97% full and macOS "Optimise Mac Storage" is evicting
-faster than it can rehydrate.
+**How to recognise it:** a command that normally takes two seconds returns nothing for
+minutes, with no error. Confirm with `ls -lO node_modules/typescript/lib/tsc.js` — a `-`
+in the size column, or `dataless` in the flags, means the file is a stub.
 
-**The fix, in order of preference:**
+**What to do:** run it again. The second attempt usually succeeds. To force it up front:
 
-1. **Move the project out of iCloud.** The Desktop and Documents folders are synced by
-   default. This is the permanent fix and the README has recommended it for months:
-   ```bash
-   mv "/Users/chriscarty/Desktop/All Finished Apps/Web-AIOS" ~/Developer/Web-AIOS
-   cd ~/Developer/Web-AIOS && rm -rf node_modules .next && npm install
-   ```
-2. **Free disk space** — you need well more than 14 GB headroom for a Next.js + three.js
-   build. Then turn **off** System Settings → Apple ID → iCloud → iCloud Drive →
-   *Optimise Mac Storage*, which is what authorises the eviction.
-3. **If you must stay put**, rehydrate and rebuild dependencies:
-   ```bash
-   rm -rf node_modules .next .test-build && npm ci
-   ```
+```bash
+find node_modules -name "*.js" -print0 | xargs -0 -P8 cat > /dev/null 2>&1   # warm the cache
+```
 
-**Do not start debugging a hang as if it were your change.** The signature is: a command
-that used to take 2 seconds now never returns, and `ls -lO` on anything under
-`node_modules` shows `-` or `dataless`.
+**The permanent fix** is to move the project off iCloud. The README has recommended this
+for months and this is the second distinct failure it has caused (the other is in §9):
 
-Everything below was true at commit `a98e7e7`, which built and tested clean.
+```bash
+mv "/Users/chriscarty/Desktop/All Finished Apps/Web-AIOS" ~/Developer/Web-AIOS
+cd ~/Developer/Web-AIOS && rm -rf node_modules .next && npm install
+```
+
+**On disk space:** the local SSD is at **97%** — `df` reports 15 GB free of 494 GB, and
+System Settings → General → Storage agrees (475.52 GB of 494.38 GB used). That is separate
+from iCloud storage (133 of 200 GB, which is fine — the cloud is not the constraint, the
+local disk is). Low free space makes macOS evict more aggressively, so it worsens the
+above, but eviction happens on an iCloud-synced folder regardless. This project is only
+18 MB itself; the space is going elsewhere.
 
 ---
 
-## 0b. First five minutes — once the machine is healthy
+## 0b. First five minutes — do this before planning anything
 
 ```bash
 cd "/Users/chriscarty/Desktop/All Finished Apps/Web-AIOS"
@@ -66,8 +72,8 @@ npx eslint .                # must be silent — the baseline is ZERO
 npx next dev -p 3131        # then open http://localhost:3131
 ```
 
-If `npm test` hangs for more than ~90s, it is the iCloud problem in §0 — not your change.
-Check `ls -lO node_modules/typescript/lib/tsc.js` before doing anything else.
+If `npm test` hangs for more than ~90s, see §0 — run it again before assuming anything is
+broken.
 
 Then read §1 (what this is), §3 (the harness — the newest and least obvious part), and
 §8 (what is NOT done). Everything else is reference; grep it when you need it.
@@ -88,7 +94,7 @@ installable as a PWA.
 | Local path | `/Users/chriscarty/Desktop/All Finished Apps/Web-AIOS` |
 | Stack | Next.js 16.3.5 (App Router, Turbopack) · React 19.3 · TypeScript 5.9 strict · Tailwind v4 over CSS custom properties · zustand 5 + persist |
 | Runtime deps | `clsx lucide-react next react react-dom tailwind-merge three zod zustand` |
-| Tests | 13 files, **204 tests** (green at `a98e7e7` on 2026-09-15), `node:test` only — no framework |
+| Tests | 13 files, **204 tests**, all passing, `node:test` only — no framework |
 
 There is no backend. Everything is in the browser except four route handlers
 (`/api/ai/chat`, `/api/ai/models`, `/api/ai/media`, `/api/mcp`, `/api/proxy`), which exist
@@ -400,10 +406,10 @@ to the original plan. Spec sections 3.12-3.15 (`harness-mcp.ts`, `/api/harness/m
 
 ## 9. Environment hazards that will waste your time
 
-**This is the single biggest environmental risk and it has already caused two distinct
-failures.** See §0 for the currently-active one (dataless `node_modules`, builds hang).
+**This has caused two distinct failures.** §0 covers the first (dataless `node_modules`,
+builds stall on first run).
 
-The second failure mode: iCloud drops **conflict duplicates** (`CURRENT 3`,
+The second: iCloud drops **conflict duplicates** (`CURRENT 3`,
 `route.js 2.map`) into `.next/`, which kills the dev server with an opaque
 *"Failed to open database"*. Fix:
 
