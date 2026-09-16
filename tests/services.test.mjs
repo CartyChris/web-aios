@@ -24,7 +24,7 @@ const get = (id) => {
 /* ── catalogue integrity ─────────────────────────────────────────────────── */
 
 test("the catalogue is non-empty and every id is unique", () => {
-  assert.ok(SERVICES.length >= 20, `only ${SERVICES.length} services registered`);
+  assert.ok(SERVICES.length >= 40, `only ${SERVICES.length} services registered`);
   const ids = SERVICES.map((s) => s.id);
   assert.equal(new Set(ids).size, ids.length, "duplicate service id");
 });
@@ -86,9 +86,15 @@ test("servicesByCategory partitions the catalogue without loss", () => {
 test("every direct-reach service asks for a CORS-safe origin or a CORS-enabled host", () => {
   // A service marked "direct" that the browser cannot actually call fails with
   // an opaque network error and no way to tell it from the host being down.
+  // Every id here had its real access-control-allow-origin header read with a
+  // preflight-shaped request before it was added. Guessing produces a service
+  // that fails with an opaque network error indistinguishable from an outage.
   const CORS_OK = [
     "wikipedia", "wikidata", "openlibrary", "crossref", "geocode", "weather",
     "earthquakes", "air_quality", "sunrise", "fx", "hackernews", "datamuse",
+    "openalex", "species", "stackexchange", "pypi", "depsdev", "onthisday",
+    "pageviews", "weather_history", "fx_history", "federalregister", "postcode",
+    "commons",
   ];
   for (const s of SERVICES) {
     if (s.reach === "direct") {
@@ -395,16 +401,27 @@ test("crypto reads a price and its 24h change without knowing the currency in ad
   assert.match(r.rows[0].detail, /-1\.23% over 24h/);
 });
 
-test("countries summarises capital, area, languages and currency", () => {
-  const body = JSON.stringify([{
-    name: { common: "Iceland" }, capital: ["Reykjavík"], population: 366425, area: 103000,
-    region: "Europe", languages: { isl: "Icelandic" }, currencies: { ISK: { name: "Icelandic króna" } }, cca3: "ISL",
-  }]);
+test("countries reads capital, region and income group from the World Bank pair", () => {
+  const body = JSON.stringify([
+    { page: 1, total: 1 },
+    [{ id: "ISL", iso2Code: "IS", name: "Iceland", region: { value: "Europe & Central Asia" }, incomeLevel: { value: "High income" }, capitalCity: "Reykjavik", longitude: "-21.8952", latitude: "64.1353" }],
+  ]);
   const r = get("countries").parse(body);
-  assert.match(r.rows[0].detail, /Capital Reykjavík/);
-  assert.match(r.rows[0].detail, /103,000 km²/);
-  assert.match(r.rows[0].detail, /Currency: ISK/);
-  assert.equal(r.rows[0].meta, "pop. 366,425");
+  assert.match(r.rows[0].detail, /Capital Reykjavik/);
+  assert.match(r.rows[0].detail, /High income economy/);
+  assert.match(r.rows[0].detail, /ISO IS\/ISL/);
+  assert.equal(r.rows[0].meta, "64.135, -21.895");
+});
+
+test("countries refuses the error envelope, which is an object rather than a pair", () => {
+  assert.throws(() => get("countries").parse(JSON.stringify({ message: [{ id: "120", value: "Invalid value" }] })), ServiceParseError);
+});
+
+test("countries drops an aggregate row that is not a country", () => {
+  // A World Bank "country" lookup can return a region aggregate with no
+  // capital and no income group; listing it makes a single lookup look wrong.
+  const body = JSON.stringify([{ page: 1 }, [{ id: "ECS", name: "Europe & Central Asia", region: { value: "" }, incomeLevel: { value: "" }, capitalCity: "", iso2Code: "" }]]);
+  assert.equal(get("countries").parse(body).empty, true);
 });
 
 test("npm builds a package page link from the returned name", () => {
@@ -444,4 +461,274 @@ test("every parser refuses a body that is not its format at all", () => {
   for (const s of SERVICES) {
     assert.throws(() => s.parse("<html><head><title>502</title></head></html>"), ServiceParseError, `${s.id} accepted an HTML error page`);
   }
+});
+
+/* ── round two: parsers, against the shapes each API really returned ─────── */
+
+test("openalex reads citation counts and prefers the DOI as the link", () => {
+  const body = JSON.stringify({
+    meta: { count: 1283846 },
+    results: [{ id: "https://openalex.org/W3138516171", title: "Swin Transformer", publication_year: 2021, cited_by_count: 32667, doi: "https://doi.org/10.1109/iccv48922.2021.00986" }],
+  });
+  const r = get("openalex").parse(body);
+  assert.equal(r.rows[0].meta, "2021");
+  assert.equal(r.rows[0].url, "https://doi.org/10.1109/iccv48922.2021.00986");
+  assert.match(r.rows[0].detail, /Cited 32,667 times/);
+});
+
+test("openalex falls back to the work id when a record has no DOI", () => {
+  const r = get("openalex").parse(JSON.stringify({ results: [{ id: "https://openalex.org/W1", title: "x", doi: null }] }));
+  assert.equal(r.rows[0].url, "https://openalex.org/W1");
+});
+
+test("openfda distinguishes its NOT_FOUND envelope from a broken payload", () => {
+  const miss = get("openfda").parse(JSON.stringify({ error: { code: "NOT_FOUND", message: "No matches found!" } }));
+  assert.equal(miss.empty, true);
+  assert.throws(() => get("openfda").parse(JSON.stringify({ meta: {} })), ServiceParseError);
+});
+
+test("openfda reads the brand name and the indications section", () => {
+  const body = JSON.stringify({
+    results: [{ openfda: { brand_name: ["ADVIL"] }, indications_and_usage: ["For the temporary relief of minor aches."], effective_time: ["20240115"] }],
+  });
+  const r = get("openfda").parse(body);
+  assert.equal(r.rows[0].title, "ADVIL");
+  assert.equal(r.rows[0].meta, "2024");
+  assert.match(r.rows[0].detail, /temporary relief/);
+});
+
+test("species renders the taxonomy as a lineage", () => {
+  const body = JSON.stringify({
+    results: [{ key: 2481139, scientificName: "Fratercula arctica (Linnaeus, 1758)", kingdom: "Animalia", phylum: "Chordata", class: "Aves", order: "Charadriiformes", family: "Alcidae", rank: "SPECIES" }],
+  });
+  const r = get("species").parse(body);
+  assert.equal(r.rows[0].meta, "SPECIES");
+  assert.match(r.rows[0].detail, /Animalia > Chordata > Aves > Charadriiformes > Alcidae/);
+  assert.equal(r.rows[0].url, "https://www.gbif.org/species/2481139");
+});
+
+test("stackexchange decodes HTML entities in titles", () => {
+  // Titles arrive escaped; showing &quot; to the reader is a visible bug.
+  const body = JSON.stringify({
+    items: [{ title: "Why does &quot;useState&quot; not update?", score: 42, answer_count: 3, is_answered: true, tags: ["reactjs", "hooks"], link: "https://stackoverflow.com/q/1" }],
+  });
+  const r = get("stackexchange").parse(body);
+  assert.equal(r.rows[0].title, 'Why does "useState" not update?');
+  assert.equal(r.rows[0].meta, "42 score");
+  assert.match(r.rows[0].detail, /3 answers, accepted/);
+});
+
+test("stackexchange reports an unanswered question as such — the negative control", () => {
+  const r = get("stackexchange").parse(JSON.stringify({ items: [{ title: "x", score: 0, answer_count: 0, is_answered: false, tags: [], link: "u" }] }));
+  assert.match(r.rows[0].detail, /0 answers, none accepted/);
+});
+
+test("stackexchange surfaces a throttle envelope instead of reporting no results", () => {
+  assert.throws(
+    () => get("stackexchange").parse(JSON.stringify({ error_id: 502, error_message: "Violation of backoff parameter", error_name: "throttle_violation" })),
+    (e) => { assert.match(e.message, /backoff/); return true; },
+  );
+});
+
+test("pypi counts releases and refuses a payload with no info object", () => {
+  const body = JSON.stringify({
+    info: { name: "requests", version: "2.32.3", summary: "Python HTTP for Humans.", license: "Apache-2.0", requires_python: ">=3.8", project_url: "https://pypi.org/project/requests/" },
+    releases: { "2.32.2": [], "2.32.3": [] },
+  });
+  const r = get("pypi").parse(body);
+  assert.equal(r.rows[0].meta, "2.32.3");
+  assert.match(r.rows[0].detail, /2 releases/);
+  assert.match(r.rows[0].detail, /Licence: Apache-2\.0/);
+  assert.throws(() => get("pypi").parse(JSON.stringify({ message: "Not Found" })), ServiceParseError);
+});
+
+test("crates prefers the max stable version over the newest one", () => {
+  const body = JSON.stringify({ crates: [{ name: "serde", description: "A framework", downloads: 1401093108, max_stable_version: "1.0.229", newest_version: "1.0.230-beta" }] });
+  const r = get("crates").parse(body);
+  assert.match(r.rows[0].meta, /^1\.0\.229/);
+  assert.match(r.rows[0].meta, /1,401,093,108 downloads/);
+  assert.equal(r.rows[0].url, "https://crates.io/crates/serde");
+});
+
+test("depsdev lists newest versions first and flags deprecated ones", () => {
+  const body = JSON.stringify({
+    packageKey: { system: "NPM", name: "zustand" },
+    versions: [
+      { versionKey: { version: "0.0.1" }, publishedAt: "2019-04-09T13:47:37Z", isDefault: false, isDeprecated: true, deprecatedReason: "ancient" },
+      { versionKey: { version: "5.0.15" }, publishedAt: "2026-08-01T00:00:00Z", isDefault: true, isDeprecated: false, deprecatedReason: "" },
+    ],
+  });
+  const r = get("depsdev").parse(body);
+  assert.equal(r.rows[0].title, "5.0.15", "the newest version must come first");
+  assert.equal(r.rows[0].meta, "default");
+  assert.equal(r.rows[1].meta, "deprecated");
+  assert.match(r.rows[1].detail, /DEPRECATED: ancient/);
+  assert.match(r.summary, /2 published versions/);
+});
+
+test("cve pulls the English description and the CVSS v3.1 base score", () => {
+  const body = JSON.stringify({
+    totalResults: 113,
+    vulnerabilities: [{
+      cve: {
+        id: "CVE-2017-16877",
+        descriptions: [{ lang: "es", value: "hola" }, { lang: "en", value: "Path traversal in Next.js." }],
+        metrics: { cvssMetricV31: [{ cvssData: { baseScore: 7.5, baseSeverity: "HIGH" } }] },
+      },
+    }],
+  });
+  const r = get("cve").parse(body);
+  assert.equal(r.rows[0].title, "CVE-2017-16877");
+  assert.equal(r.rows[0].meta, "CVSS 7.5 HIGH");
+  assert.equal(r.rows[0].detail, "Path traversal in Next.js.");
+  assert.match(r.summary, /113 matching CVEs/);
+});
+
+test("cve survives a record with no CVSS metrics rather than dropping it", () => {
+  // A CVE that has not been scored yet is still a CVE you need to see.
+  const r = get("cve").parse(JSON.stringify({ totalResults: 1, vulnerabilities: [{ cve: { id: "CVE-2026-1", descriptions: [{ lang: "en", value: "x" }] } }] }));
+  assert.equal(r.rows.length, 1);
+  assert.equal(r.rows[0].meta, undefined);
+});
+
+test("dockerhub marks an official image and formats pull counts", () => {
+  const body = JSON.stringify({ results: [{ repo_name: "postgres", short_description: "The PostgreSQL system.", star_count: 15012, pull_count: 11482896502, is_official: true }] });
+  const r = get("dockerhub").parse(body);
+  assert.match(r.rows[0].detail, /OFFICIAL IMAGE/);
+  assert.match(r.rows[0].detail, /11,482,896,502 pulls/);
+  assert.equal(r.rows[0].meta, "15,012 stars");
+});
+
+test("dockerhub does NOT mark an unofficial image as official", () => {
+  const r = get("dockerhub").parse(JSON.stringify({ results: [{ repo_name: "me/postgres", short_description: "x", star_count: 1, pull_count: 2, is_official: false }] }));
+  assert.doesNotMatch(r.rows[0].detail, /OFFICIAL/);
+});
+
+test("onthisday sorts events chronologically", () => {
+  const body = JSON.stringify({
+    events: [
+      { year: 2022, text: "Recent thing.", pages: [{ content_urls: { desktop: { page: "https://en.wikipedia.org/wiki/Recent" } } }] },
+      { year: 1620, text: "The Mayflower departs.", pages: [] },
+    ],
+  });
+  const r = get("onthisday").parse(body);
+  assert.deepEqual(r.rows.map((x) => x.title), ["1620", "2022"]);
+  assert.equal(r.rows[0].detail, "The Mayflower departs.");
+});
+
+test("onthisday pads a single-digit month and day into the URL", () => {
+  const s = get("onthisday");
+  assert.match(s.url({ month: "9", day: "6" }), /events\/09\/06$/);
+  assert.match(s.url({ month: "09", day: "16" }), /events\/09\/16$/);
+});
+
+test("pageviews totals the range and reports it in the summary", () => {
+  const body = JSON.stringify({
+    items: [
+      { timestamp: "2025010100", views: 17320 },
+      { timestamp: "2025020100", views: 15289 },
+    ],
+  });
+  const r = get("pageviews").parse(body);
+  assert.equal(r.rows[0].title, "2025-01");
+  assert.equal(r.rows[0].meta, "17,320");
+  assert.match(r.summary, /32,609 views total/);
+});
+
+test("pageviews treats a 404 body as no data rather than as a parse failure", () => {
+  const r = get("pageviews").parse(JSON.stringify({ type: "https://mediawiki.org/wiki/HyperSwitch/errors/not_found", title: "Not found." }));
+  assert.equal(r.empty, true);
+});
+
+test("reverse_geocode reports an ocean coordinate as no match", () => {
+  const r = get("reverse_geocode").parse(JSON.stringify({ error: "Unable to geocode" }));
+  assert.equal(r.empty, true);
+});
+
+test("reverse_geocode returns the display name plus one row per address component", () => {
+  const body = JSON.stringify({
+    name: "Vonarstræti", addresstype: "road",
+    display_name: "Vonarstræti, Miðbær, Reykjavíkurborg, Iceland",
+    address: { road: "Vonarstræti", city: "Reykjavíkurborg", country: "Iceland" },
+  });
+  const r = get("reverse_geocode").parse(body);
+  assert.equal(r.rows[0].title, "Vonarstræti");
+  assert.equal(r.rows[0].meta, "road");
+  assert.equal(r.rows.length, 4, "the summary row plus three address components");
+  assert.match(r.summary, /Iceland/);
+});
+
+test("weather_history averages the range and totals precipitation", () => {
+  const body = JSON.stringify({
+    daily: { time: ["2025-01-01", "2025-01-02", "2025-01-03"], temperature_2m_mean: [-10.4, 0.8, 0.5], precipitation_sum: [0, 9.9, 5.0] },
+  });
+  const r = get("weather_history").parse(body);
+  assert.equal(r.rows.length, 3);
+  assert.equal(r.rows[0].meta, "-10.4°C mean");
+  assert.match(r.summary, /mean -3\.0°C/);
+  assert.match(r.summary, /total precipitation 14\.9 mm/);
+});
+
+test("weather_history reports an empty range as empty", () => {
+  const r = get("weather_history").parse(JSON.stringify({ daily: { time: [], temperature_2m_mean: [], precipitation_sum: [] } }));
+  assert.equal(r.empty, true);
+});
+
+test("fx_history computes the move across the period", () => {
+  const body = JSON.stringify({
+    amount: 1, base: "USD", start_date: "2025-12-31", end_date: "2026-01-06",
+    rates: { "2026-01-06": { EUR: 0.85419 }, "2025-12-31": { EUR: 0.85106 } },
+  });
+  const r = get("fx_history").parse(body);
+  // Keys arrive unsorted; the series must still read oldest-first.
+  assert.deepEqual(r.rows.map((x) => x.title), ["2025-12-31", "2026-01-06"]);
+  assert.match(r.summary, /EUR moved \+0\.37%/);
+});
+
+test("fx_history refuses a payload whose rates is not an object", () => {
+  assert.throws(() => get("fx_history").parse(JSON.stringify({ base: "USD", rates: "nope" })), ServiceParseError);
+});
+
+test("federalregister names the issuing agencies", () => {
+  const body = JSON.stringify({
+    count: 1565,
+    results: [{ title: "NIST Artificial Intelligence Consortium", publication_date: "2026-05-29", type: "Notice", html_url: "https://www.federalregister.gov/documents/x", agencies: [{ name: "Commerce Department", raw_name: "DEPARTMENT OF COMMERCE" }] }],
+  });
+  const r = get("federalregister").parse(body);
+  assert.equal(r.rows[0].meta, "2026-05-29");
+  assert.match(r.rows[0].detail, /Notice — Commerce Department/);
+  assert.match(r.summary, /1565 matching documents/);
+});
+
+test("federalregister treats a zero-result search as empty", () => {
+  const r = get("federalregister").parse(JSON.stringify({ count: 0, description: "no matches" }));
+  assert.equal(r.empty, true);
+});
+
+test("postcode reads places and coordinates and reports an unknown code as empty", () => {
+  const body = JSON.stringify({
+    country: "United States", "post code": "90210",
+    places: [{ "place name": "Beverly Hills", state: "California", latitude: "34.0901", longitude: "-118.4065" }],
+  });
+  const r = get("postcode").parse(body);
+  assert.equal(r.rows[0].title, "Beverly Hills");
+  assert.equal(r.rows[0].meta, "34.090, -118.406");
+  assert.match(r.summary, /^90210: Beverly Hills/);
+  assert.equal(get("postcode").parse("{}").empty, true);
+});
+
+test("commons strips the File: prefix and the search-match markup", () => {
+  const body = JSON.stringify({
+    query: { search: [{ ns: 6, title: "File:Aurora australis.jpg", size: 3007, snippet: 'CC BY 2.0 <span class="searchmatch">Aurora</span> australis &amp; friends' }] },
+  });
+  const r = get("commons").parse(body);
+  assert.equal(r.rows[0].title, "Aurora australis.jpg");
+  assert.doesNotMatch(r.rows[0].detail, /<span|searchmatch/);
+  assert.match(r.rows[0].detail, /Aurora australis & friends/);
+  assert.equal(r.rows[0].url, "https://commons.wikimedia.org/wiki/File%3AAurora%20australis.jpg");
+});
+
+test("commons reports a miss as empty and refuses a wrong-typed search key", () => {
+  assert.equal(get("commons").parse(JSON.stringify({ batchcomplete: "" })).empty, true);
+  assert.throws(() => get("commons").parse(JSON.stringify({ query: { search: "nope" } })), ServiceParseError);
 });

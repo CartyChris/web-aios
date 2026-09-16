@@ -719,35 +719,46 @@ export const SERVICES: ServiceDef[] = [
   {
     id: "countries",
     name: "Country Facts",
+    // Was REST Countries until 2026-09-16, when a live probe found that every
+    // version of that API — v3.1 AND the v5 it tells you to migrate to — now
+    // answers with a deprecation envelope instead of data. The recorded-payload
+    // test still passed, because a parser cannot tell that the shape it was
+    // taught is no longer the shape anyone sends. Only calling it could.
+    //
+    // The World Bank is keyless, stable and public-domain. It carries a
+    // narrower fact set: capital, region, income group and coordinates, but no
+    // population, languages or currencies. `geocode` resolves a place NAME to
+    // a country and a population, which is the gap this leaves.
     category: "civic",
-    description: "Return population, area, capital, currencies and languages for a country.",
-    provider: "REST Countries",
-    licence: "Mozilla Public License 2.0",
-    docs: "https://restcountries.com",
+    description: "Return the capital, region, income group and coordinates of a country by its ISO code.",
+    provider: "The World Bank",
+    licence: "CC BY 4.0",
+    docs: "https://datahelpdesk.worldbank.org/knowledgebase/articles/898590",
     reach: "proxy",
-    params: [{ name: "name", label: "Country", placeholder: "iceland", required: true, kind: "text" }],
-    url: (a) => `https://restcountries.com/v3.1/name/${q(need(a, "name", "countries"))}?fields=name,capital,population,area,currencies,languages,region,cca3`,
+    params: [{ name: "country", label: "Country (ISO-2 or ISO-3)", placeholder: "ISL", required: true, kind: "text" }],
+    url: (a) => `https://api.worldbank.org/v2/country/${q(need(a, "country", "countries"))}?format=json`,
     parse: (body) => {
       const json = asJson("countries", body);
-      if (!Array.isArray(json)) return result([], listSummary("country"));
-      const rows = json.map((c): ServiceRow => {
-        const pop = num(dig(c, "population"));
-        const area = num(dig(c, "area"));
-        const caps = dig(c, "capital");
-        const langs = dig(c, "languages");
-        const cur = dig(c, "currencies");
+      // Always [meta, data]. A bare object is the error envelope.
+      if (!Array.isArray(json)) throw new ServiceParseError("countries", "expected a [meta, data] pair");
+      const data = json[1];
+      if (!Array.isArray(data)) return result([], listSummary("country"));
+      const rows = data.map((c): ServiceRow => {
+        const lat = num(dig(c, "latitude"));
+        const lon = num(dig(c, "longitude"));
         return {
-          title: str(dig(c, "name", "common"), "(unnamed)"),
+          title: str(dig(c, "name"), "(unnamed)"),
           detail: clean([
-            `Capital ${Array.isArray(caps) ? caps.map((x) => str(x)).join(", ") : "n/a"}`,
-            str(dig(c, "region")),
-            area !== undefined ? `${area.toLocaleString("en-US")} km²` : "",
-            isRecord(langs) ? `Languages: ${Object.values(langs).map((x) => str(x)).join(", ")}` : "",
-            isRecord(cur) ? `Currency: ${Object.keys(cur).join(", ")}` : "",
-          ].filter(Boolean).join(" · ")),
-          meta: pop !== undefined ? `pop. ${pop.toLocaleString("en-US")}` : undefined,
+            str(dig(c, "capitalCity")) ? `Capital ${str(dig(c, "capitalCity"))}` : "",
+            str(dig(c, "region", "value")),
+            str(dig(c, "incomeLevel", "value")) ? `${str(dig(c, "incomeLevel", "value"))} economy` : "",
+            str(dig(c, "iso2Code")) ? `ISO ${str(dig(c, "iso2Code"))}/${str(dig(c, "id"))}` : "",
+          ].filter(Boolean).join(" · ")) || "No detail returned.",
+          meta: lat !== undefined && lon !== undefined ? `${lat.toFixed(3)}, ${lon.toFixed(3)}` : undefined,
         };
-      });
+      // An aggregate row ("Europe & Central Asia") has no region of its own and
+      // is not a country; including it makes a one-country lookup look wrong.
+      }).filter((r) => r.detail !== "No detail returned.");
       return result(rows, listSummary("country"));
     },
   },
@@ -1028,6 +1039,603 @@ export const SERVICES: ServiceDef[] = [
         summary: `${total ?? ids.length} matching objects; showing the first ${rows.length}.`,
         empty: rows.length === 0,
       };
+    },
+  },
+
+  /* ── round two ─────────────────────────────────────────────────────────
+     Every entry below was probed live before its parser was written, and
+     every `reach: "direct"` was confirmed by reading the host's real
+     access-control-allow-origin header rather than assumed. A service marked
+     direct that the browser cannot actually call fails with an opaque network
+     error indistinguishable from the host being down. */
+
+  {
+    id: "openalex",
+    name: "OpenAlex",
+    category: "science",
+    description: "Search the OpenAlex index of scholarly works and return citation counts and DOIs.",
+    provider: "OurResearch",
+    licence: "CC0 1.0",
+    docs: "https://docs.openalex.org",
+    reach: "direct",
+    params: [
+      { name: "query", label: "Query", placeholder: "mechanistic interpretability", required: true, kind: "text" },
+      { name: "limit", label: "Results", placeholder: "10", required: false, kind: "number", default: "10" },
+    ],
+    url: (a) =>
+      `https://api.openalex.org/works?search=${q(need(a, "query", "openalex"))}&per-page=${q(opt(a, "limit", "10"))}` +
+      `&select=id,title,publication_year,cited_by_count,doi`,
+    parse: (body) => {
+      const json = asJson("openalex", body);
+      const rows = arrayAt("openalex", json, "results").map((w): ServiceRow => {
+        const cites = num(dig(w, "cited_by_count"));
+        const year = num(dig(w, "publication_year"));
+        return {
+          title: clean(str(dig(w, "title"), "(untitled)"), 200),
+          detail: cites !== undefined ? `Cited ${cites.toLocaleString("en-US")} times` : "Citation count unavailable",
+          url: str(dig(w, "doi")) || str(dig(w, "id")) || undefined,
+          meta: year !== undefined ? String(year) : undefined,
+        };
+      });
+      return result(rows, listSummary("work"));
+    },
+  },
+  {
+    id: "openfda",
+    name: "Drug Labels",
+    category: "science",
+    description: "Search FDA-approved drug labelling for a generic or brand name and return its indications and warnings.",
+    provider: "US Food and Drug Administration",
+    licence: "Public domain",
+    docs: "https://open.fda.gov/apis/drug/label/",
+    reach: "proxy",
+    params: [{ name: "drug", label: "Drug", placeholder: "ibuprofen", required: true, kind: "text" }],
+    url: (a) => `https://api.fda.gov/drug/label.json?search=openfda.generic_name:${q(need(a, "drug", "openfda"))}&limit=5`,
+    parse: (body) => {
+      const json = asJson("openfda", body);
+      // openFDA reports a miss as an `error` object with NOT_FOUND, which is a
+      // miss and not an outage.
+      if (str(dig(json, "error", "code")) === "NOT_FOUND") return result([], listSummary("label"));
+      const rows = arrayAt("openfda", json, "results").map((r): ServiceRow => {
+        const names = dig(r, "openfda", "brand_name");
+        const first = (k: string) => {
+          const v = dig(r, k);
+          return Array.isArray(v) && v.length > 0 ? str(v[0]) : "";
+        };
+        return {
+          title: Array.isArray(names) && names.length > 0 ? str(names[0]) : "(unnamed product)",
+          detail: clean(first("indications_and_usage") || first("purpose") || first("description") || "No indications section.", 600),
+          meta: first("effective_time").slice(0, 4) || undefined,
+        };
+      });
+      return result(rows, listSummary("label"));
+    },
+  },
+  {
+    id: "species",
+    name: "Species",
+    category: "science",
+    description: "Look up a species in the Global Biodiversity Information Facility backbone and return its taxonomy.",
+    provider: "GBIF",
+    licence: "CC BY 4.0",
+    docs: "https://techdocs.gbif.org/en/openapi/",
+    reach: "direct",
+    params: [{ name: "query", label: "Species", placeholder: "puffin", required: true, kind: "text" }],
+    url: (a) => `https://api.gbif.org/v1/species/search?q=${q(need(a, "query", "species"))}&limit=10&status=ACCEPTED`,
+    parse: (body) => {
+      const json = asJson("species", body);
+      const rows = arrayAt("species", json, "results").map((s): ServiceRow => ({
+        title: str(dig(s, "scientificName"), str(dig(s, "canonicalName"), "(unnamed)")),
+        detail: clean([str(dig(s, "kingdom")), str(dig(s, "phylum")), str(dig(s, "class")), str(dig(s, "order")), str(dig(s, "family"))].filter(Boolean).join(" > ")) || "No taxonomy given.",
+        url: num(dig(s, "key")) !== undefined ? `https://www.gbif.org/species/${num(dig(s, "key"))}` : undefined,
+        meta: str(dig(s, "rank")) || undefined,
+      }));
+      return result(rows, listSummary("taxon"));
+    },
+  },
+
+  /* -- dev --------------------------------------------------------------- */
+  {
+    id: "stackexchange",
+    name: "Stack Overflow",
+    category: "dev",
+    description: "Search Stack Overflow questions and return scores, answer counts and whether one is accepted.",
+    provider: "Stack Exchange",
+    licence: "CC BY-SA 4.0",
+    docs: "https://api.stackexchange.com/docs",
+    reach: "direct",
+    params: [{ name: "query", label: "Query", placeholder: "zustand persist hydration", required: true, kind: "text" }],
+    url: (a) =>
+      `https://api.stackexchange.com/2.3/search/advanced?site=stackoverflow&q=${q(need(a, "query", "stackexchange"))}` +
+      `&pagesize=10&order=desc&sort=relevance&filter=default`,
+    parse: (body) => {
+      const json = asJson("stackexchange", body);
+      // Stack Exchange reports throttling as an error envelope with no items.
+      if (dig(json, "items") === undefined) {
+        throw new ServiceParseError("stackexchange", str(dig(json, "error_message")) || "no items in the response");
+      }
+      const rows = arrayAt("stackexchange", json, "items").map((h): ServiceRow => {
+        const score = num(dig(h, "score"));
+        const answers = num(dig(h, "answer_count"));
+        const accepted = dig(h, "is_answered") === true;
+        return {
+          // Titles arrive HTML-escaped; showing &quot; to the reader is a bug.
+          title: clean(decodeEntities(str(dig(h, "title"), "(untitled)")), 200),
+          detail: `${answers ?? 0} answer${answers === 1 ? "" : "s"}${accepted ? ", accepted" : ", none accepted"} · ${(Array.isArray(dig(h, "tags")) ? (dig(h, "tags") as unknown[]).map((t) => str(t)) : []).slice(0, 5).join(", ")}`,
+          url: str(dig(h, "link")) || undefined,
+          meta: score !== undefined ? `${score} score` : undefined,
+        };
+      });
+      return result(rows, listSummary("question"));
+    },
+  },
+  {
+    id: "pypi",
+    name: "PyPI",
+    category: "dev",
+    description: "Look up a Python package on PyPI and return its version, summary, licence and project links.",
+    provider: "Python Software Foundation",
+    licence: "Public registry API",
+    docs: "https://docs.pypi.org/api/json/",
+    reach: "direct",
+    params: [{ name: "package", label: "Package", placeholder: "requests", required: true, kind: "text" }],
+    url: (a) => `https://pypi.org/pypi/${q(need(a, "package", "pypi"))}/json`,
+    parse: (body) => {
+      const json = asJson("pypi", body);
+      const info = dig(json, "info");
+      if (!isRecord(info)) throw new ServiceParseError("pypi", "no info object — the package may not exist");
+      const releases = dig(json, "releases");
+      const versions = isRecord(releases) ? Object.keys(releases).length : undefined;
+      return {
+        rows: [{
+          title: str(info.name, "(unnamed)"),
+          detail: clean([
+            str(info.summary, "No summary."),
+            str(info.license) ? `Licence: ${str(info.license)}` : "",
+            str(info.requires_python) ? `Requires Python ${str(info.requires_python)}` : "",
+            versions !== undefined ? `${versions} releases` : "",
+          ].filter(Boolean).join(" · ")),
+          url: str(info.project_url) || str(info.package_url) || undefined,
+          meta: str(info.version) || undefined,
+        }],
+        summary: `${str(info.name)} ${str(info.version)} — ${clean(str(info.summary, "no summary"), 300)}`,
+        empty: false,
+      };
+    },
+  },
+  {
+    id: "crates",
+    name: "crates.io",
+    category: "dev",
+    description: "Search the Rust crate registry and return downloads, latest version and description.",
+    provider: "Rust Foundation",
+    licence: "Public registry API",
+    docs: "https://crates.io/data-access",
+    reach: "proxy",
+    params: [{ name: "query", label: "Query", placeholder: "serde", required: true, kind: "text" }],
+    url: (a) => `https://crates.io/api/v1/crates?q=${q(need(a, "query", "crates"))}&per_page=10`,
+    parse: (body) => {
+      const json = asJson("crates", body);
+      const rows = arrayAt("crates", json, "crates").map((c): ServiceRow => {
+        const downloads = num(dig(c, "downloads"));
+        const name = str(dig(c, "name"), "(unnamed)");
+        return {
+          title: name,
+          detail: clean(str(dig(c, "description"), "No description.")),
+          url: `https://crates.io/crates/${name}`,
+          meta: [str(dig(c, "max_stable_version")) || str(dig(c, "newest_version")), downloads !== undefined ? `${downloads.toLocaleString("en-US")} downloads` : ""].filter(Boolean).join(" · ") || undefined,
+        };
+      });
+      return result(rows, listSummary("crate"));
+    },
+  },
+  {
+    id: "depsdev",
+    name: "Package Versions",
+    category: "dev",
+    description: "List every published version of a package across npm, PyPI, Cargo, Go, Maven or NuGet, flagging deprecated ones.",
+    provider: "Google Open Source Insights",
+    licence: "Free, no key",
+    docs: "https://docs.deps.dev/api/v3alpha/",
+    reach: "direct",
+    params: [
+      { name: "system", label: "Ecosystem", placeholder: "npm, pypi, cargo, go, maven, nuget", required: false, kind: "text", default: "npm" },
+      { name: "package", label: "Package", placeholder: "zustand", required: true, kind: "text" },
+    ],
+    url: (a) => `https://api.deps.dev/v3alpha/systems/${q(opt(a, "system", "npm").toLowerCase())}/packages/${q(need(a, "package", "depsdev"))}`,
+    parse: (body) => {
+      const json = asJson("depsdev", body);
+      const versions = arrayAt("depsdev", json, "versions");
+      // Newest last in the API's own order; the reader wants newest first.
+      const rows = versions.slice(-20).reverse().map((v): ServiceRow => {
+        const deprecated = dig(v, "isDeprecated") === true;
+        const isDefault = dig(v, "isDefault") === true;
+        return {
+          title: str(dig(v, "versionKey", "version"), "(no version)"),
+          detail: [
+            deprecated ? `DEPRECATED${str(dig(v, "deprecatedReason")) ? `: ${clean(str(dig(v, "deprecatedReason")), 160)}` : ""}` : "",
+            isDefault ? "current default" : "",
+            str(dig(v, "publishedAt")).slice(0, 10),
+          ].filter(Boolean).join(" · ") || "Published",
+          meta: deprecated ? "deprecated" : isDefault ? "default" : undefined,
+        };
+      });
+      return result(rows, (r) => `${versions.length} published versions; newest ${r.length} shown: ${r.map((x) => x.title).join(", ")}`);
+    },
+  },
+  {
+    id: "cve",
+    name: "Vulnerabilities",
+    category: "dev",
+    description: "Search the National Vulnerability Database by keyword and return CVE identifiers with their severity.",
+    provider: "NIST",
+    licence: "Public domain",
+    docs: "https://nvd.nist.gov/developers/vulnerabilities",
+    reach: "proxy",
+    params: [{ name: "query", label: "Keyword", placeholder: "next.js", required: true, kind: "text" }],
+    // Unauthenticated NVD allows roughly 5 requests per 30 seconds. The small
+    // page size is deliberate: a large one makes a slow endpoint slower and
+    // burns the same quota.
+    url: (a) => `https://services.nvd.nist.gov/rest/json/cves/2.0?keywordSearch=${q(need(a, "query", "cve"))}&resultsPerPage=10`,
+    parse: (body) => {
+      const json = asJson("cve", body);
+      const total = num(dig(json, "totalResults"));
+      const rows = arrayAt("cve", json, "vulnerabilities").map((v): ServiceRow => {
+        const cve = dig(v, "cve");
+        const id = str(dig(cve, "id"), "(no id)");
+        const descs = dig(cve, "descriptions");
+        const en = Array.isArray(descs) ? descs.find((d) => str(dig(d, "lang")) === "en") : undefined;
+        const metrics = dig(cve, "metrics", "cvssMetricV31");
+        const score = Array.isArray(metrics) && metrics.length > 0 ? num(dig(metrics[0], "cvssData", "baseScore")) : undefined;
+        const sev = Array.isArray(metrics) && metrics.length > 0 ? str(dig(metrics[0], "cvssData", "baseSeverity")) : "";
+        return {
+          title: id,
+          detail: clean(str(dig(en, "value"), "No description."), 500),
+          url: `https://nvd.nist.gov/vuln/detail/${id}`,
+          meta: score !== undefined ? `CVSS ${score}${sev ? ` ${sev}` : ""}` : undefined,
+        };
+      });
+      if (rows.length === 0) return result([], listSummary("vulnerability"));
+      return { rows, summary: `${total ?? rows.length} matching CVEs; ${rows.length} shown: ${rows.map((r) => `${r.title}${r.meta ? ` (${r.meta})` : ""}`).join(", ")}`, empty: false };
+    },
+  },
+  {
+    id: "dockerhub",
+    name: "Docker Hub",
+    category: "dev",
+    description: "Search Docker Hub for container images and return stars, pulls and whether the image is official.",
+    provider: "Docker, Inc.",
+    licence: "Public search API",
+    docs: "https://docs.docker.com/reference/api/hub/latest/",
+    reach: "proxy",
+    params: [{ name: "query", label: "Query", placeholder: "postgres", required: true, kind: "text" }],
+    url: (a) => `https://hub.docker.com/v2/search/repositories/?query=${q(need(a, "query", "dockerhub"))}&page_size=10`,
+    parse: (body) => {
+      const json = asJson("dockerhub", body);
+      const rows = arrayAt("dockerhub", json, "results").map((r): ServiceRow => {
+        const stars = num(dig(r, "star_count"));
+        const pulls = num(dig(r, "pull_count"));
+        const name = str(dig(r, "repo_name"), "(unnamed)");
+        return {
+          title: name,
+          detail: clean([
+            str(dig(r, "short_description"), "No description."),
+            dig(r, "is_official") === true ? "OFFICIAL IMAGE" : "",
+            pulls !== undefined ? `${pulls.toLocaleString("en-US")} pulls` : "",
+          ].filter(Boolean).join(" · ")),
+          url: `https://hub.docker.com/r/${name}`,
+          meta: stars !== undefined ? `${stars.toLocaleString("en-US")} stars` : undefined,
+        };
+      });
+      return result(rows, listSummary("image"));
+    },
+  },
+
+  /* -- knowledge --------------------------------------------------------- */
+  {
+    id: "onthisday",
+    name: "On This Day",
+    category: "knowledge",
+    description: "Return notable historical events that happened on a given month and day.",
+    provider: "Wikimedia Foundation",
+    licence: "CC BY-SA 4.0",
+    docs: "https://en.wikipedia.org/api/rest_v1/",
+    reach: "direct",
+    params: [
+      { name: "month", label: "Month (MM)", placeholder: "09", required: true, kind: "text" },
+      { name: "day", label: "Day (DD)", placeholder: "16", required: true, kind: "text" },
+    ],
+    url: (a) => {
+      const pad = (v: string) => (v.length === 1 ? `0${v}` : v);
+      return `https://en.wikipedia.org/api/rest_v1/feed/onthisday/events/${q(pad(need(a, "month", "onthisday")))}/${q(pad(need(a, "day", "onthisday")))}`;
+    },
+    parse: (body) => {
+      const json = asJson("onthisday", body);
+      const rows = arrayAt("onthisday", json, "events").map((e): ServiceRow => {
+        const year = num(dig(e, "year"));
+        const pages = dig(e, "pages");
+        const first = Array.isArray(pages) && pages.length > 0 ? pages[0] : undefined;
+        return {
+          title: year !== undefined ? String(year) : "(undated)",
+          detail: clean(str(dig(e, "text"), "")),
+          url: str(dig(first, "content_urls", "desktop", "page")) || undefined,
+        };
+      // The feed arrives oldest-last; a reader scanning a millennium wants it
+      // chronological.
+      }).sort((a, b) => Number(a.title) - Number(b.title));
+      return result(rows, listSummary("event"));
+    },
+  },
+  {
+    id: "pageviews",
+    name: "Article Traffic",
+    category: "knowledge",
+    description: "Return monthly Wikipedia pageview counts for one article over a date range.",
+    provider: "Wikimedia Foundation",
+    licence: "CC0 1.0",
+    docs: "https://wikimedia.org/api/rest_v1/",
+    reach: "direct",
+    params: [
+      { name: "article", label: "Article", placeholder: "Quantum_state", required: true, kind: "text" },
+      { name: "start", label: "From (YYYYMMDD)", placeholder: "20250101", required: false, kind: "text", default: "20250101" },
+      { name: "end", label: "To (YYYYMMDD)", placeholder: "20251231", required: false, kind: "text", default: "20251231" },
+    ],
+    url: (a) =>
+      `https://wikimedia.org/api/rest_v1/metrics/pageviews/per-article/en.wikipedia/all-access/all-agents/` +
+      `${q(need(a, "article", "pageviews").replace(/ /g, "_"))}/monthly/${q(opt(a, "start", "20250101"))}/${q(opt(a, "end", "20251231"))}`,
+    parse: (body) => {
+      const json = asJson("pageviews", body);
+      // A 404 body carries `type`/`title` instead of items; that is "no data
+      // for this article", not a broken payload.
+      if (dig(json, "items") === undefined) return result([], listSummary("month"));
+      const items = arrayAt("pageviews", json, "items");
+      const rows = items.map((i): ServiceRow => {
+        const ts = str(dig(i, "timestamp"));
+        const views = num(dig(i, "views"));
+        return {
+          title: `${ts.slice(0, 4)}-${ts.slice(4, 6)}`,
+          detail: "Monthly pageviews, all access, all agents",
+          meta: views !== undefined ? views.toLocaleString("en-US") : undefined,
+        };
+      });
+      const total = items.reduce<number>((sum, i) => sum + (num(dig(i, "views")) ?? 0), 0);
+      if (rows.length === 0) return result([], listSummary("month"));
+      return { rows, summary: `${rows.length} months, ${total.toLocaleString("en-US")} views total: ${rows.map((r) => `${r.title} ${r.meta}`).join(", ")}`, empty: false };
+    },
+  },
+
+  /* -- earth ------------------------------------------------------------- */
+  {
+    id: "reverse_geocode",
+    name: "Reverse Geocoding",
+    category: "earth",
+    description: "Turn a latitude and longitude into a street address and administrative area.",
+    provider: "OpenStreetMap Nominatim",
+    licence: "ODbL 1.0",
+    docs: "https://nominatim.org/release-docs/latest/api/Reverse/",
+    reach: "proxy",
+    params: [
+      { name: "latitude", label: "Latitude", placeholder: "64.1466", required: true, kind: "number" },
+      { name: "longitude", label: "Longitude", placeholder: "-21.9426", required: true, kind: "number" },
+    ],
+    url: (a) =>
+      `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${q(need(a, "latitude", "reverse_geocode"))}&lon=${q(need(a, "longitude", "reverse_geocode"))}`,
+    parse: (body) => {
+      const json = asJson("reverse_geocode", body);
+      // Nominatim answers an ocean coordinate with {"error": "Unable to geocode"}.
+      if (dig(json, "error") !== undefined) return result([], listSummary("place"));
+      const display = str(dig(json, "display_name"));
+      if (!display) throw new ServiceParseError("reverse_geocode", "no display_name in the response");
+      const addr = dig(json, "address");
+      const rows: ServiceRow[] = [{
+        title: str(dig(json, "name")) || display.split(",")[0] || "(unnamed)",
+        detail: clean(display, 400),
+        meta: str(dig(json, "addresstype")) || str(dig(json, "type")) || undefined,
+      }];
+      if (isRecord(addr)) {
+        for (const [k, v] of Object.entries(addr)) {
+          rows.push({ title: k.replace(/_/g, " "), detail: str(v), meta: undefined });
+        }
+      }
+      return { rows, summary: clean(display, 500), empty: false };
+    },
+  },
+  {
+    id: "weather_history",
+    name: "Historical Weather",
+    category: "earth",
+    description: "Return daily mean temperature and precipitation for a coordinate over a past date range.",
+    provider: "Open-Meteo",
+    licence: "CC BY 4.0",
+    docs: "https://open-meteo.com/en/docs/historical-weather-api",
+    reach: "direct",
+    params: [
+      { name: "latitude", label: "Latitude", placeholder: "64.15", required: true, kind: "number" },
+      { name: "longitude", label: "Longitude", placeholder: "-21.94", required: true, kind: "number" },
+      { name: "start_date", label: "From (YYYY-MM-DD)", placeholder: "2025-01-01", required: false, kind: "text", default: "2025-01-01" },
+      { name: "end_date", label: "To (YYYY-MM-DD)", placeholder: "2025-01-31", required: false, kind: "text", default: "2025-01-31" },
+    ],
+    url: (a) =>
+      `https://archive-api.open-meteo.com/v1/archive?latitude=${q(need(a, "latitude", "weather_history"))}` +
+      `&longitude=${q(need(a, "longitude", "weather_history"))}&start_date=${q(opt(a, "start_date", "2025-01-01"))}` +
+      `&end_date=${q(opt(a, "end_date", "2025-01-31"))}&daily=temperature_2m_mean,precipitation_sum&timezone=auto`,
+    parse: (body) => {
+      const json = asJson("weather_history", body);
+      const days = arrayAt("weather_history", json, "daily", "time").map((x) => str(x));
+      const mean = arrayAt("weather_history", json, "daily", "temperature_2m_mean");
+      const rain = arrayAt("weather_history", json, "daily", "precipitation_sum");
+      const rows = days.map((d, i): ServiceRow => {
+        const t = num(mean[i]);
+        const p = num(rain[i]);
+        return {
+          title: d,
+          detail: p !== undefined ? `${p} mm precipitation` : "Precipitation unavailable",
+          meta: t !== undefined ? `${t}°C mean` : undefined,
+        };
+      });
+      if (rows.length === 0) return result([], listSummary("day"));
+      const temps = mean.map((x) => num(x)).filter((x): x is number => x !== undefined);
+      const avg = temps.length > 0 ? temps.reduce((a, b) => a + b, 0) / temps.length : undefined;
+      return {
+        rows,
+        summary: `${rows.length} days from ${days[0]} to ${days[days.length - 1]}` +
+          (avg !== undefined ? `, mean ${avg.toFixed(1)}°C` : "") +
+          `, total precipitation ${rain.reduce<number>((a, b) => a + (num(b) ?? 0), 0).toFixed(1)} mm.`,
+        empty: false,
+      };
+    },
+  },
+
+  /* -- finance ----------------------------------------------------------- */
+  {
+    id: "fx_history",
+    name: "Exchange Rate History",
+    category: "finance",
+    description: "Return a time series of European Central Bank reference rates between two dates.",
+    provider: "Frankfurter (ECB data)",
+    licence: "Public data, free API",
+    docs: "https://frankfurter.dev",
+    reach: "direct",
+    params: [
+      { name: "from", label: "Base", placeholder: "USD", required: false, kind: "text", default: "USD" },
+      { name: "to", label: "Against", placeholder: "EUR", required: false, kind: "text", default: "EUR" },
+      { name: "start", label: "From (YYYY-MM-DD)", placeholder: "2026-01-01", required: false, kind: "text", default: "2026-01-01" },
+      { name: "end", label: "To (YYYY-MM-DD)", placeholder: "2026-03-01", required: false, kind: "text", default: "2026-03-01" },
+    ],
+    url: (a) =>
+      `https://api.frankfurter.dev/v1/${q(opt(a, "start", "2026-01-01"))}..${q(opt(a, "end", "2026-03-01"))}` +
+      `?base=${q(opt(a, "from", "USD").toUpperCase())}&symbols=${q(opt(a, "to", "EUR").toUpperCase())}`,
+    parse: (body) => {
+      const json = asJson("fx_history", body);
+      const base = str(dig(json, "base"));
+      const rates = dig(json, "rates");
+      if (!isRecord(rates)) throw new ServiceParseError("fx_history", "rates was not an object");
+      const dates = Object.keys(rates).sort();
+      const rows = dates.map((d): ServiceRow => {
+        const day = rates[d];
+        const pairs = isRecord(day) ? Object.entries(day) : [];
+        return {
+          title: d,
+          detail: `Reference rate against ${base}`,
+          meta: pairs.map(([sym, v]) => `${sym} ${num(v) ?? v}`).join(", ") || undefined,
+        };
+      });
+      if (rows.length === 0) return result([], listSummary("day"));
+      const firstDay = rates[dates[0] as string];
+      const lastDay = rates[dates[dates.length - 1] as string];
+      const sym = isRecord(firstDay) ? Object.keys(firstDay)[0] : undefined;
+      const a0 = sym && isRecord(firstDay) ? num(firstDay[sym]) : undefined;
+      const a1 = sym && isRecord(lastDay) ? num(lastDay[sym]) : undefined;
+      const move = a0 !== undefined && a1 !== undefined && a0 !== 0 ? ((a1 - a0) / a0) * 100 : undefined;
+      return {
+        rows,
+        summary: `${rows.length} observations from ${dates[0]} to ${dates[dates.length - 1]}, base ${base}` +
+          (move !== undefined && sym ? `. ${sym} moved ${move >= 0 ? "+" : ""}${move.toFixed(2)}% over the period (${a0} to ${a1}).` : "."),
+        empty: false,
+      };
+    },
+  },
+
+  /* -- civic ------------------------------------------------------------- */
+  {
+    id: "federalregister",
+    name: "Federal Register",
+    category: "civic",
+    description: "Search United States federal rules, proposed rules and notices by term.",
+    provider: "US Office of the Federal Register",
+    licence: "Public domain",
+    docs: "https://www.federalregister.gov/developers/api/v1",
+    reach: "direct",
+    params: [{ name: "query", label: "Term", placeholder: "artificial intelligence", required: true, kind: "text" }],
+    url: (a) =>
+      `https://www.federalregister.gov/api/v1/documents.json?per_page=10&order=newest` +
+      `&conditions%5Bterm%5D=${q(need(a, "query", "federalregister"))}` +
+      `&fields%5B%5D=title&fields%5B%5D=publication_date&fields%5B%5D=type&fields%5B%5D=html_url&fields%5B%5D=agencies`,
+    parse: (body) => {
+      const json = asJson("federalregister", body);
+      // A zero-result search answers with count 0 and no `results` key at all.
+      if (dig(json, "results") === undefined) return result([], listSummary("document"));
+      const total = num(dig(json, "count"));
+      const rows = arrayAt("federalregister", json, "results").map((d): ServiceRow => {
+        const agencies = dig(d, "agencies");
+        const names = Array.isArray(agencies)
+          ? agencies.map((x) => str(dig(x, "name")) || str(dig(x, "raw_name"))).filter(Boolean)
+          : [];
+        return {
+          title: clean(str(dig(d, "title"), "(untitled)"), 200),
+          detail: clean([str(dig(d, "type")), names.slice(0, 3).join(", ")].filter(Boolean).join(" — ")) || "No agency given.",
+          url: str(dig(d, "html_url")) || undefined,
+          meta: str(dig(d, "publication_date")) || undefined,
+        };
+      });
+      if (rows.length === 0) return result([], listSummary("document"));
+      return { rows, summary: `${total ?? rows.length} matching documents; ${rows.length} newest shown:\n` + rows.map((r, i) => `${i + 1}. ${r.title} (${r.meta})`).join("\n"), empty: false };
+    },
+  },
+  {
+    id: "postcode",
+    name: "Postal Codes",
+    category: "civic",
+    description: "Turn a postal code into its place names, state and coordinates.",
+    provider: "Zippopotam.us",
+    licence: "Free, no key",
+    docs: "https://api.zippopotam.us",
+    reach: "direct",
+    params: [
+      { name: "country", label: "Country (ISO-2)", placeholder: "us", required: false, kind: "text", default: "us" },
+      { name: "code", label: "Postal code", placeholder: "90210", required: true, kind: "text" },
+    ],
+    url: (a) => `https://api.zippopotam.us/${q(opt(a, "country", "us").toLowerCase())}/${q(need(a, "code", "postcode"))}`,
+    parse: (body) => {
+      const json = asJson("postcode", body);
+      // An unknown code answers with an empty object and HTTP 404.
+      if (!isRecord(json) || Object.keys(json).length === 0) return result([], listSummary("place"));
+      const places = dig(json, "places");
+      if (!Array.isArray(places)) throw new ServiceParseError("postcode", "no places array in the response");
+      const code = str(dig(json, "post code"));
+      const rows = places.map((p): ServiceRow => {
+        const lat = num(dig(p, "latitude"));
+        const lon = num(dig(p, "longitude"));
+        return {
+          title: str(dig(p, "place name"), "(unnamed)"),
+          detail: clean([str(dig(p, "state")), str(dig(json, "country"))].filter(Boolean).join(", ")),
+          meta: lat !== undefined && lon !== undefined ? `${lat.toFixed(3)}, ${lon.toFixed(3)}` : undefined,
+        };
+      });
+      return result(rows, (r) => `${code}: ${r.map((x) => `${x.title}${x.detail ? ` (${x.detail})` : ""}`).join("; ")}`);
+    },
+  },
+
+  /* -- media ------------------------------------------------------------- */
+  {
+    id: "commons",
+    name: "Wikimedia Commons",
+    category: "media",
+    description: "Search Wikimedia Commons for freely licensed images and media files.",
+    provider: "Wikimedia Foundation",
+    licence: "Varies per file; each is free to reuse with attribution",
+    docs: "https://commons.wikimedia.org/w/api.php",
+    reach: "direct",
+    params: [{ name: "query", label: "Query", placeholder: "aurora borealis", required: true, kind: "text" }],
+    url: (a) =>
+      `https://commons.wikimedia.org/w/api.php?action=query&format=json&origin=*&list=search&srnamespace=6&srlimit=12` +
+      `&srsearch=${q(need(a, "query", "commons"))}`,
+    parse: (body) => {
+      const json = asJson("commons", body);
+      const hits = dig(json, "query", "search");
+      if (hits === undefined) return result([], listSummary("file"));
+      if (!Array.isArray(hits)) throw new ServiceParseError("commons", "query.search was not an array");
+      const rows = hits.map((h): ServiceRow => {
+        const title = str(dig(h, "title"), "(untitled)");
+        return {
+          title: title.replace(/^File:/, ""),
+          // The snippet is HTML with <span class="searchmatch"> highlighting.
+          detail: clean(decodeEntities(stripTags(str(dig(h, "snippet"))))) || "No description.",
+          url: `https://commons.wikimedia.org/wiki/${encodeURIComponent(title)}`,
+          meta: num(dig(h, "size")) !== undefined ? `${num(dig(h, "size"))} bytes of text` : undefined,
+        };
+      });
+      return result(rows, listSummary("file"));
     },
   },
 ];

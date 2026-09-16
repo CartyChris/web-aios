@@ -1,6 +1,8 @@
 import type { ToolDef, ToolRegistry, ToolResult } from "./types";
 import { runTool, validateArgs } from "./tools";
 import { createFactStore } from "./context";
+import type { Fixtures } from "./fixtures";
+import { exemplarsFor } from "./exemplars";
 
 /* ────────────────────────────────────────────────────────────────────────────
    The other direction: this OS as an MCP server.
@@ -37,6 +39,7 @@ export const RPC = {
   INTERNAL_ERROR: -32603,
   TOOL_NOT_FOUND: -32001,
   TOOL_REFUSED: -32002,
+  RESOURCE_NOT_FOUND: -32003,
 } as const;
 
 export interface RpcRequest {
@@ -64,6 +67,9 @@ export interface McpServerOptions {
    *  a feature — see `defaultExposureFilter`. */
   expose?: (tool: ToolDef) => boolean;
   signal?: AbortSignal;
+  /** Served as MCP resources. Optional: a server with no corpus advertises no
+   *  resources capability rather than advertising one and answering empty. */
+  fixtures?: Fixtures;
 }
 
 /**
@@ -101,6 +107,38 @@ function toContent(r: ToolResult): { content: Array<{ type: "text"; text: string
   if (r.value !== undefined) out.structuredContent = { value: r.value };
   return out;
 }
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+
+/** A stable, opaque URI per document. Clients cache on it, so it must not
+ *  encode anything that changes between deployments. */
+export function docUri(docId: string): string {
+  return `webaios://docs/${docId}`;
+}
+
+function docResource(d: { id: string; title: string; sentences: string[] }) {
+  return {
+    uri: docUri(d.id),
+    name: d.id,
+    title: d.title,
+    description: `${d.title} — ${d.sentences.length} sentences.`,
+    mimeType: "text/markdown",
+  };
+}
+
+const PROMPTS = [
+  {
+    name: "react_exemplars",
+    title: "ReAct worked examples",
+    description:
+      "Three worked ReAct traces: a retrieval question, an arithmetic question, and one the fixtures cannot answer — " +
+      "which refuses rather than guessing. The third is the one that matters; a model shown only successes learns to " +
+      "produce the shape of a success.",
+    arguments: [{ name: "density", description: "dense or sparse thoughts", required: false }],
+  },
+] as const;
 
 function toolDescriptor(t: ToolDef) {
   return {
@@ -148,8 +186,12 @@ export async function handleMcpMessage(raw: unknown, opts: McpServerOptions): Pr
         protocolVersion: MCP_PROTOCOL_VERSION,
         // Only what is actually implemented. Advertising a capability this
         // server does not serve makes a conforming client call it and get a
-        // method-not-found it had every right not to expect.
-        capabilities: { tools: { listChanged: false } },
+        // method-not-found it had every right not to expect — so `resources`
+        // and `prompts` appear only when a corpus was actually supplied.
+        capabilities: {
+          tools: { listChanged: false },
+          ...(opts.fixtures ? { resources: { listChanged: false, subscribe: false }, prompts: { listChanged: false } } : {}),
+        },
         serverInfo: { name: opts.serverName, version: opts.serverVersion },
         instructions:
           "Deterministic analysis tools from Web-AIOS. Every figure comes from a fixed, versioned " +
@@ -220,11 +262,60 @@ export async function handleMcpMessage(raw: unknown, opts: McpServerOptions): Pr
       return ok(id, toContent(result));
     }
 
-    case "resources/list":
-      return isNotification ? null : ok(id, { resources: [] });
+    /* ---- resources: the same corpus the retrieval tools read ----------- */
 
-    case "prompts/list":
-      return isNotification ? null : ok(id, { prompts: [] });
+    case "resources/list": {
+      if (isNotification) return null;
+      return ok(id, { resources: (opts.fixtures?.docs ?? []).map(docResource) });
+    }
+
+    case "resources/read": {
+      if (isNotification) return null;
+      const uri = typeof msg.params?.uri === "string" ? msg.params.uri : "";
+      if (!uri) return err(id, RPC.INVALID_PARAMS, "resources/read requires params.uri (a string).");
+      const doc = (opts.fixtures?.docs ?? []).find((d) => docUri(d.id) === uri);
+      if (!doc) {
+        const available = (opts.fixtures?.docs ?? []).map((d) => docUri(d.id));
+        return err(id, RPC.RESOURCE_NOT_FOUND, `No resource at ${uri}. Available: ${available.join(", ") || "(none)"}.`);
+      }
+      return ok(id, {
+        contents: [{
+          uri,
+          mimeType: "text/markdown",
+          // The WHOLE document, unlike `read_doc`, which deliberately returns a
+          // five-sentence window. The budget there exists to create reasoning
+          // pressure inside a ReAct loop; a client reading a resource directly
+          // is not in one, and truncating it would just be data loss.
+          text: `# ${doc.title}\n\n${doc.sentences.join(" ")}`,
+        }],
+      });
+    }
+
+    /* ---- prompts: the worked ReAct examples ---------------------------- */
+
+    case "prompts/list": {
+      if (isNotification) return null;
+      if (!opts.fixtures) return ok(id, { prompts: [] });
+      return ok(id, { prompts: PROMPTS });
+    }
+
+    case "prompts/get": {
+      if (isNotification) return null;
+      const name = typeof msg.params?.name === "string" ? msg.params.name : "";
+      const prompt = PROMPTS.find((p) => p.name === name);
+      if (!prompt) {
+        return err(id, RPC.INVALID_PARAMS, `No prompt named ${name || "(none)"}. Available: ${PROMPTS.map((p) => p.name).join(", ")}.`);
+      }
+      const density = String(msg.params?.arguments && isRecord(msg.params.arguments) ? msg.params.arguments.density ?? "" : "");
+      const chosen = density === "sparse" ? "sparse" : "dense";
+      return ok(id, {
+        description: prompt.description,
+        messages: [{
+          role: "user",
+          content: { type: "text", text: exemplarsFor(chosen as "dense" | "sparse") },
+        }],
+      });
+    }
 
     default:
       if (isNotification) return null;

@@ -314,6 +314,17 @@ export const APPS: AppManifest[] = [
     accent: "#22d3ee",
   },
   {
+    id: "mcphub",
+    name: "MCP Hub",
+    icon: "mcp",
+    category: "system",
+    description: "A directory of MCP servers: connect, list their tools, and call one.",
+    component: lazy(() => import("@/apps/McpHub")),
+    defaultSize: { w: 1000, h: 700 },
+    permissions: ["network", "storage"],
+    accent: "#a78bfa",
+  },
+  {
     id: "bridge",
     name: "Bridge",
     icon: "bridge",

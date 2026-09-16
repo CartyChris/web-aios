@@ -10,7 +10,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   handleMcpMessage, handleMcpPayload, defaultExposureFilter,
-  MCP_PROTOCOL_VERSION, RPC,
+  MCP_PROTOCOL_VERSION, RPC, docUri,
 } from "../.test-build/harness/mcp-server.js";
 import { createRegistry, builtinTools } from "../.test-build/harness/tools.js";
 import { FIXTURES } from "../.test-build/harness/fixtures.js";
@@ -234,4 +234,102 @@ test("resources/list and prompts/list answer empty rather than method-not-found"
   // for a server that simply has none.
   assert.deepEqual((await call(rpc("resources/list"))).result, { resources: [] });
   assert.deepEqual((await call(rpc("prompts/list"))).result, { prompts: [] });
+});
+
+/* ── resources and prompts ───────────────────────────────────────────────── */
+
+test("resources and prompts are advertised ONLY when a corpus was supplied", async () => {
+  // Advertising a capability the server does not serve makes a conforming
+  // client call it and get a method-not-found it had every right not to expect.
+  const bare = await call(rpc("initialize"), server());
+  assert.deepEqual(Object.keys(bare.result.capabilities), ["tools"]);
+
+  const withDocs = await call(rpc("initialize"), server({ fixtures: FIXTURES }));
+  assert.deepEqual(Object.keys(withDocs.result.capabilities).sort(), ["prompts", "resources", "tools"]);
+});
+
+test("resources/list returns one entry per fixture document with a stable uri", async () => {
+  const r = await call(rpc("resources/list"), server({ fixtures: FIXTURES }));
+  assert.equal(r.result.resources.length, FIXTURES.docs.length);
+  assert.ok(FIXTURES.docs.length > 0, "the fixture corpus is empty, so this test proves nothing");
+  for (const res of r.result.resources) {
+    assert.equal(res.uri, docUri(res.name));
+    assert.equal(res.mimeType, "text/markdown");
+    assert.ok(res.title.length > 0);
+  }
+});
+
+test("resources/read returns the WHOLE document, not read_doc's five-sentence window", async () => {
+  const doc = FIXTURES.docs[0];
+  const opts = server({ fixtures: FIXTURES });
+  const res = await handleMcpMessage(rpc("resources/read", { uri: docUri(doc.id) }), opts);
+  const whole = res.result.contents[0].text;
+  assert.equal(res.result.contents[0].uri, docUri(doc.id));
+  for (const sentence of doc.sentences) {
+    assert.ok(whole.includes(sentence), "a sentence was missing from the resource body");
+  }
+
+  // The contrast that makes the point: the tool is budgeted, the resource is not.
+  const windowed = await handleMcpMessage(rpc("tools/call", { name: "read_doc", arguments: { id: doc.id } }), opts);
+  if (doc.sentences.length > 5) {
+    assert.ok(whole.length > windowed.result.content[0].text.length, "the resource was no longer than the budgeted window");
+  }
+});
+
+test("resources/read on an unknown uri names what is available", async () => {
+  const r = await call(rpc("resources/read", { uri: "webaios://docs/nope" }), server({ fixtures: FIXTURES }));
+  assert.equal(r.error.code, RPC.RESOURCE_NOT_FOUND);
+  assert.match(r.error.message, /Available: webaios:\/\/docs\//);
+});
+
+test("resources/read without a uri is invalid params", async () => {
+  const r = await call(rpc("resources/read", {}), server({ fixtures: FIXTURES }));
+  assert.equal(r.error.code, RPC.INVALID_PARAMS);
+});
+
+test("prompts/get returns the worked ReAct examples, including the refusal", async () => {
+  const opts = server({ fixtures: FIXTURES });
+  const list = await handleMcpMessage(rpc("prompts/list"), opts);
+  assert.equal(list.result.prompts.length, 1);
+  assert.equal(list.result.prompts[0].name, "react_exemplars");
+
+  const got = await handleMcpMessage(rpc("prompts/get", { name: "react_exemplars" }), opts);
+  const text = got.result.messages[0].content.text;
+  assert.match(text, /finish\[/);
+  // The example that refuses is the one worth shipping: a model shown only
+  // successes learns to produce the shape of a success.
+  assert.match(text, /cannot answer this/i);
+});
+
+test("prompts/get honours the density argument and the two differ", async () => {
+  const opts = server({ fixtures: FIXTURES });
+  const dense = await handleMcpMessage(rpc("prompts/get", { name: "react_exemplars", arguments: { density: "dense" } }), opts);
+  const sparse = await handleMcpMessage(rpc("prompts/get", { name: "react_exemplars", arguments: { density: "sparse" } }), opts);
+  assert.notEqual(dense.result.messages[0].content.text, sparse.result.messages[0].content.text);
+});
+
+test("prompts/get on an unknown name names what is available", async () => {
+  const r = await call(rpc("prompts/get", { name: "nope" }), server({ fixtures: FIXTURES }));
+  assert.equal(r.error.code, RPC.INVALID_PARAMS);
+  assert.match(r.error.message, /react_exemplars/);
+});
+
+test("a server with no corpus still answers resources/list and prompts/list empty", async () => {
+  // It does not advertise them, but a client that probes anyway should get an
+  // empty list rather than an error in its log.
+  assert.deepEqual((await call(rpc("resources/list"))).result, { resources: [] });
+  assert.deepEqual((await call(rpc("prompts/list"))).result, { prompts: [] });
+});
+
+test("the live services are exposed as tools and are labelled non-deterministic", async () => {
+  const opts = server({ fixtures: FIXTURES });
+  for (const t of webTools({ fetchText: async () => "{}" })) opts.registry.register(t);
+  const r = await handleMcpMessage(rpc("tools/list"), opts);
+  const live = r.result.tools.filter((t) => t.name.startsWith("web_"));
+  assert.ok(live.length >= 40, `only ${live.length} live tools exposed`);
+  for (const t of live) {
+    assert.equal(t.annotations.idempotentHint, false, `${t.name} claims to be idempotent`);
+    assert.equal(t.annotations.openWorldHint, true);
+    assert.match(t.description, /NOT deterministic/);
+  }
 });

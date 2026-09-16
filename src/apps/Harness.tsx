@@ -13,6 +13,10 @@ import { SEED_TASKS } from "@/lib/harness/tasks";
 import type { DefinitionOfDone, RunResult, ToolDef } from "@/lib/harness/types";
 import { Tabs, Empty, ErrorNote, Spinner, Markdown } from "./_ui";
 import { useTriggers } from "@/kernel/triggers";
+import { runGoldenSet, allTasks, invalidTasks, baselineFrom, compare, currentFingerprint, installEvals, DEFAULT_EVAL_CONCURRENCY } from "@/lib/harness-evals";
+import { suiteToMarkdown } from "@/lib/harness/evals";
+import type { EvalBaseline, EvalSuiteResult } from "@/lib/harness/types";
+import { download } from "@/lib/format";
 import { fireNow } from "@/lib/harness-triggers";
 import { newTrigger, validateTrigger, MIN_INTERVAL_MS } from "@/lib/harness/triggers";
 import type { TriggerKind, TriggerSpec } from "@/lib/harness/types";
@@ -54,7 +58,7 @@ export default function Harness({}: AppProps) {
   const [openTrace, setOpenTrace] = useState<string | null>(null);
   const abort = useRef<AbortController | null>(null);
 
-  useEffect(() => { installHarness(); }, []);
+  useEffect(() => { installHarness(); installEvals(); }, []);
 
   const dod: DefinitionOfDone =
     store.dods.find((d) => d.id === dodId) ?? DOD_EXPLORATORY;
@@ -252,26 +256,222 @@ export default function Harness({}: AppProps) {
           </div>
         )}
 
-        {tab === "golden" && (
-          <div className="max-w-3xl">
-            <p className="mb-3 text-[12px] leading-relaxed text-[var(--muted)]">
-              A fixed set of tasks to re-run after every change. Every task carries an anti-case — a deliberately
-              wrong answer its check must reject — because a check that passes on both is decoration, not a test.
+        {tab === "golden" && <GoldenPanel />}
+        {tab === "triggers" && <TriggersPanel dods={store.dods} />}
+      </div>
+    </div>
+  );
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
+   The golden set, with a button.
+
+   The suite runner, the seed tasks and the baseline diff have all existed and
+   been tested for a while; nothing called any of them. A suite nobody runs is
+   the same as no suite, except that it looks like coverage.
+
+   The panel leads with the rejected tasks rather than the results, because a
+   task refused at registration — no anti-case, a definition of done that
+   cannot fail — is a task silently covering nothing, and that is invisible in
+   a pass count.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+const BASELINE_PATH = "/harness/evals/baseline.json";
+
+function GoldenPanel() {
+  const vfs = useVFS();
+  const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState<{ done: number; total: number; label: string } | null>(null);
+  const [result, setResult] = useState<EvalSuiteResult | null>(null);
+  const [note, setNote] = useState<string | null>(null);
+  const abort = useRef<AbortController | null>(null);
+
+  const tasks = allTasks();
+  const invalid = invalidTasks();
+
+  const baseline: EvalBaseline | null = (() => {
+    const node = vfs.read(BASELINE_PATH);
+    if (!node?.content) return null;
+    try { return JSON.parse(node.content) as EvalBaseline; } catch { return null; }
+  })();
+
+  const deltas = result ? compare(result, baseline) : [];
+
+  const launch = async () => {
+    const ctrl = new AbortController();
+    abort.current = ctrl;
+    setBusy(true); setNote(null); setResult(null); setProgress(null);
+    try {
+      const r = await runGoldenSet({
+        baseline,
+        signal: ctrl.signal,
+        concurrency: DEFAULT_EVAL_CONCURRENCY,
+        onProgress: (done, total, taskId) => setProgress({ done, total, label: taskId }),
+      });
+      setResult(r);
+    } catch (e) {
+      setNote(e instanceof Error ? e.message : "The suite failed to start.");
+    } finally {
+      setBusy(false);
+      abort.current = null;
+      setProgress(null);
+    }
+  };
+
+  const pin = () => {
+    if (!result) return;
+    const b = baselineFrom(result);
+    if (!b.ok) { setNote(b.reason); return; }
+    vfs.write(BASELINE_PATH, JSON.stringify(b.baseline, null, 2), { appId: "harness" });
+    setNote("Baseline pinned. The next suite is compared against this one.");
+  };
+
+  return (
+    <div className="max-w-3xl">
+      <p className="mb-2.5 text-[12px] leading-relaxed text-[var(--muted)]">
+        A fixed set of tasks to re-run after every change. Every task carries an anti-case — an objective its
+        definition of done must NOT pass — because a check that passes on both is decoration, not a test. A suite is
+        green only when every task passes AND every anti-case fails.
+      </p>
+
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        {busy ? (
+          <button className="os-btn" onClick={() => abort.current?.abort()}>
+            <Icon name="stop" size={13} /> Stop
+          </button>
+        ) : (
+          <button className="os-btn" data-variant="primary" onClick={() => void launch()} disabled={tasks.length === 0}>
+            <Icon name="play" size={13} /> Run {tasks.length} tasks
+          </button>
+        )}
+        <span className="text-[11px] text-[var(--muted)]">
+          {tasks.length * 2} runs minimum — each task plus its anti-case, one at a time.
+        </span>
+        <div className="flex-1" />
+        <span className="os-chip !px-1.5 !py-0 !text-[9px]" title="Prompt shape, tool catalogue, fixtures and model. A baseline taken against a different surface is not comparable.">
+          surface {currentFingerprint().slice(0, 10)}
+        </span>
+        {baseline && (
+          <span className="os-chip !px-1.5 !py-0 !text-[9px]">
+            baseline {new Date(baseline.at).toISOString().slice(0, 10)}
+          </span>
+        )}
+      </div>
+
+      {note && <p className="mb-2.5 text-[11px] leading-relaxed text-[var(--muted)]">{note}</p>}
+
+      {busy && (
+        <div className="mb-3">
+          <Spinner label={progress ? `${progress.done}/${progress.total} runs — ${progress.label}` : "Starting…"} />
+        </div>
+      )}
+
+      {invalid.length > 0 && (
+        <div className="os-card mb-3 !p-2.5" style={{ borderColor: "var(--warn)" }}>
+          <div className="mb-1 flex items-center gap-1.5">
+            <Icon name="warning" size={13} style={{ color: "var(--warn)" }} />
+            <span className="text-[12px] font-medium">{invalid.length} task(s) would be refused before running</span>
+          </div>
+          <p className="mb-1.5 text-[10.5px] leading-snug text-[var(--muted)]">
+            A refused task covers nothing, and a pass count cannot show you that.
+          </p>
+          {invalid.map((t) => (
+            <div key={t.id} className="text-[10.5px] text-[var(--muted)]">
+              · <span className="text-[var(--fg)]">{t.title}</span> — {t.reasons.join(" ")}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {result && (
+        <div className="os-card mb-3 !p-2.5" style={{ borderColor: result.green ? "var(--ok)" : "var(--warn)" }}>
+          <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
+            <Icon name={result.green ? "check" : "warning"} size={13} style={{ color: result.green ? "var(--ok)" : "var(--warn)" }} />
+            <span className="text-[12.5px] font-medium">{result.green ? "Green" : "Not green"}</span>
+            <span className="os-chip !px-1.5 !py-0 !text-[9px]">{result.passed} passed</span>
+            <span className="os-chip !px-1.5 !py-0 !text-[9px]">{result.failed} failed</span>
+            {result.nonDiscriminating > 0 && (
+              <span className="os-chip !px-1.5 !py-0 !text-[9px]" style={{ color: "var(--warn)" }}>
+                {result.nonDiscriminating} non-discriminating
+              </span>
+            )}
+            <span className="os-chip !px-1.5 !py-0 !text-[9px]">${result.totals.costUsd.toFixed(4)}</span>
+            <div className="flex-1" />
+            <button className="os-btn !px-1.5 !py-0 !text-[10px]" onClick={pin}>Pin as baseline</button>
+            <button
+              className="os-btn !px-1.5 !py-0 !text-[10px]"
+              onClick={() => download(`golden-${result.startedAt}.md`, suiteToMarkdown(result), "text/markdown")}
+            >
+              Export
+            </button>
+          </div>
+
+          {result.stale && (
+            <p className="mb-1.5 text-[11px] leading-snug text-[var(--muted)]">
+              The surface changed since the baseline was taken, so the comparison below is between two different
+              measurements. Re-pin before reading a regression into it.
             </p>
-            <div className="space-y-1.5">
-              {[...store.tasks, ...SEED_TASKS].map((t) => (
-                <div key={t.id} className="os-card !p-2">
-                  <div className="flex items-center gap-1.5">
-                    <span className="min-w-0 flex-1 truncate text-[12px]">{t.title}</span>
-                    <span className="os-chip !px-1.5 !py-0 !text-[9px]">{t.category}</span>
-                  </div>
-                  <div className="mt-0.5 text-[10.5px] text-[var(--muted)]">{t.objective}</div>
+          )}
+          {result.nonDiscriminating > 0 && (
+            <p className="mb-1.5 text-[11px] leading-snug text-[var(--muted)]">
+              A non-discriminating task passed its objective AND its anti-case. That is counted as not green: a check
+              that accepts the wrong answer too is not measuring anything.
+            </p>
+          )}
+
+          <div className="space-y-0.5">
+            {result.results.map((r) => (
+              <div key={r.taskId} className="flex items-start gap-1.5 text-[10.5px]">
+                <Icon
+                  name={r.discriminates && r.pass ? "check" : "close"}
+                  size={11}
+                  className="mt-0.5 shrink-0"
+                  style={{ color: r.discriminates && r.pass ? "var(--ok)" : "var(--danger)" }}
+                />
+                <span className="w-40 shrink-0 truncate font-medium">{r.taskId}</span>
+                <span className="min-w-0 flex-1 text-[var(--muted)]">
+                  {r.error
+                    ? r.error
+                    : r.pass && !r.discriminates
+                      ? "passed, but the anti-case passed too"
+                      : r.verdict.reason}
+                </span>
+              </div>
+            ))}
+          </div>
+
+          {deltas.length > 0 && (
+            <div className="mt-2 border-t border-[var(--border)] pt-2">
+              <div className="os-label mb-1">Against the baseline</div>
+              {deltas.map((d) => (
+                <div key={`${d.taskId}:${d.kind}`} className="text-[10.5px] text-[var(--muted)]">
+                  · <span className="text-[var(--fg)]">{d.taskId}</span> {d.kind} — {d.detail}
                 </div>
               ))}
             </div>
+          )}
+        </div>
+      )}
+
+      <div className="os-label mb-1">Tasks</div>
+      <div className="space-y-1.5">
+        {tasks.map((t) => (
+          <div key={t.id} className="os-card !p-2">
+            <div className="flex items-center gap-1.5">
+              <span className="min-w-0 flex-1 truncate text-[12px]">{t.title}</span>
+              {t.origin === "production_failure" && (
+                <span className="os-chip !px-1.5 !py-0 !text-[9px]" title="Added from a real failure. It never leaves the set.">
+                  from a failure
+                </span>
+              )}
+              <span className="os-chip !px-1.5 !py-0 !text-[9px]">{t.category}</span>
+            </div>
+            <div className="mt-0.5 text-[10.5px] text-[var(--muted)]">{t.objective}</div>
+            <div className="mt-0.5 text-[10.5px] text-[var(--muted)] opacity-80">
+              <span className="opacity-70">Must NOT pass: </span>{t.anti.objective}
+            </div>
           </div>
-        )}
-        {tab === "triggers" && <TriggersPanel dods={store.dods} />}
+        ))}
       </div>
     </div>
   );
