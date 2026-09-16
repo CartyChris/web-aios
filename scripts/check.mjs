@@ -127,6 +127,33 @@ const lineAt = (src, index) => src.slice(0, index).split("\n").length;
   notes.push(`${seen.size} storage keys, all distinct`);
 }
 
+/* ── 4b. App display names are unique ────────────────────────────────────── */
+{
+  // Added after a real collision: a new app was registered as "Signals" while
+  // the Intel app already carried that name. Every id was unique, so check 2
+  // passed — but the launcher, the dock, the palette, the pin picker and the
+  // mobile shell all render the NAME, so the two apps were indistinguishable
+  // everywhere a person actually chooses between them. Uniqueness of the key
+  // is not uniqueness of the label.
+  const registrySrc = read(join(SRC, "kernel/registry.tsx"));
+  const entries = [...registrySrc.matchAll(/id:\s*["']([a-z0-9_-]+)["'],[\s\S]{0,400}?name:\s*["']([^"']+)["']/g)];
+  if (entries.length < 20) {
+    problems.push(`app names: only parsed ${entries.length} registry entries — the parser has stopped matching`);
+  }
+  const byName = new Map();
+  for (const m of entries) {
+    const [, id, name] = m;
+    const key = name.trim().toLowerCase();
+    if (byName.has(key)) {
+      problems.push(
+        `app name "${name}" is used by both "${byName.get(key)}" and "${id}" — they are indistinguishable in the launcher, dock and palette`,
+      );
+    }
+    byName.set(key, id);
+  }
+  notes.push(`${entries.length} app names, all distinct`);
+}
+
 /* ── 5. No emoji in the UI ───────────────────────────────────────────────── */
 {
   // Pictographic ranges only. Deliberately excludes the arrows, box-drawing and
@@ -170,4 +197,4 @@ if (problems.length) {
   for (const p of problems) console.error(`  ✗ ${p}`);
   process.exit(1);
 }
-console.error(`\nOK  icons resolve | app ids resolve | modules exist | keys unique | no emoji | no debug output`);
+console.error(`\nOK  icons resolve | app ids resolve | modules exist | keys unique | names unique | no emoji | no debug output`);

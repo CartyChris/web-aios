@@ -5,6 +5,7 @@ import { useWM } from "@/kernel/wm";
 import { useVFS } from "@/kernel/vfs";
 import { useUserApps } from "@/kernel/userapps";
 import { useCustomWidgets } from "@/kernel/widgets";
+import { useTriggers } from "@/kernel/triggers";
 import { APPS, getApp } from "@/kernel/registry";
 import { bus } from "@/kernel/bus";
 import { useMcp } from "./mcp";
@@ -71,6 +72,7 @@ const STORES = {
   widgets: useCustomWidgets,
   mcp: useMcp,
   eggs: useEggs,
+  triggers: useTriggers,
 } as const;
 
 function snapshot(): Record<string, unknown> {
@@ -90,6 +92,17 @@ function snapshot(): Record<string, unknown> {
     notifications: wm.notifications.length,
     files: vfs.usage(),
     userApps: useUserApps.getState().apps.map((a) => ({ id: a.id, name: a.name, kind: a.kind, files: a.files?.length ?? 0 })),
+    // Layer 1 at a glance. `armed` is the one field worth seeing without
+    // opening the app: a disarmed OS starts no runs and spends nothing.
+    triggers: (() => {
+      const t = useTriggers.getState();
+      return {
+        armed: t.armed,
+        count: t.triggers.length,
+        neverFired: t.triggers.filter((x) => x.firedCount === 0).map((x) => x.id),
+        attempts: t.attempts.length,
+      };
+    })(),
     apps: APPS.map((a) => a.id),
   };
 }

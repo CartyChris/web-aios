@@ -9,6 +9,12 @@ import { PROVIDERS, getProvider } from "@/lib/providers";
 import type { AppProps } from "@/kernel/types";
 import { uid, download } from "@/lib/format";
 import { Markdown, CopyButton, ErrorNote, Tabs, Slider, Toggle } from "./_ui";
+import {
+  swarmDod, judgeSwarm, validateSwarmDod, profilesForFormation, bidRequestFor, rankAgents,
+  type SwarmSnapshot,
+} from "@/lib/harness/swarm";
+import { useHarness } from "@/kernel/harness";
+import type { Award, DodVerdict } from "@/lib/harness/types";
 import { cn } from "@/lib/cn";
 import { Icon } from "@/shell/icons";
 
@@ -129,6 +135,12 @@ export default function Swarm({}: AppProps) {
   const [concurrency, setConcurrency] = useState(3);
   const [doSynthesis, setDoSynthesis] = useState(true);
   const [maxTokensPerAgent, setMaxTokensPerAgent] = useState(1200);
+  // A swarm must ALWAYS have a definition of done. `verdict` is what makes a
+  // run able to fail; before this, every swarm "succeeded" because nothing was
+  // ever asked to fail.
+  const [verdict, setVerdict] = useState<DodVerdict | null>(null);
+  const [award, setAward] = useState<Award | null>(null);
+  const [useBidding, setUseBidding] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
 
   const loadFormation = useCallback((id: string) => {
@@ -138,6 +150,8 @@ export default function Swarm({}: AppProps) {
     setAgents(f.agents.map((a) => ({ ...a, id: uid("ag"), enabled: true })));
     setRuns({});
     setSynthesis("");
+    setVerdict(null);
+    setAward(null);
   }, []);
 
   const totalCost = useMemo(() => Object.values(runs).reduce((a, r) => a + (r.costUsd ?? 0), 0), [runs]);
@@ -147,20 +161,64 @@ export default function Swarm({}: AppProps) {
     if (!question.trim() || busy) return;
     if (!active.length) { setError("Enable at least one agent."); return; }
 
+    // The floor every swarm is held to. Built before anything runs, and
+    // refused if it could not fail — a definition of done that passes
+    // everything is worse than none, because it manufactures confidence.
+    const dod = swarmDod({ owner: "the operator", minAgents: Math.min(2, active.length) });
+    const dodCheck = validateSwarmDod(dod);
+    if (!dodCheck.ok) {
+      setError(`This swarm has no usable definition of done: ${dodCheck.reasons.join(" ")}`);
+      return;
+    }
+
     setError(null);
     setBusy(true);
     setSynthesis("");
+    setVerdict(null);
+    setAward(null);
     setRuns(Object.fromEntries(active.map((a) => [a.id, { agentId: a.id, status: "idle" as const, output: "" }])));
 
     const ctrl = new AbortController();
     abortRef.current = ctrl;
+    const startedAt = Date.now();
+    let finalSynthesis = "";
+    // A plain local map rather than a ref: `runs` state is async and the
+    // snapshot below must see what actually happened, not what React has
+    // committed by then.
+    const ledger = new Map<string, { status: AgentRun["status"]; output: string; costUsd: number; ms: number }>();
+    for (const a of active) ledger.set(a.id, { status: "idle", output: "", costUsd: 0, ms: 0 });
+
+    // Who runs, decided from measured history rather than from whoever happens
+    // to be on the list. Off by default: with no run history the ranking is
+    // priors only, and a ranking with no evidence behind it should not quietly
+    // start excluding agents the user enabled.
+    const budgetLeft = settings.ai.budgetUsd > 0 ? Math.max(0, settings.ai.budgetUsd - settings.ai.spentUsd) : 0;
+    let roster = active;
+    if (useBidding) {
+      const profiles = profilesForFormation(formationId, active);
+      const req = bidRequestFor({
+        question, formationId, dodId: dod.id,
+        maxCostUsd: budgetLeft,
+        deadlineMs: 120_000,
+      });
+      const ranked = rankAgents(profiles, req);
+      setAward(ranked.award);
+      const allowed = new Set(ranked.withinBudget);
+      roster = active.filter((a) => allowed.has(a.id));
+      for (const a of active) {
+        if (!allowed.has(a.id)) {
+          setRuns((r) => ({ ...r, [a.id]: { agentId: a.id, status: "skipped", output: "", error: "Not awarded by the bidding pass" } }));
+          ledger.set(a.id, { status: "skipped", output: "", costUsd: 0, ms: 0 });
+        }
+      }
+    }
 
     const results: Array<{ agent: Agent; text: string }> = [];
     let stoppedForBudget = false;
 
     // A bounded worker pool. Unbounded Promise.all over a formation is how a
     // swarm turns into a rate-limit wall and a bill nobody approved.
-    const queue = [...active];
+    const queue = [...roster];
     const worker = async () => {
       while (queue.length) {
         if (ctrl.signal.aborted) return;
@@ -171,6 +229,7 @@ export default function Swarm({}: AppProps) {
         if (s.ai.budgetUsd > 0 && s.ai.spentUsd >= s.ai.budgetUsd) {
           stoppedForBudget = true;
           setRuns((r) => ({ ...r, [agent.id]: { agentId: agent.id, status: "skipped", output: "", error: "Budget reached" } }));
+          ledger.set(agent.id, { status: "skipped", output: "", costUsd: 0, ms: 0 });
           continue;
         }
 
@@ -188,16 +247,20 @@ export default function Swarm({}: AppProps) {
           });
           results.push({ agent, text: res.text });
           setRuns((r) => ({ ...r, [agent.id]: { agentId: agent.id, status: "done", output: res.text, ms: res.ms, costUsd: res.costUsd } }));
+          ledger.set(agent.id, { status: "done", output: res.text, costUsd: res.costUsd, ms: res.ms });
         } catch (e) {
           if ((e as Error).name === "AbortError") return;
           const msg = e instanceof Error ? e.message : "Agent failed.";
           setRuns((r) => ({ ...r, [agent.id]: { agentId: agent.id, status: "error", output: "", error: msg } }));
+          // The message is carried as output so the DoD can tell a failure
+          // that explained itself from one that left a hole in the record.
+          ledger.set(agent.id, { status: "error", output: msg, costUsd: 0, ms: 0 });
         }
       }
     };
 
     try {
-      await Promise.all(Array.from({ length: Math.min(concurrency, active.length) }, worker));
+      await Promise.all(Array.from({ length: Math.max(1, Math.min(concurrency, roster.length)) }, worker));
 
       if (stoppedForBudget) setError(`Budget of $${useSettings.getState().ai.budgetUsd.toFixed(2)} reached — some agents were skipped.`);
 
@@ -211,15 +274,49 @@ export default function Swarm({}: AppProps) {
           onDelta: (_d, full) => setSynthesis(full),
         });
         setSynthesis(res.text);
+        finalSynthesis = res.text;
       }
-      bus.emit("notify", { title: "Swarm finished", body: `${results.length} of ${active.length} agents completed.`, kind: "success" });
+
+      // Judged by code, from the outcomes. The synthesis pass and the judge
+      // would otherwise be the same model grading its own work, which is the
+      // verifier problem in its purest form.
+      const snapshot: SwarmSnapshot = {
+        question,
+        formationId,
+        outcomes: active.map((a) => {
+          const r = ledger.get(a.id);
+          return {
+            agentId: a.id,
+            agentName: a.name,
+            status: r?.status ?? "idle",
+            output: r?.output ?? "",
+            costUsd: r?.costUsd ?? 0,
+            ms: r?.ms ?? 0,
+          };
+        }),
+        synthesis: finalSynthesis,
+        startedAt,
+        endedAt: Date.now(),
+      };
+      const judged = judgeSwarm(snapshot, dod, uid("swarm"));
+      setVerdict(judged.verdict);
+      // The run joins the same ledger a harness run does, so a swarm that
+      // failed its floor is visible next to every other run rather than only
+      // in this window until it closes.
+      useHarness.getState().record(judged.run, "");
+
+      bus.emit("notify", {
+        title: judged.verdict.pass ? "Swarm met its definition of done" : "Swarm did NOT meet its definition of done",
+        body: judged.verdict.reason.slice(0, 160),
+        kind: judged.verdict.pass ? "success" : "warning",
+      });
     } catch (e) {
       if ((e as Error).name !== "AbortError") setError(e instanceof Error ? e.message : "Swarm failed.");
     } finally {
       setBusy(false);
       abortRef.current = null;
     }
-  }, [question, busy, active, concurrency, doSynthesis, maxTokensPerAgent]);
+  }, [question, busy, active, concurrency, doSynthesis, maxTokensPerAgent, formationId, useBidding, settings.ai.budgetUsd, settings.ai.spentUsd]);
 
   const report = useCallback(() => {
     const lines = [
@@ -282,6 +379,13 @@ export default function Swarm({}: AppProps) {
                   Launch {active.length} agents
                 </button>
               )}
+              <button
+                onClick={() => setUseBidding((v) => !v)}
+                title="Rank agents by measured pass rate and mean cost before running, and drop the ones the budget cannot cover."
+                className={cn("os-btn !py-1 text-[11px]", useBidding && "!border-[var(--accent)] !bg-[var(--accent)]/16")}
+              >
+                Bidding {useBidding ? "on" : "off"}
+              </button>
               <span className="text-[11px] text-[var(--muted)]">
                 {FORMATIONS.find((f) => f.id === formationId)?.description}
               </span>
@@ -299,6 +403,61 @@ export default function Swarm({}: AppProps) {
           </div>
 
           <div className="min-h-0 flex-1 overflow-y-auto p-2.5">
+            {verdict && (
+              <div
+                className="os-card mb-3"
+                style={{ borderColor: verdict.pass ? "var(--accent)" : "var(--danger)" }}
+              >
+                <div className="mb-1.5 flex flex-wrap items-center gap-2">
+                  <span className="os-chip" style={{ color: verdict.pass ? "var(--accent)" : "var(--danger)" }}>
+                    <Icon name={verdict.pass ? "check" : "warning"} className="h-3.5 w-3.5" />
+                    {verdict.pass ? "Met its definition of done" : "Did NOT meet its definition of done"}
+                  </span>
+                  <span className="os-chip">score {(verdict.score * 100).toFixed(0)}%</span>
+                  <div className="flex-1" />
+                  <CopyButton text={verdict.reason} label="Copy verdict" className="!px-1.5 !py-0 !text-[10px]" />
+                </div>
+                <p className="mb-2 text-[11px] leading-relaxed text-[var(--muted)]">{verdict.reason}</p>
+                <ul className="space-y-1">
+                  {verdict.outcomes.map((o) => (
+                    <li key={o.criterionId} className="flex items-start gap-2 text-[11px]">
+                      <Icon
+                        name={o.met === true ? "check" : o.met === false ? "close" : "half"}
+                        className="mt-0.5 h-3.5 w-3.5 shrink-0"
+                        style={{ color: o.met === true ? "var(--accent)" : o.met === false ? "var(--danger)" : "var(--muted)" }}
+                      />
+                      <span className="min-w-0">
+                        <span className="font-medium">{o.criterionId}</span>
+                        <span className="ml-1.5 text-[var(--muted)]">{o.observed}</span>
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+                <p className="mt-2 text-[10px] leading-snug text-[var(--muted)]">
+                  Judged by code against fixed criteria, never by a model. A synthesis pass grading its own
+                  synthesis agrees with itself, and that looks exactly like success.
+                </p>
+              </div>
+            )}
+
+            {award && (
+              <details className="os-card mb-3">
+                <summary className="cursor-pointer text-[12px] font-medium">
+                  Bidding pass — {award.winner ? `${award.winner.agentId} led` : "no winner"}, {award.abstained.length} abstained
+                </summary>
+                <p className="mt-1.5 text-[11px] leading-relaxed text-[var(--muted)]">{award.reason}</p>
+                <ul className="mt-1.5 space-y-0.5">
+                  {[...(award.winner ? [award.winner] : []), ...award.runnersUp, ...award.abstained].map((b) => (
+                    <li key={b.agentId} className="text-[10.5px] text-[var(--muted)]">
+                      <span className="font-medium text-[var(--fg)]">{b.agentId}</span>
+                      {" — "}
+                      {b.abstainReason ? `abstained: ${b.abstainReason}` : b.rationale}
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            )}
+
             {synthesis && (
               <div className="os-card mb-3" style={{ borderColor: "var(--accent)" }}>
                 <div className="mb-1.5 flex items-center gap-2">

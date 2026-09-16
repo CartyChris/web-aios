@@ -38,6 +38,11 @@
     "src/lib/harness/resilience.ts",
     "src/lib/harness/evals.ts",
     "src/lib/harness/tasks.ts",
-    "src/lib/harness/models.ts"
+    "src/lib/harness/models.ts",
+    "src/lib/services.ts",
+    "src/lib/harness/webtools.ts",
+    "src/lib/harness/mcp-server.ts",
+    "src/lib/harness/triggers.ts",
+    "src/lib/harness/swarm.ts"
   ]
 }

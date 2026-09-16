@@ -12,6 +12,10 @@ import { DEFAULT_LOOP_CONFIG, DOD_EXPLORATORY } from "@/lib/harness/config";
 import { SEED_TASKS } from "@/lib/harness/tasks";
 import type { DefinitionOfDone, RunResult, ToolDef } from "@/lib/harness/types";
 import { Tabs, Empty, ErrorNote, Spinner, Markdown } from "./_ui";
+import { useTriggers } from "@/kernel/triggers";
+import { fireNow } from "@/lib/harness-triggers";
+import { newTrigger, validateTrigger, MIN_INTERVAL_MS } from "@/lib/harness/triggers";
+import type { TriggerKind, TriggerSpec } from "@/lib/harness/types";
 import { relTime } from "@/lib/format";
 import { cn } from "@/lib/cn";
 import { Icon } from "@/shell/icons";
@@ -38,6 +42,7 @@ const TOOL_LIST: ToolDef[] = (() => {
 
 export default function Harness({}: AppProps) {
   const store = useHarness();
+  const triggers = useTriggers();
   const vfs = useVFS();
   const [tab, setTab] = useState("run");
   const [objective, setObjective] = useState("");
@@ -94,6 +99,7 @@ export default function Harness({}: AppProps) {
           { id: "tools", label: `Tools (${TOOL_LIST.length})`, icon: "tune" },
           { id: "done", label: "Definition of done", icon: "gate" },
           { id: "golden", label: `Golden set (${store.tasks.length + SEED_TASKS.length})`, icon: "doubleCheck" },
+          { id: "triggers", label: `Triggers (${triggers.triggers.length})`, icon: "trigger" },
         ]}
         active={tab}
         onChange={setTab}
@@ -265,7 +271,170 @@ export default function Harness({}: AppProps) {
             </div>
           </div>
         )}
+        {tab === "triggers" && <TriggersPanel dods={store.dods} />}
       </div>
+    </div>
+  );
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
+   Layer 1, made visible.
+
+   The reason this panel leads with the attempt ledger rather than the trigger
+   list: a trigger layer's characteristic failure is silence, and a trigger
+   that has never fired looks identical whether its pattern is wrong, its
+   events never happen, or it fired and was correctly deduplicated. Writing
+   down every decision — including the refusals, with their reason — is the
+   only thing that tells those apart.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+const TRIGGER_KINDS: Array<{ id: TriggerKind; label: string; hint: string; placeholder: string }> = [
+  { id: "event", label: "Bus event", hint: "Fires when an app publishes a matching event. Use prefix:* to widen.", placeholder: "artifact:created" },
+  { id: "schedule", label: "Schedule", hint: `every:15m, every:2h or at:09:30. Minimum interval ${MIN_INTERVAL_MS / 1000}s.`, placeholder: "every:30m" },
+  { id: "file", label: "File written", hint: "Fires when a file is written under this VFS path.", placeholder: "/notes" },
+];
+
+function TriggersPanel({ dods }: { dods: DefinitionOfDone[] }) {
+  const t = useTriggers();
+  const [kind, setKind] = useState<TriggerKind>("event");
+  const [match, setMatch] = useState("");
+  const [objective, setObjective] = useState("");
+  const [dodId, setDodId] = useState(dods[0]?.id ?? DOD_EXPLORATORY.id);
+  const [problem, setProblem] = useState<string | null>(null);
+
+  const draft: TriggerSpec = newTrigger({
+    id: "draft", createdAt: 0, kind, match, objectiveTemplate: objective, dodId, configId: "default", enabled: true,
+  });
+  const check = validateTrigger(draft);
+  const meta = TRIGGER_KINDS.find((k) => k.id === kind);
+
+  const add = () => {
+    if (!check.ok) { setProblem(check.reasons.join(" ")); return; }
+    setProblem(null);
+    t.save(newTrigger({ ...draft, id: `trg_${Date.now().toString(36)}`, createdAt: Date.now(), enabled: false }));
+    setMatch(""); setObjective("");
+  };
+
+  return (
+    <div className="max-w-3xl">
+      <div className="os-card mb-3 !p-2.5">
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            onClick={() => t.setArmed(!t.armed)}
+            className={cn("os-btn", t.armed && "!border-[var(--accent)] !bg-[var(--accent)]/16")}
+          >
+            <Icon name={t.armed ? "play" : "pause"} size={13} /> {t.armed ? "Armed" : "Disarmed"}
+          </button>
+          <p className="flex-1 text-[11px] leading-snug text-[var(--muted)]">
+            Disarmed, triggers are evaluated and their decisions recorded, but no run starts and nothing is spent.
+            A page that begins paying for model calls because it was left open in a background tab is not a page
+            you can leave open in a background tab.
+          </p>
+        </div>
+      </div>
+
+      <div className="os-card mb-3 !p-2.5">
+        <div className="os-label mb-1.5">New trigger</div>
+        <div className="mb-2 flex flex-wrap gap-1.5">
+          {TRIGGER_KINDS.map((k) => (
+            <button
+              key={k.id}
+              onClick={() => { setKind(k.id); setMatch(""); }}
+              className={cn("os-btn !py-1 text-[11px]", kind === k.id && "!border-[var(--accent)] !bg-[var(--accent)]/16")}
+            >
+              {k.label}
+            </button>
+          ))}
+        </div>
+        <input
+          className="os-input mb-1.5 w-full text-[12px]"
+          placeholder={meta?.placeholder}
+          value={match}
+          onChange={(e) => setMatch(e.target.value)}
+        />
+        <p className="mb-2 text-[10.5px] text-[var(--muted)]">{meta?.hint}</p>
+        <textarea
+          className="os-input mb-1.5 w-full resize-none text-[12px]"
+          rows={2}
+          placeholder={kind === "schedule" ? "Summarise what changed since {{now}}" : "Read {{payload.path}} and list what it commits us to"}
+          value={objective}
+          onChange={(e) => setObjective(e.target.value)}
+        />
+        <p className="mb-2 text-[10.5px] text-[var(--muted)]">
+          {"{{payload}}, {{payload.field}}, {{now}} and {{trigger}} are substituted. An unresolved placeholder is left "}
+          standing rather than blanked, so a mistyped field is visible instead of producing an objective with a hole in it.
+        </p>
+        <div className="flex flex-wrap items-center gap-2">
+          <select className="os-input !py-1 text-[11px]" value={dodId} onChange={(e) => setDodId(e.target.value)}>
+            {dods.map((d) => <option key={d.id} value={d.id}>{d.label}</option>)}
+          </select>
+          <button className="os-btn" onClick={add} disabled={!check.ok}>
+            <Icon name="plus" size={13} /> Add, disabled
+          </button>
+          {!check.ok && <span className="text-[11px] text-[var(--muted)]">{check.reasons[0]}</span>}
+        </div>
+        {problem && <p className="mt-1.5 text-[11px] text-[var(--danger)]">{problem}</p>}
+      </div>
+
+      {t.triggers.length === 0 ? (
+        <Empty icon="trigger" title="No triggers." body="Layer 1 is what lets a run start without someone watching it start." />
+      ) : (
+        <div className="mb-3 space-y-1.5">
+          {t.triggers.map((spec) => (
+            <div key={spec.id} className="os-card !p-2">
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="os-chip !px-1.5 !py-0 !text-[9px]">{spec.kind}</span>
+                <span className="min-w-0 flex-1 truncate font-mono text-[11px]">{spec.match || "(any)"}</span>
+                <span
+                  className="os-chip !px-1.5 !py-0 !text-[9px]"
+                  title="A trigger that has never fired is a bug you cannot otherwise see."
+                >
+                  fired {spec.firedCount}x
+                </span>
+                <button className="os-btn !px-1.5 !py-0 !text-[10px]" onClick={() => t.setEnabled(spec.id, !spec.enabled)}>
+                  {spec.enabled ? "On" : "Off"}
+                </button>
+                <button className="os-btn !px-1.5 !py-0 !text-[10px]" onClick={() => void fireNow(spec.id, { path: spec.match })}>
+                  Test
+                </button>
+                <button className="os-btn !px-1.5 !py-0 !text-[10px]" onClick={() => t.remove(spec.id)}>
+                  <Icon name="trash" size={11} />
+                </button>
+              </div>
+              <div className="mt-0.5 truncate text-[10.5px] text-[var(--muted)]">{spec.objectiveTemplate}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="os-label mb-1 flex items-center gap-2">
+        Decision ledger
+        {t.attempts.length > 0 && (
+          <button className="os-btn !px-1.5 !py-0 !text-[10px]" onClick={() => t.clearAttempts()}>Clear</button>
+        )}
+      </div>
+      {t.attempts.length === 0 ? (
+        <p className="text-[11px] text-[var(--muted)]">
+          Nothing evaluated yet. Every decision lands here, including the refusals — that is how you tell a
+          trigger that never matched from one that matched and was correctly suppressed.
+        </p>
+      ) : (
+        <div className="space-y-0.5">
+          {t.attempts.slice(0, 60).map((a) => (
+            <div key={a.id} className="flex items-start gap-1.5 text-[10.5px]">
+              <Icon
+                name={a.fired ? "check" : "ban"}
+                size={11}
+                className="mt-0.5 shrink-0"
+                style={{ color: a.fired ? "var(--ok)" : "var(--muted)" }}
+              />
+              <span className="shrink-0 text-[var(--muted)]">{relTime(a.at)}</span>
+              <span className="shrink-0 font-medium">{a.reason}</span>
+              <span className="min-w-0 flex-1 truncate text-[var(--muted)]">{a.detail}</span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

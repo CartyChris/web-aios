@@ -127,6 +127,10 @@ export const ICONS: Record<string, React.ReactNode> = {
   quick: <><P d="M13.4 2.8 5.2 13.4h5.4l-.8 7.8 8.2-10.6h-5.4z" /></>,
   sticky: <><P d="M4.5 4.5h15v10l-5 5h-10z" /><P d="M19.5 14.5h-5v5" /></>,
   spark: <><P d="M12 3.2l2.1 5.3 5.3 2.1-5.3 2.1L12 18l-2.1-5.3L4.6 10.6l5.3-2.1z" /></>,
+  // A dish pointed up and to the right, with two arcs leaving it: the app
+  // fetches from elsewhere and does not transmit.
+  signals: <><P d="M4.4 19.6 13 11" /><circle cx="3.6" cy="20.4" r="1.2" /><P d="M8.8 15.2a6 6 0 0 1 0-8.5 6 6 0 0 1 8.5 0" /><P d="M14.6 12.2a2.6 2.6 0 0 1 3.7 0" /><P d="M17.4 4.2a9.6 9.6 0 0 1 2.9 6.8" /></>,
+  trigger: <><P d="M13.4 2.8 4.6 13.6h6l-1 7.6 8.8-10.8h-6z" /></>,
   storage: <><ellipse cx="12" cy="6.4" rx="7.6" ry="2.9" /><P d="M4.4 6.4v11.2c0 1.6 3.4 2.9 7.6 2.9s7.6-1.3 7.6-2.9V6.4" /><P d="M4.4 12c0 1.6 3.4 2.9 7.6 2.9s7.6-1.3 7.6-2.9" /></>,
 
   /* ── Generic UI ───────────────────────────────────────────────────────── */

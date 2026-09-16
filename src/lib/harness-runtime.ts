@@ -9,6 +9,8 @@ import { registerAiosModule } from "./aios-api";
 import { uid } from "./format";
 import { runReAct, type LoopDeps } from "./harness/loop";
 import { createRegistry, builtinTools, toolCatalogueText } from "./harness/tools";
+import { webTools, DEFAULT_WEB_TOOLS } from "./harness/webtools";
+import { SERVICES, type ServiceDef } from "./services";
 import { FIXTURES } from "./harness/fixtures";
 import { createFactStore } from "./harness/context";
 import { traceToMarkdown } from "./harness/trace";
@@ -39,10 +41,45 @@ export interface StartRunOptions {
   /** Paths in the VFS the agent is allowed to see. Layer 4: what the agent may
    *  read is a decision someone makes, not whatever happens to be lying around. */
   factPaths?: string[];
+  /** Service ids from lib/services.ts to expose as live tools. Omitted means
+   *  DEFAULT_WEB_TOOLS; an explicit [] means none, which is what a run that
+   *  must be replayable byte for byte should pass. */
+  webServices?: string[];
   trigger?: Partial<TriggerEvent>;
   signal?: AbortSignal;
   approve?: (tool: ToolDef, args: Record<string, unknown>) => Promise<string | null>;
   onSpan?: (span: Span) => void;
+}
+
+/**
+ * The harness's transport to the open web.
+ *
+ * `lib/harness/webtools.ts` is pure and takes this as a dependency, which is
+ * what lets the whole live catalogue be driven in Node against recorded
+ * payloads. This is the browser half: a CORS-enabled host directly, everything
+ * else through the SSRF-guarded relay the Browser and Atlas apps already use.
+ *
+ * It THROWS on a bad status rather than returning the error body. A 429 page
+ * handed to a parser produces a parse failure, and a parse failure reads as
+ * "the API changed" — which would send whoever is debugging it in exactly the
+ * wrong direction.
+ */
+async function browserFetchText(url: string, o: { signal: AbortSignal; reach: ServiceDef["reach"] }): Promise<string> {
+  if (o.reach === "direct") {
+    const res = await fetch(url, { signal: o.signal, headers: { accept: "application/json, text/plain, */*" } });
+    if (!res.ok) throw new Error(`the service answered HTTP ${res.status}`);
+    return res.text();
+  }
+  const res = await fetch(`/api/proxy?mode=raw&url=${encodeURIComponent(url)}`, { signal: o.signal });
+  if (!res.ok) {
+    let detail = `HTTP ${res.status}`;
+    try {
+      const j = (await res.json()) as { error?: string };
+      if (j.error) detail = j.error;
+    } catch { /* a non-JSON error body is still an error */ }
+    throw new Error(detail);
+  }
+  return res.text();
 }
 
 /** Turn allowed VFS paths into the agent's readable memory. */
@@ -91,6 +128,15 @@ export async function startRun(opts: StartRunOptions): Promise<RunResult> {
       }
     },
   })) registry.register(tool);
+
+  // The free services, as live tools. Every one is marked non-deterministic,
+  // which `toolCatalogueText` renders into the system prompt as "do not quote
+  // it as a fixed figure" — the distinction between an audited number and a
+  // live one is the whole reason the deterministic tools exist.
+  const wanted = opts.webServices ?? DEFAULT_WEB_TOOLS;
+  if (wanted.length > 0) {
+    for (const tool of webTools({ only: wanted, fetchText: browserFetchText })) registry.register(tool);
+  }
 
   const spans: Span[] = [];
   const emit = (span: Span) => {
@@ -162,8 +208,10 @@ export function installHarness() {
     tools: () => {
       const r = createRegistry();
       for (const t of builtinTools({ fixtures: FIXTURES })) r.register(t);
-      return r.list().map((t) => ({ name: t.name, deterministic: t.deterministic }));
+      for (const t of webTools({ only: DEFAULT_WEB_TOOLS, fetchText: browserFetchText })) r.register(t);
+      return r.list().map((t) => ({ name: t.name, deterministic: t.deterministic, openWorld: t.annotations.openWorld }));
     },
+    services: () => SERVICES.map((s) => ({ id: s.id, provider: s.provider, reach: s.reach })),
     runs: () => useHarness.getState().runs,
     defaultConfig: DEFAULT_LOOP_CONFIG,
   });

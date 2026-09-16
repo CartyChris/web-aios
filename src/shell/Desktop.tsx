@@ -22,6 +22,8 @@ import { DesktopIcons } from "./DesktopIcons";
 import { PinPicker } from "./PinPicker";
 import { EGGS, useEggs, watchSequences } from "@/lib/easter";
 import { installAiosApi } from "@/lib/aios-api";
+import { installTriggers, startTriggerRuntime, instrumentVfs } from "@/lib/harness-triggers";
+import { installSpanRecorder } from "@/kernel/spans";
 
 export function Desktop() {
   const hydrated = useHydrated();
@@ -48,7 +50,19 @@ export function Desktop() {
   // ── External control surface ──────────────────────────────────────────────
   // Installed as early as the shell mounts so automation, the console and the
   // harness all have the same way in. See lib/aios-api.ts for why this exists.
-  useEffect(() => { installAiosApi(); }, []);
+  useEffect(() => {
+    installAiosApi();
+    installTriggers();
+    // The span ring is the OS's, not Observatory's. A trace lost by closing a
+    // window is exactly the trace you wanted afterwards.
+    const stopSpans = installSpanRecorder(bus);
+    // The VFS does not publish its writes, so a file trigger would otherwise
+    // never receive a signal. Wrapping the store once at boot is what puts
+    // them on the bus.
+    instrumentVfs();
+    const stopTriggers = startTriggerRuntime();
+    return () => { stopSpans(); stopTriggers(); };
+  }, []);
 
   // ── Startup apps ──────────────────────────────────────────────────────────
   useEffect(() => {

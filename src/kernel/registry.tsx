@@ -174,6 +174,20 @@ export const APPS: AppManifest[] = [
     accent: "#f472b6",
   },
   {
+    id: "opendata",
+    // NOT "Signals": the Intel app already carries that name, and two apps
+    // sharing a display name are indistinguishable in the launcher, the dock,
+    // the palette and the pin picker.
+    name: "Open Data",
+    icon: "signals",
+    category: "research",
+    description: "Two dozen free public data services — no key, no account, no billing.",
+    component: lazy(() => import("@/apps/OpenData")),
+    defaultSize: { w: 1000, h: 700 },
+    permissions: ["network", "storage"],
+    accent: "#38bdf8",
+  },
+  {
     id: "browser",
     name: "Browser",
     icon: "browser",

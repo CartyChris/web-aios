@@ -1,12 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { bus } from "@/kernel/bus";
+import { useMemo, useState } from "react";
 import { useSettings } from "@/kernel/settings";
 import type { AppProps } from "@/kernel/types";
 import { relTime, download } from "@/lib/format";
 import { useNow } from "@/lib/useNow";
 import { Tabs, Empty, CopyButton } from "./_ui";
+import { useSpans } from "@/kernel/spans";
 import { cn } from "@/lib/cn";
 import { Icon } from "@/shell/icons";
 
@@ -79,19 +79,18 @@ function similarity(a: string, b: string): number {
 
 export default function Observatory({}: AppProps) {
   const settings = useSettings();
-  const [spans, setSpans] = useState<Span[]>([]);
+  // The ring lives in the kernel now: a trace you lose by closing the window
+  // is exactly the trace you wanted afterwards.
+  const spanStore = useSpans();
+  const spans = spanStore.spans as unknown as Span[];
   const [tab, setTab] = useState("spans");
   const [sel, setSel] = useState<string | null>(null);
   // An unfinished span is measured to "now", which must not be read mid-render.
   const now = useNow(1_000);
 
-  useEffect(() => {
-    const off = bus.on("span", (p) => {
-      const s = p as Span;
-      if (s?.id) setSpans((prev) => [...prev.filter((x) => x.id !== s.id), s].slice(-400));
-    });
-    return off;
-  }, []);
+  // No subscription here. The shell subscribes once at boot, so a run that
+  // happens while this window is shut is still recorded — which is the point
+  // of moving the ring out of the component.
 
   const flags = useMemo(() => analyse(spans), [spans]);
   const totals = useMemo(() => ({
@@ -118,7 +117,7 @@ export default function Observatory({}: AppProps) {
         <span className="os-chip">~${totals.cost.toFixed(4)}</span>
         <span className="os-chip">{(totals.tokensIn + totals.tokensOut).toLocaleString()} tokens</span>
         <div className="flex-1" />
-        <button className="os-btn !py-1 text-[11px]" onClick={() => setSpans([])}>Clear</button>
+        <button className="os-btn !py-1 text-[11px]" onClick={() => spanStore.clear()}>Clear</button>
         <button className="os-btn !py-1 text-[11px]" onClick={() => download(`trace-${Date.now()}.json`, JSON.stringify({ spans, flags }, null, 2), "application/json")}>Export trace</button>
       </div>
 
