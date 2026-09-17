@@ -2,6 +2,7 @@
 
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
+import { resolveOpen } from "@/lib/window-open";
 import type { Notification, WindowInstance, WindowState } from "./types";
 
 /** Where a window lands when dropped against an edge or driven by a keybinding. */
@@ -52,8 +53,11 @@ export interface OpenOptions {
   args?: Record<string, unknown>;
   size?: { w: number; h: number };
   at?: { x: number; y: number };
-  /** Focus an existing instance instead of spawning a second one. */
+  /** Focus an existing instance on THIS workspace instead of spawning a
+   *  second one beside it. Other workspaces get their own copy. */
   singleton?: boolean;
+  /** Open another window even for a singleton app. */
+  forceNew?: boolean;
   workspace?: number;
 }
 
@@ -122,21 +126,28 @@ export const useWM = create<WMState>()(
 
       open: (appId, opts = {}) => {
         const s = get();
-        if (opts.singleton) {
-          const existing = s.windows.find((w) => w.appId === appId);
-          if (existing) {
-            set({
-              activeWorkspace: existing.pinned ? s.activeWorkspace : existing.workspace,
-              focused: existing.id,
-              topZ: s.topZ + 1,
-              windows: s.windows.map((w) =>
-                w.id === existing.id
-                  ? { ...w, z: s.topZ + 1, state: w.state === "minimized" ? "normal" : w.state, args: opts.args ?? w.args }
-                  : w,
-              ),
-            });
-            return existing.id;
-          }
+        // Singleton is per WORKSPACE, not per OS. See lib/window-open.ts: the
+        // old rule matched on appId alone, so opening an app from workspace 3
+        // while it sat on workspace 1 teleported you there instead of opening
+        // it where you were. Four desktops, three of which could never hold it.
+        const decision = resolveOpen({
+          appId,
+          windows: s.windows,
+          activeWorkspace: s.activeWorkspace,
+          singleton: opts.singleton,
+          forceNew: opts.forceNew,
+        });
+        if (decision.action === "focus") {
+          set({
+            focused: decision.windowId,
+            topZ: s.topZ + 1,
+            windows: s.windows.map((w) =>
+              w.id === decision.windowId
+                ? { ...w, z: s.topZ + 1, state: w.state === "minimized" ? "normal" : w.state, args: opts.args ?? w.args }
+                : w,
+            ),
+          });
+          return decision.windowId;
         }
         const v = viewport();
         const size = opts.size ?? { w: 880, h: 600 };

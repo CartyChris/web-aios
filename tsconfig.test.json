@@ -47,6 +47,7 @@
     "src/lib/mcp-directory.ts",
     "src/lib/appversions.ts",
     "src/lib/swarm-plan.ts",
+    "src/lib/window-open.ts",
     "src/lib/petmind.ts"
   ]
 }

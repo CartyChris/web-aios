@@ -117,6 +117,28 @@ export function DesktopIcons({ topInset }: { topInset: number }) {
   );
 
   /* ── Marquee ─────────────────────────────────────────────────────────── */
+  /**
+   * Is this press on bare desktop?
+   *
+   * It has to be asked of the whole document rather than of one element,
+   * because the widget layer sits ABOVE the icon surface and every widget card
+   * is pointer-events-auto so its own controls work. The card therefore
+   * consumed the press, and a rubber-band drag started anywhere near the
+   * default desktop's clock silently did nothing — measured: no pointerdown
+   * ever reached the surface.
+   *
+   * A widget's empty background reads as desktop, which is what it looks like.
+   * Its drag handle, its close button and anything interactive inside it do
+   * not. Everything outside the surface and the widgets — dock, top bar,
+   * windows, menus — fails the last check and is left alone.
+   */
+  const isBareDesktopPress = useCallback((target: HTMLElement): boolean => {
+    if (target.closest("[data-desktop-icon]")) return false;
+    if (target.closest("[data-widget-handle]")) return false;
+    if (target.closest("button, a, input, select, textarea, iframe, [contenteditable='true']")) return false;
+    return Boolean(target.closest("[data-desktop-surface]") || target.closest("[data-widget-card]"));
+  }, []);
+
   const onSurfacePointerDown = useCallback(
     (e: React.PointerEvent) => {
       // Only a drag starting on bare desktop draws a band.
@@ -307,6 +329,35 @@ export function DesktopIcons({ topInset }: { topInset: number }) {
     return () => window.removeEventListener("keydown", onKey);
   }, [selected, items, resolved, settings, renaming, wm.windows, wm.activeWorkspace]);
 
+  /* A press that lands on a widget's background still starts a marquee. The
+     surface cannot hear it — the widget is a sibling above it, so nothing
+     bubbles down — so the document is asked instead, in the capture phase,
+     before the widget can act on it. */
+  useEffect(() => {
+    if (!settings.showDesktopIcons) return;
+    const onDown = (e: PointerEvent) => {
+      if (e.button !== 0) return;
+      const host = surfaceRef.current;
+      if (!host) return;
+      const target = e.target as HTMLElement | null;
+      if (!target) return;
+      // The surface handles its own presses; this is only for the layers above it.
+      if (!target.closest("[data-widget-card]")) return;
+      if (!isBareDesktopPress(target)) return;
+
+      const box = host.getBoundingClientRect();
+      const x = e.clientX - box.left;
+      const y = e.clientY - box.top;
+      marqueeStart.current = { x, y };
+      setMarquee({ x, y, w: 0, h: 0 });
+      setMenu(null);
+      if (!e.shiftKey && !e.metaKey && !e.ctrlKey) setSelected([]);
+      try { host.setPointerCapture(e.pointerId); } catch { /* a stale pointer id is not worth throwing over */ }
+    };
+    window.addEventListener("pointerdown", onDown, true);
+    return () => window.removeEventListener("pointerdown", onDown, true);
+  }, [settings.showDesktopIcons, isBareDesktopPress]);
+
   if (!settings.showDesktopIcons) return null;
 
   return (
@@ -316,6 +367,7 @@ export function DesktopIcons({ topInset }: { topInset: number }) {
       onPointerMove={onSurfacePointerMove}
       onPointerUp={onSurfacePointerUp}
       onPointerCancel={onSurfacePointerUp}
+      data-desktop-surface
       className="absolute inset-x-0 bottom-0 z-[1]"
       style={{ top: topInset }}
     >

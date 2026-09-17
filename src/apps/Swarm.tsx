@@ -818,7 +818,31 @@ export default function Swarm({}: AppProps) {
             <div className="mb-4 text-[11px] text-[var(--muted)]">
               Higher is faster but more likely to hit provider rate limits. Three is a safe default for most keys.
             </div>
-            <Slider label="Max tokens per agent" value={maxTokensPerAgent} min={MIN_TOKENS} max={MAX_TOKENS_CEILING} step={256} onChange={setMaxTokensPerAgent} />
+            {/* The value AND the ceiling. Showing the value alone is why the
+                old 4,000 bound was indistinguishable from the new 64,000 one:
+                the number beside the label never was the maximum. */}
+            <Slider
+              label="Max tokens per agent"
+              value={maxTokensPerAgent}
+              min={MIN_TOKENS}
+              max={MAX_TOKENS_CEILING}
+              step={256}
+              onChange={setMaxTokensPerAgent}
+              format={(v) => `${v.toLocaleString("en-US")} of ${MAX_TOKENS_CEILING.toLocaleString("en-US")} max`}
+            />
+            <div className="mb-2 flex flex-wrap gap-1">
+              {/* Explicit labels, not arithmetic. Dividing by 1024 against a
+                  decimal ceiling rendered the top chip as "63k". */}
+              {([[1024, "1k"], [4096, "4k"], [16384, "16k"], [32768, "32k"], [MAX_TOKENS_CEILING, "64k"]] as const).map(([n, label]) => (
+                <button
+                  key={n}
+                  onClick={() => setMaxTokensPerAgent(n)}
+                  className={cn("os-chip !px-1.5 !py-0 !text-[10px]", maxTokensPerAgent === n && "!border-[var(--accent)] !text-[var(--accent)]")}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
             <p className="mb-3 text-[11px] leading-snug text-[var(--muted)]">
               The swarm-wide default. An agent that names its own ceiling overrides it. Providers clamp their own
               limits below this, so asking for more than a model supports costs nothing extra — but a long answer

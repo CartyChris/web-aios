@@ -49,7 +49,11 @@ export interface AgentSpec {
  *  agent asked to actually write something. */
 export const MAX_TOKENS_CEILING = 64_000;
 export const MIN_TOKENS = 256;
-export const DEFAULT_MAX_TOKENS = 4_000;
+/** A multiple of the 256 slider step above MIN_TOKENS, so the thumb lands
+ *  exactly on the default. 4,000 is not: the browser snapped the input to
+ *  4,096 while React still held 4,000, and the number beside the label
+ *  disagreed with where the handle sat. */
+export const DEFAULT_MAX_TOKENS = 4_096;
 
 export function clampTokens(n: number | undefined, fallback = DEFAULT_MAX_TOKENS): number {
   if (n === undefined || !Number.isFinite(n)) return fallback;

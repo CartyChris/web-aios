@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { APPS, CATEGORY_LABELS } from "@/kernel/registry";
 import { useWM } from "@/kernel/wm";
+import { useSettings } from "@/kernel/settings";
+import { bus } from "@/kernel/bus";
 import { cn } from "@/lib/cn";
 import { Icon } from "@/shell/icons";
 
@@ -10,6 +12,7 @@ import { Icon } from "@/shell/icons";
  *  invocation and no reset effect is needed. */
 export function Launcher({ onClose }: { onClose: () => void }) {
   const wm = useWM();
+  const settings = useSettings();
   const [q, setQ] = useState("");
   const [cat, setCat] = useState<string>("all");
   const inputRef = useRef<HTMLInputElement>(null);
@@ -26,6 +29,27 @@ export function Launcher({ onClose }: { onClose: () => void }) {
       (a) => !needle || a.name.toLowerCase().includes(needle) || a.description.toLowerCase().includes(needle) || a.id.includes(needle),
     );
   }, [q, cat]);
+
+  /** Drop it in the first free grid slot rather than on top of something. */
+  const pin = (id: string, name: string) => {
+    const taken = new Set(settings.desktopItems.map((d) => `${d.x},${d.y}`));
+    const COL = 92;
+    const ROW = 100;
+    let x = 24;
+    let y = 56;
+    // Walk columns, then rows. A pin that lands under an existing icon looks
+    // like nothing happened, which is the complaint this whole affordance
+    // exists to answer.
+    outer: for (let col = 0; col < 12; col++) {
+      for (let row = 0; row < 8; row++) {
+        const cx = 24 + col * COL;
+        const cy = 56 + row * ROW;
+        if (!taken.has(`${cx},${cy}`)) { x = cx; y = cy; break outer; }
+      }
+    }
+    settings.addDesktopItem({ kind: "app", ref: id, x, y });
+    bus.emit("notify", { title: `Pinned "${name}" to the desktop`, kind: "success" });
+  };
 
   const launch = (id: string) => {
     const app = APPS.find((a) => a.id === id);
@@ -72,9 +96,25 @@ export function Launcher({ onClose }: { onClose: () => void }) {
           <button
             key={app.id}
             onClick={() => launch(app.id)}
-            className="os-card group flex flex-col items-center gap-2 text-center transition hover:-translate-y-1"
+            // Pinning worked from the very start, behind a right-click on bare
+            // desktop — which nobody finds, and which the default layout hides
+            // further by covering the top-left with widgets. Here it is where
+            // people already are, on the thing they already want.
+            onContextMenu={(e) => { e.preventDefault(); pin(app.id, app.name); }}
+            title={`${app.description}\n\nRight-click to pin to the desktop`}
+            className="os-card group relative flex flex-col items-center gap-2 text-center transition hover:-translate-y-1"
             style={{ animation: `os-fade-up 260ms ease both`, animationDelay: `${Math.min(i * 18, 300)}ms` }}
           >
+            <span
+              role="button"
+              tabIndex={-1}
+              aria-label={`Pin ${app.name} to the desktop`}
+              title={`Pin ${app.name} to the desktop`}
+              onClick={(e) => { e.stopPropagation(); pin(app.id, app.name); }}
+              className="absolute right-1.5 top-1.5 grid h-6 w-6 place-items-center rounded-full border border-[var(--border)] bg-[var(--panel-solid)] opacity-0 transition group-hover:opacity-100 hover:!border-[var(--accent)]"
+            >
+              <Icon name="pin" size={11} />
+            </span>
             <div
               className="grid h-14 w-14 place-items-center rounded-[calc(var(--radius)*0.9)]"
               style={{ background: `color-mix(in srgb, ${app.accent ?? "var(--accent)"} 22%, transparent)`, border: `1px solid ${app.accent ?? "var(--accent)"}`, color: app.accent ?? "var(--accent)" }}

@@ -72,6 +72,7 @@ function WidgetHost({ widget, onMove, onRemove }: { widget: WidgetInstance; onMo
       onPointerUp={() => (drag.current = null)}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
+      data-widget-card
       className="glass pointer-events-auto absolute overflow-hidden"
       style={{ left: widget.x, top: widget.y, width: widget.w, height: widget.h, borderRadius: "var(--radius)" }}
     >
