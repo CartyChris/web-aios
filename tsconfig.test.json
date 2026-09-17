@@ -44,6 +44,9 @@
     "src/lib/harness/mcp-server.ts",
     "src/lib/harness/triggers.ts",
     "src/lib/harness/swarm.ts",
-    "src/lib/mcp-directory.ts"
+    "src/lib/mcp-directory.ts",
+    "src/lib/appversions.ts",
+    "src/lib/swarm-plan.ts",
+    "src/lib/petmind.ts"
   ]
 }

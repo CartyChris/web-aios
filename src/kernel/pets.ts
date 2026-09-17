@@ -60,6 +60,19 @@ export const SPECIES: Species[] = [
   { id: "capybara", name: "Capybara", family: "mammal", body: "oval", ears: "round", tail: "none", eyes: "sleepy", limbs: "legs", pattern: "none", hue: ["#a97f52", "#775636", "#dcc3a3"], tempo: 0.55, blurb: "Serenity, given form." },
   { id: "bat", name: "Bat", family: "mammal", body: "round", ears: "pointed", tail: "none", eyes: "wide", limbs: "wings", pattern: "none", hue: ["#584a72", "#332a47", "#c4b5e0"], tempo: 1.5, blurb: "Nocturnal, like you." },
 
+  { id: "redpanda", name: "Red Panda", family: "mammal", body: "oval", ears: "round", tail: "bushy", eyes: "round", limbs: "paws", pattern: "stripes", hue: ["#c4622d", "#7d3413", "#f7e3cd"], tempo: 0.9, blurb: "Small tree gremlin. Beloved." },
+  { id: "ferret", name: "Ferret", family: "mammal", body: "serpent", ears: "round", tail: "bushy", eyes: "round", limbs: "paws", pattern: "belly", hue: ["#d8c4a6", "#8d7355", "#fdf6ea"], tempo: 1.5, blurb: "A tube with opinions." },
+  { id: "sloth", name: "Sloth", family: "mammal", body: "blob", ears: "round", tail: "none", eyes: "sleepy", limbs: "paws", pattern: "none", hue: ["#9d8f6f", "#6a5f45", "#ded3b6"], tempo: 0.3, blurb: "Arrives eventually." },
+  { id: "shiba", name: "Shiba", family: "mammal", body: "oval", ears: "pointed", tail: "curl", eyes: "dot", limbs: "paws", pattern: "belly", hue: ["#e0a45c", "#a86a2c", "#fff4e2"], tempo: 1.2, blurb: "Deeply unbothered." },
+  { id: "lynx", name: "Lynx", family: "mammal", body: "oval", ears: "tuft", tail: "thin", eyes: "wide", limbs: "paws", pattern: "spots", hue: ["#b99a72", "#7d6244", "#f2e6d2"], tempo: 0.95, blurb: "Ear tufts. Zero patience." },
+  { id: "pangolin", name: "Pangolin", family: "mammal", body: "bean", ears: "none", tail: "thin", eyes: "dot", limbs: "legs", pattern: "plates", hue: ["#a9834f", "#6d502b", "#e6cfa6"], tempo: 0.75, blurb: "An artichoke that loves you." },
+  { id: "wombat", name: "Wombat", family: "mammal", body: "round", ears: "round", tail: "none", eyes: "sleepy", limbs: "legs", pattern: "none", hue: ["#9b8368", "#67553f", "#dfd0b8"], tempo: 0.6, blurb: "Structurally a brick." },
+  { id: "raccoon", name: "Raccoon", family: "mammal", body: "oval", ears: "round", tail: "bushy", eyes: "wide", limbs: "paws", pattern: "stripes", hue: ["#8e929c", "#4c505c", "#e4e7ee"], tempo: 1.3, blurb: "Has been through your things." },
+  { id: "mouse", name: "Mouse", family: "mammal", body: "round", ears: "round", tail: "thin", eyes: "dot", limbs: "paws", pattern: "belly", hue: ["#b5adaa", "#7a7370", "#f3efed"], tempo: 1.6, blurb: "Small. Fast. Yours." },
+  { id: "deer", name: "Deer", family: "mammal", body: "tall", ears: "long", tail: "none", eyes: "wide", limbs: "legs", pattern: "spots", hue: ["#c08c5c", "#8a5f36", "#f6e6d2"], tempo: 0.85, blurb: "Alert about nothing." },
+  { id: "hamster", name: "Hamster", family: "mammal", body: "round", ears: "round", tail: "none", eyes: "dot", limbs: "paws", pattern: "belly", hue: ["#e3b878", "#a8804a", "#fff6e6"], tempo: 1.7, blurb: "Cheeks full of plans." },
+  { id: "bumblebee", name: "Bumblebee", family: "mammal", body: "bean", ears: "antenna", tail: "stinger", eyes: "multi", limbs: "wings", pattern: "stripes", hue: ["#f5c518", "#2b2b2b", "#fff3c4"], tempo: 1.8, blurb: "Aerodynamically rude." },
+  { id: "moth", name: "Moth", family: "mammal", body: "oval", ears: "antenna", tail: "none", eyes: "round", limbs: "wings", pattern: "swirl", hue: ["#c9b9a4", "#8a7a66", "#f4ece0"], tempo: 1.35, blurb: "Loves a lamp. Always has." },
   /* ── Birds ───────────────────────────────────────────────────────────── */
   { id: "penguin", name: "Penguin", family: "bird", body: "tall", ears: "none", tail: "none", eyes: "round", limbs: "flipper", pattern: "belly", hue: ["#2c3550", "#161c2e", "#f4f7ff"], tempo: 0.85, blurb: "Formal. Falls over." },
   { id: "owl", name: "Owl", family: "bird", body: "round", ears: "tuft", tail: "fan", eyes: "wide", limbs: "wings", pattern: "spots", hue: ["#9d7b55", "#6a4f33", "#efe0c8"], tempo: 0.6, blurb: "Knows. Won't say." },
@@ -67,6 +80,14 @@ export const SPECIES: Species[] = [
   { id: "crow", name: "Crow", family: "bird", body: "oval", ears: "none", tail: "fan", eyes: "dot", limbs: "wings", pattern: "glow", hue: ["#2b2f3d", "#14161f", "#7e8aa8"], tempo: 1.1, blurb: "Collects shiny bugs." },
   { id: "parrot", name: "Parrot", family: "bird", body: "oval", ears: "crest", tail: "fan", eyes: "round", limbs: "wings", pattern: "stripes", hue: ["#36c46a", "#e2483d", "#ffd84d"], tempo: 1.35, blurb: "Repeats your worst idea." },
 
+  { id: "puffin", name: "Puffin", family: "bird", body: "oval", ears: "none", tail: "fan", eyes: "round", limbs: "wings", pattern: "belly", hue: ["#2a2f38", "#14171c", "#fdfaf4"], tempo: 1.1, blurb: "A serious little person." },
+  { id: "flamingo", name: "Flamingo", family: "bird", body: "tall", ears: "crest", tail: "fan", eyes: "dot", limbs: "legs", pattern: "none", hue: ["#f78fb3", "#c95f88", "#ffe3ee"], tempo: 0.8, blurb: "Balanced, for now." },
+  { id: "toucan", name: "Toucan", family: "bird", body: "oval", ears: "crest", tail: "fan", eyes: "round", limbs: "wings", pattern: "belly", hue: ["#1d1d22", "#f6a623", "#fff8e8"], tempo: 1.15, blurb: "Mostly beak, honestly." },
+  { id: "hummingbird", name: "Hummingbird", family: "bird", body: "bean", ears: "none", tail: "fan", eyes: "dot", limbs: "wings", pattern: "glow", hue: ["#21c98a", "#0d7d55", "#d6fff0"], tempo: 2, blurb: "Never actually still." },
+  { id: "swan", name: "Swan", family: "bird", body: "serpent", ears: "none", tail: "fan", eyes: "sleepy", limbs: "flipper", pattern: "none", hue: ["#f7f4ef", "#c9c2b6", "#ffffff"], tempo: 0.5, blurb: "Elegant. Will fight you." },
+  { id: "chicken", name: "Chicken", family: "bird", body: "round", ears: "crest", tail: "fan", eyes: "dot", limbs: "legs", pattern: "none", hue: ["#f2e4cc", "#c4a87e", "#fffaf0"], tempo: 1.45, blurb: "Ancient dinosaur. Small now." },
+  { id: "heron", name: "Heron", family: "bird", body: "tall", ears: "crest", tail: "thin", eyes: "wide", limbs: "legs", pattern: "none", hue: ["#8fa3b4", "#56687a", "#e6eef5"], tempo: 0.45, blurb: "Waits. Then does not." },
+  { id: "kiwi", name: "Kiwi", family: "bird", body: "blob", ears: "none", tail: "none", eyes: "dot", limbs: "legs", pattern: "none", hue: ["#8d7455", "#5c4a33", "#ddcdb4"], tempo: 1.05, blurb: "A potato with ambitions." },
   /* ── Aquatic ─────────────────────────────────────────────────────────── */
   { id: "fish", name: "Fish", family: "aquatic", body: "fish", ears: "fin", tail: "fin", eyes: "round", limbs: "none", pattern: "scales", hue: ["#4aa8d8", "#2a6f9a", "#d8f2ff"], tempo: 1.2, blurb: "Eight-second attention. Relatable." },
   { id: "octo", name: "Octopus", family: "aquatic", body: "orb", ears: "none", tail: "none", eyes: "round", limbs: "tentacles", pattern: "spots", hue: ["#b95d92", "#7d3363", "#ffd9ee"], tempo: 0.8, blurb: "Eight hands, no patience." },
@@ -75,11 +96,24 @@ export const SPECIES: Species[] = [
   { id: "axolotl", name: "Axolotl", family: "aquatic", body: "serpent", ears: "crest", tail: "fin", eyes: "dot", limbs: "legs", pattern: "none", hue: ["#f7b8d2", "#d4799f", "#fff0f6"], tempo: 0.75, blurb: "Perpetually a child. Goals." },
   { id: "whale", name: "Whale", family: "aquatic", body: "fish", ears: "none", tail: "fin", eyes: "dot", limbs: "flipper", pattern: "belly", hue: ["#3d6ea8", "#24456c", "#cfe6ff"], tempo: 0.4, blurb: "Big thoughts, slowly." },
 
+  { id: "seahorse", name: "Seahorse", family: "aquatic", body: "serpent", ears: "crest", tail: "curl", eyes: "dot", limbs: "none", pattern: "scales", hue: ["#f0b03c", "#a9701c", "#ffeec6"], tempo: 0.7, blurb: "Holds on to things." },
+  { id: "pufferfish", name: "Pufferfish", family: "aquatic", body: "orb", ears: "fin", tail: "fan", eyes: "wide", limbs: "flipper", pattern: "spots", hue: ["#e8c169", "#a9853a", "#fff4d8"], tempo: 0.9, blurb: "Inflates on principle." },
+  { id: "manta", name: "Manta", family: "aquatic", body: "fish", ears: "fin", tail: "thin", eyes: "dot", limbs: "flipper", pattern: "belly", hue: ["#2f4a63", "#16283a", "#dfeaf3"], tempo: 0.55, blurb: "Flies underwater." },
+  { id: "narwhal", name: "Narwhal", family: "aquatic", body: "fish", ears: "horns", tail: "fin", eyes: "sleepy", limbs: "flipper", pattern: "spots", hue: ["#7e8fa8", "#4a5870", "#e9eff7"], tempo: 0.6, blurb: "Sea unicorn. Real, somehow." },
+  { id: "nautilus", name: "Nautilus", family: "aquatic", body: "orb", ears: "none", tail: "trail", eyes: "multi", limbs: "tentacles", pattern: "swirl", hue: ["#d9b98a", "#96734a", "#f6ead6"], tempo: 0.5, blurb: "Older than trees." },
+  { id: "starfish", name: "Starfish", family: "aquatic", body: "crystal", ears: "none", tail: "none", eyes: "dot", limbs: "none", pattern: "spots", hue: ["#e57c52", "#a8492a", "#ffdcc9"], tempo: 0.4, blurb: "Regrows. Eventually." },
+  { id: "shrimp", name: "Shrimp", family: "aquatic", body: "bean", ears: "antenna", tail: "fan", eyes: "multi", limbs: "legs", pattern: "plates", hue: ["#f08a7a", "#b5503f", "#ffe1da"], tempo: 1.55, blurb: "Punches above its weight." },
+  { id: "seal", name: "Seal", family: "aquatic", body: "blob", ears: "none", tail: "fin", eyes: "round", limbs: "flipper", pattern: "spots", hue: ["#8e9099", "#565a64", "#e7e9ee"], tempo: 0.8, blurb: "A wet dog that swims." },
   /* ── Reptiles ────────────────────────────────────────────────────────── */
   { id: "gecko", name: "Gecko", family: "reptile", body: "serpent", ears: "none", tail: "thin", eyes: "wide", limbs: "legs", pattern: "spots", hue: ["#59c46d", "#2f7c3f", "#dcffdf"], tempo: 1.45, blurb: "Sticks to things." },
   { id: "turtle", name: "Turtle", family: "reptile", body: "oval", ears: "none", tail: "thin", eyes: "sleepy", limbs: "legs", pattern: "plates", hue: ["#5f9b5c", "#3a6438", "#d8e9c8"], tempo: 0.35, blurb: "Will get there." },
   { id: "snake", name: "Snake", family: "reptile", body: "serpent", ears: "none", tail: "thin", eyes: "dot", limbs: "none", pattern: "stripes", hue: ["#7fc45e", "#4a8035", "#f0ffdd"], tempo: 0.9, blurb: "One long opinion." },
 
+  { id: "chameleon", name: "Chameleon", family: "reptile", body: "oval", ears: "crest", tail: "curl", eyes: "single", limbs: "legs", pattern: "swirl", hue: [A, A2, "#f2fff8"], tempo: 0.5, blurb: "Matches your theme. Literally." },
+  { id: "frog", name: "Frog", family: "reptile", body: "bean", ears: "none", tail: "none", eyes: "wide", limbs: "legs", pattern: "spots", hue: ["#6fbf5e", "#3c7a30", "#e4ffd9"], tempo: 1.2, blurb: "Sits. Is content." },
+  { id: "newt", name: "Newt", family: "reptile", body: "serpent", ears: "none", tail: "thin", eyes: "dot", limbs: "legs", pattern: "spots", hue: ["#e07b39", "#98491a", "#ffe6cf"], tempo: 1.05, blurb: "Damp and delighted." },
+  { id: "iguana", name: "Iguana", family: "reptile", body: "serpent", ears: "crest", tail: "thin", eyes: "sleepy", limbs: "legs", pattern: "scales", hue: ["#7fae5c", "#4a6c32", "#e8f7d6"], tempo: 0.65, blurb: "Sunbathing professional." },
+  { id: "tortoise", name: "Tortoise", family: "reptile", body: "round", ears: "none", tail: "none", eyes: "sleepy", limbs: "legs", pattern: "plates", hue: ["#8d7a4e", "#5a4d2f", "#ded0aa"], tempo: 0.25, blurb: "Will outlive this project." },
   /* ── Mythic ──────────────────────────────────────────────────────────── */
   { id: "dragon", name: "Dragon", family: "mythic", body: "serpent", ears: "horns", tail: "spark", eyes: "star", limbs: "wings", pattern: "scales", hue: ["#c2413f", "#7b1f24", "#ffcf6e"], tempo: 0.95, blurb: "Hoards your unfinished branches." },
   { id: "slime", name: "Slime", family: "mythic", body: "blob", ears: "none", tail: "none", eyes: "round", limbs: "none", pattern: "glow", hue: [A, A2, "#ffffff"], tempo: 1.1, blurb: "Takes the shape of the theme." },
@@ -87,11 +121,26 @@ export const SPECIES: Species[] = [
   { id: "phoenix", name: "Phoenix", family: "mythic", body: "flame", ears: "crest", tail: "spark", eyes: "star", limbs: "wings", pattern: "glow", hue: ["#ff8a3d", "#d7351c", "#ffe9a8"], tempo: 1.2, blurb: "Restarts. Repeatedly." },
   { id: "griffin", name: "Griffin", family: "mythic", body: "oval", ears: "tuft", tail: "bushy", eyes: "star", limbs: "wings", pattern: "belly", hue: ["#d8b45c", "#94722c", "#fff3cf"], tempo: 1, blurb: "Half of two better animals." },
 
+  { id: "kitsune", name: "Kitsune", family: "mythic", body: "oval", ears: "pointed", tail: "fan", eyes: "star", limbs: "paws", pattern: "glow", hue: ["#f5f0e6", "#d4452f", "#fff8ee"], tempo: 1.1, blurb: "Nine tails. One agenda." },
+  { id: "unicorn", name: "Unicorn", family: "mythic", body: "tall", ears: "horns", tail: "trail", eyes: "star", limbs: "legs", pattern: "glow", hue: ["#fdf7ff", "#d8c2ef", "#ffffff"], tempo: 0.9, blurb: "Insufferably magical." },
+  { id: "wisp", name: "Wisp", family: "mythic", body: "cloud", ears: "none", tail: "trail", eyes: "single", limbs: "hover", pattern: "glow", hue: [A, A2, "#ffffff"], tempo: 1.3, blurb: "Leads travellers astray. Fondly." },
+  { id: "gargoyle", name: "Gargoyle", family: "mythic", body: "boxy", ears: "horns", tail: "thin", eyes: "cross", limbs: "wings", pattern: "plates", hue: ["#7d7f86", "#494b52", "#c9ccd4"], tempo: 0.35, blurb: "Guards nothing, diligently." },
+  { id: "chimera", name: "Chimera", family: "mythic", body: "oval", ears: "horns", tail: "stinger", eyes: "multi", limbs: "paws", pattern: "stripes", hue: ["#c2703c", "#6b3418", "#ffdfc2"], tempo: 1.2, blurb: "Committee of animals." },
+  { id: "golem", name: "Golem", family: "mythic", body: "boxy", ears: "none", tail: "none", eyes: "single", limbs: "legs", pattern: "plates", hue: ["#8a7a63", "#54493a", "#cdbfa6"], tempo: 0.4, blurb: "One word on its forehead." },
+  { id: "banshee", name: "Banshee", family: "mythic", body: "cloud", ears: "long", tail: "trail", eyes: "sleepy", limbs: "hover", pattern: "swirl", hue: ["#b9c8e0", "#6c7e9c", "#f0f6ff"], tempo: 0.75, blurb: "Politely ominous." },
+  { id: "mimic", name: "Mimic", family: "mythic", body: "boxy", ears: "none", tail: "none", eyes: "multi", limbs: "legs", pattern: "plates", hue: ["#7a5230", "#472c17", "#d8b98f"], tempo: 1.1, blurb: "Definitely just a box." },
   /* ── Synthetic ───────────────────────────────────────────────────────── */
   { id: "robot", name: "Robot", family: "synthetic", body: "boxy", ears: "antenna", tail: "none", eyes: "visor", limbs: "hover", pattern: "plates", hue: ["#9fb0c4", "#5c6b80", A], tempo: 1, blurb: "Compiles. Mostly." },
   { id: "drone", name: "Drone", family: "synthetic", body: "orb", ears: "antenna", tail: "none", eyes: "single", limbs: "hover", pattern: "glow", hue: ["#7d8aa0", "#414d61", A], tempo: 1.6, blurb: "Watches the build log." },
   { id: "cube", name: "Cube", family: "synthetic", body: "crystal", ears: "none", tail: "none", eyes: "cross", limbs: "hover", pattern: "plates", hue: [A, A2, "#ffffff"], tempo: 0.8, blurb: "Rotates. Considers." },
 
+  { id: "toaster", name: "Toaster", family: "synthetic", body: "boxy", ears: "none", tail: "none", eyes: "visor", limbs: "legs", pattern: "plates", hue: ["#c8ccd4", "#7d828c", "#eef1f6"], tempo: 0.9, blurb: "Sentient. Still toasts." },
+  { id: "lamp", name: "Desk Lamp", family: "synthetic", body: "tall", ears: "none", tail: "thin", eyes: "single", limbs: "none", pattern: "glow", hue: [A, A2, "#fffbe8"], tempo: 0.7, blurb: "Leans in when you work." },
+  { id: "mech", name: "Mech", family: "synthetic", body: "boxy", ears: "antenna", tail: "none", eyes: "visor", limbs: "legs", pattern: "plates", hue: ["#5d6672", "#2f353d", "#a9b5c4"], tempo: 0.5, blurb: "Scaled down. Still stomps." },
+  { id: "satellite", name: "Satellite", family: "synthetic", body: "boxy", ears: "antenna", tail: "trail", eyes: "dot", limbs: "hover", pattern: "glow", hue: ["#9aa7bb", "#5a6577", "#e2e9f4"], tempo: 0.6, blurb: "Passes overhead. Waves." },
+  { id: "orb", name: "Orb", family: "synthetic", body: "orb", ears: "none", tail: "none", eyes: "single", limbs: "hover", pattern: "glow", hue: [A, A2, "#ffffff"], tempo: 1, blurb: "Hovering. Judging. Helping." },
+  { id: "printer", name: "Printer", family: "synthetic", body: "boxy", ears: "none", tail: "trail", eyes: "visor", limbs: "none", pattern: "plates", hue: ["#d5d8dd", "#898f99", "#f4f6f9"], tempo: 0.8, blurb: "Jammed. Emotionally." },
+  { id: "floppy", name: "Floppy Disk", family: "synthetic", body: "boxy", ears: "none", tail: "none", eyes: "dot", limbs: "legs", pattern: "plates", hue: ["#3a4a6b", "#1f2a43", "#c9d4e8"], tempo: 1.2, blurb: "Remembers 1.44 things." },
   /* ── Flora & cosmic ──────────────────────────────────────────────────── */
   { id: "mushroom", name: "Mushroom", family: "flora", body: "round", ears: "none", tail: "none", eyes: "dot", limbs: "legs", pattern: "spots", hue: ["#e05a58", "#9c3634", "#fff2e0"], tempo: 0.6, blurb: "Quietly networked." },
   { id: "sprout", name: "Sprout", family: "flora", body: "bean", ears: "leaf", tail: "none", eyes: "round", limbs: "legs", pattern: "none", hue: ["#79c85e", "#3f8034", "#e6ffd9"], tempo: 0.9, blurb: "Growing. Slowly. Like the project." },
@@ -99,6 +148,17 @@ export const SPECIES: Species[] = [
   { id: "star", name: "Starling", family: "cosmic", body: "crystal", ears: "none", tail: "spark", eyes: "star", limbs: "hover", pattern: "glow", hue: ["#ffd85c", "#e0a01e", "#fffbe8"], tempo: 1.3, blurb: "Small piece of a big thing." },
   { id: "alien", name: "Alien", family: "cosmic", body: "orb", ears: "antenna", tail: "none", eyes: "wide", limbs: "legs", pattern: "none", hue: ["#7fe3a8", "#2f9c63", "#e9fff2"], tempo: 1.05, blurb: "Here about your API keys." },
   { id: "moon", name: "Moonlet", family: "cosmic", body: "orb", ears: "none", tail: "trail", eyes: "sleepy", limbs: "hover", pattern: "spots", hue: ["#cdd4e6", "#8d97b3", "#ffffff"], tempo: 0.4, blurb: "Orbits. Says little." },
+  { id: "sunflower", name: "Sunflower", family: "flora", body: "tall", ears: "crest", tail: "none", eyes: "round", limbs: "none", pattern: "glow", hue: ["#f5c211", "#a37a06", "#fff6cc"], tempo: 0.5, blurb: "Follows the brightest thing." },
+  { id: "fern", name: "Fern", family: "flora", body: "tall", ears: "leaf", tail: "curl", eyes: "sleepy", limbs: "none", pattern: "none", hue: ["#4f8f52", "#2c5c2f", "#d8f0d4"], tempo: 0.4, blurb: "Unfurling, slowly." },
+  { id: "acorn", name: "Acorn", family: "flora", body: "bean", ears: "leaf", tail: "none", eyes: "dot", limbs: "legs", pattern: "belly", hue: ["#a8703c", "#6b421d", "#eed4b2"], tempo: 1.1, blurb: "Ambitious. Technically a tree." },
+  { id: "lotus", name: "Lotus", family: "flora", body: "crystal", ears: "leaf", tail: "none", eyes: "sleepy", limbs: "none", pattern: "glow", hue: ["#f6a8c8", "#bd6389", "#fff0f6"], tempo: 0.35, blurb: "Serene, from mud." },
+  { id: "venus", name: "Venus Trap", family: "flora", body: "bean", ears: "leaf", tail: "none", eyes: "multi", limbs: "none", pattern: "stripes", hue: ["#6aa84f", "#8b2f3f", "#e4ffd0"], tempo: 0.9, blurb: "Friendly. Mostly." },
+  { id: "comet", name: "Comet", family: "cosmic", body: "orb", ears: "none", tail: "trail", eyes: "star", limbs: "hover", pattern: "glow", hue: ["#bfe6ff", "#4a7fb5", "#ffffff"], tempo: 1.6, blurb: "Visits. Rarely." },
+  { id: "blackhole", name: "Singularity", family: "cosmic", body: "orb", ears: "none", tail: "trail", eyes: "single", limbs: "hover", pattern: "swirl", hue: ["#0b0b12", "#2b1b45", "#c7b3ff"], tempo: 0.45, blurb: "Attentive. Very attentive." },
+  { id: "nebula", name: "Nebula", family: "cosmic", body: "cloud", ears: "none", tail: "trail", eyes: "multi", limbs: "hover", pattern: "swirl", hue: [A2, A, "#ffffff"], tempo: 0.3, blurb: "Mostly empty. Still stunning." },
+  { id: "sun", name: "Little Sun", family: "cosmic", body: "orb", ears: "crest", tail: "none", eyes: "round", limbs: "hover", pattern: "glow", hue: ["#ffcf3f", "#e8791a", "#fff6d8"], tempo: 0.85, blurb: "Warm. Slightly too warm." },
+  { id: "constellation", name: "Constellation", family: "cosmic", body: "crystal", ears: "none", tail: "spark", eyes: "star", limbs: "hover", pattern: "glow", hue: ["#dce9ff", "#7c96c8", "#ffffff"], tempo: 0.55, blurb: "Joined by imaginary lines." },
+  { id: "satellite2", name: "Rover", family: "cosmic", body: "boxy", ears: "antenna", tail: "none", eyes: "visor", limbs: "legs", pattern: "plates", hue: ["#c0a87f", "#7c684a", "#efe3c8"], tempo: 0.4, blurb: "Still going. Still reporting." },
 ];
 
 export const getSpecies = (id: string) => SPECIES.find((s) => s.id === id);
@@ -115,148 +175,22 @@ export const PET_FAMILIES: Array<{ id: Species["family"]; label: string }> = [
 ];
 
 /* ────────────────────────────────────────────────────────────────────────────
-   Personalities.
+   Personalities, modes and voices now live in `@/lib/petmind`.
 
-   Clicking a pet asks whatever model you have loaded for one sentence. One —
-   the cap is 60 output tokens, because a desktop pet that writes a paragraph
-   is a chatbot wearing a costume, and because this fires on a click and should
-   cost approximately nothing.
+   They moved for one reason: `tsconfig.test.json` has `rootDir: "src/lib"`, so
+   nothing under `kernel/` can be unit-tested, and the prompt composition is
+   exactly the part worth testing. What a pet says is two axes multiplied
+   together, and getting the order wrong makes a pirate talk about being a
+   pirate instead of answering.
 
-   Every personality also carries canned lines. They are what you get with no
-   key, no network, or a model that errors — a pet that goes silent the moment
-   the wifi drops would read as broken rather than offline.
+   Re-exported here so every existing import still resolves. The species
+   catalogue below stays, because it is visual description rather than
+   behaviour.
    ──────────────────────────────────────────────────────────────────────────── */
 
-export interface Personality {
-  id: string;
-  name: string;
-  blurb: string;
-  /** Appended to the pet's system prompt. */
-  line: string;
-  /** Offline fallback lines. */
-  canned: string[];
-}
-
-export const PERSONALITIES: Personality[] = [
-  {
-    id: "helpful",
-    name: "Helpful",
-    blurb: "Offers the next useful thing.",
-    line: "You are warm, concise and practical. Offer one genuinely useful nudge about what the user could do next in their desktop OS.",
-    canned: [
-      "Cmd-K opens the command palette — it is faster than hunting the dock.",
-      "You can drag a rubber band across the desktop to grab several icons at once.",
-      "Anything you build in AI Studio can be pinned to the desktop like a real app.",
-      "Right-click the desktop to pin an app exactly where you clicked.",
-      "Widgets export as standalone HTML — they work outside this OS too.",
-    ],
-  },
-  {
-    id: "funny",
-    name: "Funny",
-    blurb: "Jokes. Occasionally lands.",
-    line: "You are a small desktop pet with a dry sense of humour. Make one short joke or absurd observation about computers, work, or being a pet on someone's screen.",
-    canned: [
-      "I have been sitting on this wallpaper for hours and I regret nothing.",
-      "Your file naming convention is a cry for help and I respect it.",
-      "I counted your open windows. I stopped counting.",
-      "Somewhere in this filesystem is a folder called `final_v2_real`. I can feel it.",
-      "I would help, but I am fundamentally a shape.",
-    ],
-  },
-  {
-    id: "deadpan",
-    name: "Deadpan",
-    blurb: "States facts. Flatly.",
-    line: "You are utterly deadpan. One flat, literal sentence with no enthusiasm whatsoever. Never use an exclamation mark.",
-    canned: [
-      "You clicked me. That happened.",
-      "I am rendered at sixty frames per second for this.",
-      "The desktop is still there. I checked.",
-      "Time continues to pass.",
-      "This interaction has been logged nowhere.",
-    ],
-  },
-  {
-    id: "hype",
-    name: "Hype",
-    blurb: "Unreasonably encouraging.",
-    line: "You are relentlessly, sincerely encouraging. One short burst of enthusiasm about whatever the user is building.",
-    canned: [
-      "Whatever you are building right now — keep going. It is working.",
-      "Ship it. Fix it after. That is the whole trick.",
-      "You opened the editor. That is the hard part, statistically.",
-      "Small commit, big day. Let's go.",
-      "The idea is good. I have seen a lot of desktops.",
-    ],
-  },
-  {
-    id: "zen",
-    name: "Zen",
-    blurb: "Calm to the point of unsettling.",
-    line: "You are serene and slightly cryptic, like a very small monk. One calm sentence, ideally with an image in it.",
-    canned: [
-      "The unclosed tab is also a kind of rest.",
-      "A file is only a river you named.",
-      "Nothing needs shipping in this exact second.",
-      "Breathe. The build will still fail in a moment.",
-      "Empty desktop, empty mind. Yours is neither.",
-    ],
-  },
-  {
-    id: "gremlin",
-    name: "Gremlin",
-    blurb: "Chaotic. Mildly threatening.",
-    line: "You are a tiny chaos gremlin. One mischievous, slightly menacing but harmless sentence. Never actually suggest destructive actions.",
-    canned: [
-      "I moved one of your icons. Only one. Good luck.",
-      "I know what is in `/tmp` and I am telling nobody.",
-      "One day I will learn to click things myself.",
-      "Your semicolons are safe. For now.",
-      "I have opinions about your indentation and no way to voice them.",
-    ],
-  },
-  {
-    id: "coach",
-    name: "Coach",
-    blurb: "Asks the question you avoided.",
-    line: "You are a sharp accountability coach. Ask one pointed, kind question about what the user is actually avoiding right now.",
-    canned: [
-      "What is the one thing you have moved to tomorrow three times?",
-      "Is the thing you are polishing the thing that matters?",
-      "What would finishing look like, exactly?",
-      "Which open window is the real work?",
-      "You know the next step. Is it written down?",
-    ],
-  },
-  {
-    id: "lore",
-    name: "Lorekeeper",
-    blurb: "Narrates your desktop as myth.",
-    line: "You narrate ordinary computing as high fantasy. One grand, absurdly overwrought sentence about the user's desktop.",
-    canned: [
-      "The dock stands, as it has always stood, against the encroaching dark.",
-      "Nine workspaces. Nine realms. You have settled only the first.",
-      "The cache remembers what the user has chosen to forget.",
-      "Long ago, before the reload, the state was pristine.",
-      "Somewhere a process runs, unbidden, unkilled, uncounted.",
-    ],
-  },
-];
-
-export const getPersonality = (id: string) => PERSONALITIES.find((p) => p.id === id) ?? PERSONALITIES[0];
-
-/** Tone presets for the OS assistant itself — separate from the pet, because
- *  wanting a gremlin on your wallpaper is not wanting one in your code review. */
-export const VOICES: Array<{ id: string; name: string; line: string }> = [
-  { id: "direct", name: "Direct", line: "Be direct and useful. No preamble, no filler, no restating the question." },
-  { id: "thorough", name: "Thorough", line: "Be thorough. Cover edge cases and state your assumptions explicitly." },
-  { id: "teacher", name: "Teacher", line: "Explain as you go. Define terms the first time you use them and show the reasoning, not just the answer." },
-  { id: "terse", name: "Terse", line: "Answer in as few words as the question allows. Bullet points over prose. No pleasantries." },
-  { id: "socratic", name: "Socratic", line: "Prefer questions to answers where a question would teach more. Never more than two at a time." },
-  { id: "warm", name: "Warm", line: "Be encouraging and human. Acknowledge the hard parts before solving them." },
-  { id: "skeptic", name: "Skeptic", line: "Challenge the premise before answering it. Say plainly when the question has a wrong assumption inside it." },
-  { id: "pirate", name: "Pirate", line: "Answer correctly and completely, but in the voice of a pirate. Never let the accent cost accuracy." },
-];
-
-export const getVoice = (id: string) => VOICES.find((v) => v.id === id) ?? VOICES[0];
+export {
+  PERSONALITIES, getPersonality, VOICES, getVoice,
+  PET_MODES, getMode, composePetPrompt, cannedLine, tidyReply,
+  PET_MAX_TOKENS, PET_MAX_WORDS,
+} from "@/lib/petmind";
+export type { Personality, PetMode, PetContext, PetPromptInput } from "@/lib/petmind";

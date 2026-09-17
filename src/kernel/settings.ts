@@ -61,6 +61,9 @@ export interface Settings {
   petMotion: "still" | "wander" | "follow";
   /** The voice the pet answers in when you click it. */
   petPersonality: string;
+  /** What the pet talks ABOUT — separate from how it sounds. See
+   *  lib/petmind.ts for why those are two axes rather than one. */
+  petMode: string;
   petName: string;
   /** Let the pet talk to a model. Off means it uses its canned lines only. */
   petTalks: boolean;
@@ -206,6 +209,7 @@ const DEFAULTS: Settings = {
   petScale: 1,
   petMotion: "wander",
   petPersonality: "helpful",
+  petMode: "tips",
   petName: "",
   petTalks: true,
 

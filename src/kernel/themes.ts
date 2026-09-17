@@ -54,6 +54,56 @@ export const THEMES: Theme[] = [
   t("paper", "Paper", false, "#f6f1e5", "#d8e6ee", "rgb(255 255 255 / 0.86)", "#f8fafc", "#172033", "#526279", "#0f766e", "#2563eb"),
   t("daylight", "Daylight", false, "#f4f7fb", "#dbe7f5", "rgb(255 255 255 / 0.88)", "#ffffff", "#0f172a", "#64748b", "#2563eb", "#7c3aed"),
   t("linen", "Linen", false, "#faf7f2", "#e8e0d4", "rgb(255 253 250 / 0.88)", "#fffdfa", "#2b2416", "#6b6250", "#b45309", "#0f766e"),
+
+  /* ── Round two ─────────────────────────────────────────────────────────
+     Two rules held throughout, because a palette that breaks either is a
+     palette nobody keeps on for more than a minute:
+
+     - `muted` must be legible on `panel`. It carries every secondary label in
+       the OS, and a muted that disappears into its own background turns half
+       the interface into decoration.
+     - `accent` and `accent2` must be distinguishable from each other. They
+       mark different things — selection versus emphasis — and a theme where
+       they read as one colour silently removes a distinction every app relies
+       on. A test checks both. */
+
+  /* Dark */
+  t("obsidian", "Obsidian", true, "#0a0a0c", "#1c1c22", "rgb(14 14 18 / 0.88)", "#141419", "#f4f4f6", "#a5a5b0", "#f0abfc", "#38bdf8"),
+  t("abyss", "Abyss", true, "#00070f", "#052033", "rgb(0 8 18 / 0.88)", "#04121f", "#e6f6ff", "#93b8cf", "#22d3ee", "#818cf8"),
+  t("moss", "Moss", true, "#0b1410", "#1e3226", "rgb(11 22 17 / 0.85)", "#152320", "#eef7f0", "#a6c4b0", "#84cc16", "#0d9488"),
+  t("wine", "Wine", true, "#190711", "#45102a", "rgb(26 8 18 / 0.85)", "#2a0c1c", "#fdf2f8", "#e6b3cc", "#e11d48", "#a855f7"),
+  t("dune", "Dune", true, "#171207", "#3f3016", "rgb(24 18 8 / 0.86)", "#241b0d", "#fdf8ec", "#d9c49a", "#eab308", "#f97316"),
+  t("cobalt", "Cobalt", true, "#050c1f", "#0f2359", "rgb(6 13 33 / 0.85)", "#0a1636", "#eef3ff", "#a9bcea", "#3b82f6", "#06b6d4"),
+  t("plum", "Plum", true, "#140a1e", "#37174f", "rgb(19 10 30 / 0.85)", "#1f0f2e", "#f8f0ff", "#cbb2e2", "#a78bfa", "#f472b6"),
+  t("rust", "Rust", true, "#160c08", "#452113", "rgb(22 12 8 / 0.86)", "#23120b", "#fff3ec", "#e0b499", "#ea580c", "#2dd4bf"),
+  t("slate", "Slate", true, "#0f1216", "#242b33", "rgb(15 18 22 / 0.88)", "#1a1f26", "#eef2f6", "#9aa7b4", "#94a3b8", "#38bdf8"),
+  t("teal", "Deep Teal", true, "#021414", "#07403d", "rgb(3 22 22 / 0.85)", "#062b29", "#e6fffd", "#9fd6d0", "#2dd4bf", "#0ea5e9"),
+  t("ink", "Ink", true, "#0c0f18", "#1c2438", "rgb(11 14 24 / 0.9)", "#151b2b", "#e8ecf7", "#8f9bb8", "#c4b5fd", "#67e8f9"),
+  t("amber", "Amber Night", true, "#12100a", "#3a3113", "rgb(18 16 10 / 0.87)", "#1d190e", "#fffaeb", "#d6c489", "#fbbf24", "#f87171"),
+  t("crimson", "Crimson", true, "#150507", "#48111a", "rgb(21 5 7 / 0.86)", "#260a10", "#fff1f2", "#e8adb4", "#f43f5e", "#fb923c"),
+  t("aurora2", "Polar", true, "#04121a", "#0b3347", "rgb(4 18 26 / 0.84)", "#08283a", "#e9fbff", "#9cccdd", "#5eead4", "#c084fc"),
+  t("void", "Void", true, "#000000", "#141414", "rgb(0 0 0 / 0.92)", "#0d0d0d", "#f5f5f5", "#8f8f8f", "#ffffff", "#a3a3a3"),
+  t("synthwave", "Synthwave", true, "#150429", "#3d0a52", "rgb(21 4 41 / 0.84)", "#230740", "#ffe9fb", "#e3a8dd", "#ff4ecd", "#f7b733"),
+  t("terminal", "Terminal", true, "#0a0e0a", "#13261a", "rgb(8 14 10 / 0.9)", "#0f1a12", "#d4ffd9", "#6fbf7b", "#7cff6b", "#facc15"),
+  t("mono", "Monochrome", true, "#111111", "#2a2a2a", "rgb(17 17 17 / 0.9)", "#1d1d1d", "#fafafa", "#9e9e9e", "#e5e5e5", "#737373"),
+  t("copper", "Copper", true, "#140f0c", "#3d241a", "rgb(20 15 12 / 0.87)", "#201612", "#fdf1e9", "#d7a98d", "#c2703c", "#3f9b8e"),
+  t("indigo", "Indigo", true, "#0a0a20", "#1e1b56", "rgb(10 10 32 / 0.86)", "#14123a", "#eeeeff", "#a8a6e0", "#818cf8", "#34d399"),
+  t("jade", "Jade", true, "#04140f", "#0c3b2c", "rgb(4 20 15 / 0.85)", "#082a20", "#e9fff6", "#94ceb5", "#34d399", "#fbbf24"),
+  t("noir", "Noir", true, "#08080a", "#1f1f26", "rgb(8 8 10 / 0.9)", "#131317", "#e9e9ee", "#94949f", "#d4d4d8", "#ef4444"),
+
+  /* Light */
+  t("porcelain", "Porcelain", false, "#fbfcfe", "#e6ecf4", "rgb(255 255 255 / 0.9)", "#ffffff", "#131a26", "#5b6779", "#0284c7", "#7c3aed"),
+  t("meadow", "Meadow", false, "#f3faf2", "#d6ecd6", "rgb(253 255 253 / 0.88)", "#fdfffd", "#16261a", "#4f6b55", "#16a34a", "#0891b2"),
+  t("apricot", "Apricot", false, "#fff7f0", "#fbdfc8", "rgb(255 252 249 / 0.88)", "#fffcf9", "#2e1c0f", "#7a5a42", "#ea580c", "#0d9488"),
+  t("lavender", "Lavender", false, "#f8f5ff", "#e2d9f7", "rgb(255 254 255 / 0.88)", "#fffeff", "#241a33", "#665a7d", "#7c3aed", "#db2777"),
+  t("mint", "Mint", false, "#f1fbf8", "#cdeee5", "rgb(252 255 254 / 0.88)", "#fcfffe", "#12261f", "#4a6b62", "#0d9488", "#7c3aed"),
+  t("sandstone", "Sandstone", false, "#fbf6ec", "#e9dcc4", "rgb(255 252 246 / 0.88)", "#fffcf6", "#2a2114", "#6d604a", "#a16207", "#1d4ed8"),
+  t("cloud", "Cloud", false, "#f7f9fb", "#e3e9ef", "rgb(255 255 255 / 0.9)", "#ffffff", "#1a2028", "#5f6b78", "#475569", "#0ea5e9"),
+  t("blossom", "Blossom", false, "#fff5f8", "#fad6e2", "rgb(255 251 253 / 0.88)", "#fffbfd", "#331824", "#7d556a", "#e11d48", "#7c3aed"),
+  t("seafoam", "Seafoam", false, "#f0fafb", "#c9e9ee", "rgb(251 254 255 / 0.88)", "#fbfeff", "#0f2528", "#4b6b70", "#0891b2", "#c026d3"),
+  t("parchment", "Parchment", false, "#f9f4e8", "#e4d9bd", "rgb(255 253 246 / 0.88)", "#fffdf6", "#2b2617", "#6a6148", "#92400e", "#166534"),
+  t("slateday", "Slate Day", false, "#f4f6f8", "#dde3ea", "rgb(255 255 255 / 0.9)", "#ffffff", "#141a21", "#57626e", "#0f766e", "#b45309"),
+  t("citrus", "Citrus", false, "#fffdf0", "#faedbb", "rgb(255 254 247 / 0.88)", "#fffef7", "#2c2707", "#6d6435", "#a16207", "#0d9488"),
 ];
 
 /* Wallpapers are drawn procedurally on one canvas — see shell/Wallpaper.tsx.

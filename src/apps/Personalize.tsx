@@ -1,9 +1,9 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { useSettings, resolveTokens } from "@/kernel/settings";
 import { THEMES, WALLPAPERS, FONT_STACKS } from "@/kernel/themes";
-import { SPECIES, PET_FAMILIES, PERSONALITIES, VOICES, getSpecies } from "@/kernel/pets";
+import { SPECIES, PET_FAMILIES, PERSONALITIES, PET_MODES, VOICES, getSpecies } from "@/kernel/pets";
 import { PROFILES } from "@/kernel/profiles";
 import { APPS, getApp } from "@/kernel/registry";
 import { WIDGET_KINDS } from "@/shell/Widgets";
@@ -30,6 +30,29 @@ export default function Personalize({}: AppProps) {
   const [tab, setTab] = useState("profiles");
   const [error, setError] = useState<string | null>(null);
   const importRef = useRef<HTMLInputElement>(null);
+
+  // The catalogues grew past the point where scrolling is a way to find
+  // anything: 50 palettes and 97 creatures.
+  const [themeQuery, setThemeQuery] = useState("");
+  const [themeKind, setThemeKind] = useState<"all" | "dark" | "light">("all");
+  const [petQuery, setPetQuery] = useState("");
+
+  const visibleThemes = useMemo(() => {
+    const q = themeQuery.trim().toLowerCase();
+    return THEMES.filter((t) => {
+      if (themeKind === "dark" && !t.dark) return false;
+      if (themeKind === "light" && t.dark) return false;
+      return !q || t.name.toLowerCase().includes(q) || t.id.includes(q);
+    });
+  }, [themeQuery, themeKind]);
+
+  const visibleSpecies = useMemo(() => {
+    const q = petQuery.trim().toLowerCase();
+    if (!q) return SPECIES;
+    // Blurb and family included, so "cosmic", "sleepy" and "spiky" all work
+    // as searches rather than only exact names.
+    return SPECIES.filter((x) => `${x.name} ${x.id} ${x.family} ${x.blurb}`.toLowerCase().includes(q));
+  }, [petQuery]);
 
   const importProfile = useCallback(
     async (file: File | undefined) => {
@@ -98,9 +121,29 @@ export default function Personalize({}: AppProps) {
         {tab === "theme" && (
           <div className="grid gap-5 lg:grid-cols-2">
             <div>
-              <div className="os-label mb-2">Palette</div>
+              <div className="mb-2 flex flex-wrap items-center gap-2">
+                <span className="os-label !mb-0">Palette</span>
+                <input
+                  className="os-input !w-40 !py-1 text-[11px]"
+                  placeholder={`Filter ${THEMES.length} themes`}
+                  value={themeQuery}
+                  onChange={(e) => setThemeQuery(e.target.value)}
+                />
+                {(["all", "dark", "light"] as const).map((k) => (
+                  <button
+                    key={k}
+                    onClick={() => setThemeKind(k)}
+                    className={cn("os-chip !px-1.5 !py-0 !text-[10px]", themeKind === k && "!border-[var(--accent)] !text-[var(--accent)]")}
+                  >
+                    {k}
+                  </button>
+                ))}
+              </div>
               <div className="mb-5 grid gap-2" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(130px, 1fr))" }}>
-                {THEMES.map((t) => (
+                {visibleThemes.length === 0 && (
+                  <p className="text-[11px] text-[var(--muted)]">Nothing matches that filter.</p>
+                )}
+                {visibleThemes.map((t) => (
                   <button
                     key={t.id}
                     onClick={() => s.applyTheme(t.id)}
@@ -320,14 +363,25 @@ export default function Personalize({}: AppProps) {
                 >
                   No pet
                 </button>
-                <span className="text-[11px] text-[var(--muted)]">{SPECIES.length} creatures</span>
+                <input
+                  className="os-input !w-40 !py-1 text-[11px]"
+                  placeholder={`Search ${SPECIES.length} creatures`}
+                  value={petQuery}
+                  onChange={(e) => setPetQuery(e.target.value)}
+                />
+                <span className="text-[11px] text-[var(--muted)]">
+                  {petQuery.trim() ? `${visibleSpecies.length} of ${SPECIES.length}` : `${SPECIES.length} creatures`}
+                </span>
               </div>
 
-              {PET_FAMILIES.map((fam) => (
+              {visibleSpecies.length === 0 && (
+                <p className="mb-4 text-[11px] text-[var(--muted)]">Nothing matches that. Try a family name, or part of a description.</p>
+              )}
+              {PET_FAMILIES.filter((fam) => visibleSpecies.some((x) => x.family === fam.id)).map((fam) => (
                 <div key={fam.id} className="mb-4">
                   <div className="os-label mb-1.5">{fam.label}</div>
                   <div className="grid gap-2" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(96px, 1fr))" }}>
-                    {SPECIES.filter((x) => x.family === fam.id).map((x) => (
+                    {visibleSpecies.filter((x) => x.family === fam.id).map((x) => (
                       <button
                         key={x.id}
                         onClick={() => { s.set("pet", x.id); s.set("petVisible", true); }}
@@ -385,19 +439,51 @@ export default function Personalize({}: AppProps) {
 
               <Slider label="Size" value={s.petScale} min={0.6} max={2.2} step={0.1} onChange={(v) => s.set("petScale", v)} format={(v) => `${Math.round(v * 100)}%`} />
 
-              <div className="os-label mb-1.5 mt-2">Pet personality</div>
-              <div className="mb-3 space-y-1">
+              {/* WHAT it talks about, then HOW it sounds. Two axes, because a
+                  deadpan friend and a feral friend are different pets and the
+                  old single list could not express either. */}
+              <div className="os-label mb-1.5 mt-2">What it talks about</div>
+              <div className="mb-3 grid gap-1" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(112px, 1fr))" }}>
+                {PET_MODES.map((m) => (
+                  <button
+                    key={m.id}
+                    onClick={() => s.set("petMode", m.id)}
+                    title={m.blurb}
+                    className={cn(
+                      "rounded-[calc(var(--radius)*0.5)] border px-2 py-1 text-left",
+                      s.petMode === m.id ? "border-[var(--accent)] bg-[var(--accent)]/12" : "border-[var(--border)]",
+                    )}
+                  >
+                    <div className="truncate text-[11.5px]">{m.name}</div>
+                    <div className="truncate text-[9.5px] text-[var(--muted)]">{m.blurb}</div>
+                  </button>
+                ))}
+              </div>
+              <p className="mb-3 text-[10.5px] leading-snug text-[var(--muted)]">
+                Most of these never mention your computer. Friend checks in on you; Inspiration hands you something to
+                chase. Each carries written lines too, so the pet still says something with no key and no network.
+              </p>
+
+              <div className="os-label mb-1.5 mt-2">How it sounds</div>
+              <div className="mb-3 grid gap-1" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(112px, 1fr))" }}>
                 {PERSONALITIES.map((pp) => (
                   <button
                     key={pp.id}
                     onClick={() => s.set("petPersonality", pp.id)}
-                    className={cn("block w-full rounded-[calc(var(--radius)*0.5)] border px-2 py-1.5 text-left", s.petPersonality === pp.id ? "border-[var(--accent)] bg-[var(--accent)]/12" : "border-[var(--border)]")}
+                    title={pp.blurb}
+                    className={cn(
+                      "rounded-[calc(var(--radius)*0.5)] border px-2 py-1 text-left",
+                      s.petPersonality === pp.id ? "border-[var(--accent)] bg-[var(--accent)]/12" : "border-[var(--border)]",
+                    )}
                   >
-                    <div className="text-[12px]">{pp.name}</div>
-                    <div className="text-[10.5px] text-[var(--muted)]">{pp.blurb}</div>
+                    <div className="truncate text-[11.5px]">{pp.name}</div>
+                    <div className="truncate text-[9.5px] text-[var(--muted)]">{pp.blurb}</div>
                   </button>
                 ))}
               </div>
+              <p className="mb-3 text-[10.5px] leading-snug text-[var(--muted)]">
+                {PET_MODES.length} subjects times {PERSONALITIES.length} voices — {PET_MODES.length * PERSONALITIES.length} combinations.
+              </p>
 
               <Toggle label="Let the pet use your model" checked={s.petTalks} onChange={(v) => s.set("petTalks", v)} hint="Off means it only uses its own written lines — free, offline, and still in character." />
 

@@ -154,6 +154,76 @@ const lineAt = (src, index) => src.slice(0, index).split("\n").length;
   notes.push(`${entries.length} app names, all distinct`);
 }
 
+/* ── 4c. Every theme is legible ──────────────────────────────────────────── */
+{
+  // Added with the jump from 16 themes to 50. A palette is data, and bad data
+  // here is invisible until someone switches to that theme and finds half the
+  // interface unreadable — which is exactly the class this gate exists for.
+  //
+  // Two rules, and each is measured rather than eyeballed:
+  //  - muted text must clear WCAG AA (4.5:1) on the solid panel it sits on. It
+  //    carries every secondary label in the OS.
+  //  - accent and accent2 must be perceptually distinct. Luminance ratio is
+  //    the WRONG metric for that: a brown and a green of equal lightness score
+  //    1.01 and are obviously different colours. Redmean distance respects
+  //    hue, so it answers the question actually being asked.
+  const src = read(join(SRC, "kernel/themes.ts"));
+  const block = src.slice(src.indexOf("export const THEMES"), src.indexOf("/* Wallpapers"));
+  const RE = /^\s*t\(\s*"([a-z0-9]+)",\s*"([^"]+)",\s*(true|false),\s*"([^"]+)",\s*"([^"]+)",\s*"([^"]+)",\s*"([^"]+)",\s*"([^"]+)",\s*"([^"]+)",\s*"([^"]+)",\s*"([^"]+)"\s*\)/gm;
+
+  const rgb = (h) => {
+    const m = h.replace("#", "");
+    const full = m.length === 3 ? m.split("").map((c) => c + c).join("") : m;
+    const n = parseInt(full, 16);
+    return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  };
+  const luminance = (h) => {
+    const [r, g, b] = rgb(h).map((v) => {
+      const x = v / 255;
+      return x <= 0.03928 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4;
+    });
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  };
+  const contrast = (a, b) => {
+    const l1 = luminance(a); const l2 = luminance(b);
+    return (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05);
+  };
+  const redmean = (a, b) => {
+    const [r1, g1, b1] = rgb(a); const [r2, g2, b2] = rgb(b);
+    const rm = (r1 + r2) / 2;
+    const dr = r1 - r2; const dg = g1 - g2; const db = b1 - b2;
+    return Math.sqrt((2 + rm / 256) * dr * dr + 4 * dg * dg + (2 + (255 - rm) / 256) * db * db);
+  };
+
+  const MUTED_MIN = 4.5;   // WCAG AA for text
+  const ACCENT_MIN = 3.0;  // WCAG for a non-text UI mark
+  const DISTINCT_MIN = 100; // redmean; the shipped palettes sit at 126 and up
+
+  let themes = 0;
+  for (const m of block.matchAll(RE)) {
+    const [, id, , , , , , panelSolid, text, muted, accent, accent2] = m;
+    themes++;
+    const mutedRatio = contrast(muted, panelSolid);
+    if (mutedRatio < MUTED_MIN) {
+      problems.push(`theme "${id}": muted text is ${mutedRatio.toFixed(2)}:1 on its panel, under the ${MUTED_MIN}:1 minimum — every secondary label would be hard to read`);
+    }
+    const textRatio = contrast(text, panelSolid);
+    if (textRatio < MUTED_MIN) {
+      problems.push(`theme "${id}": body text is ${textRatio.toFixed(2)}:1 on its panel, under the ${MUTED_MIN}:1 minimum`);
+    }
+    const accentRatio = contrast(accent, panelSolid);
+    if (accentRatio < ACCENT_MIN) {
+      problems.push(`theme "${id}": accent is ${accentRatio.toFixed(2)}:1 on its panel, under the ${ACCENT_MIN}:1 minimum for a UI mark`);
+    }
+    const apart = redmean(accent, accent2);
+    if (apart < DISTINCT_MIN) {
+      problems.push(`theme "${id}": accent ${accent} and accent2 ${accent2} are only ${apart.toFixed(0)} apart — they mark different things and would read as one colour`);
+    }
+  }
+  if (themes < 10) problems.push(`themes: only parsed ${themes} palettes — the parser has stopped matching`);
+  notes.push(`${themes} themes checked for contrast and accent distinctness`);
+}
+
 /* ── 5. No emoji in the UI ───────────────────────────────────────────────── */
 {
   // Pictographic ranges only. Deliberately excludes the arrows, box-drawing and
@@ -197,4 +267,4 @@ if (problems.length) {
   for (const p of problems) console.error(`  ✗ ${p}`);
   process.exit(1);
 }
-console.error(`\nOK  icons resolve | app ids resolve | modules exist | keys unique | names unique | no emoji | no debug output`);
+console.error(`\nOK  icons resolve | app ids resolve | modules exist | keys unique | names unique | themes legible | no emoji | no debug output`);

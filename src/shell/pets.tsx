@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useId, useRef, useState } from "react";
-import { getSpecies, getPersonality, type Species } from "@/kernel/pets";
+import { getSpecies, type Species } from "@/kernel/pets";
+import { composePetPrompt, cannedLine, tidyReply, PET_MAX_TOKENS } from "@/lib/petmind";
+import { useWM } from "@/kernel/wm";
 import { useSettings } from "@/kernel/settings";
 import { ask } from "@/lib/useAI";
 import { bus } from "@/kernel/bus";
@@ -445,8 +447,10 @@ export function PetLayer() {
 
   const speak = async () => {
     if (busy.current || !sp) return;
-    const persona = getPersonality(s.petPersonality);
-    const canned = persona.canned[Math.floor(Math.random() * persona.canned.length)];
+    // The canned line comes from the MODE, not the personality: the subject is
+    // what you notice is missing when there is no model, and the voice is what
+    // you notice is wrong.
+    const canned = cannedLine(s.petMode, s.petPersonality, Math.random);
 
     pats.current += 1;
     if (pats.current === 10 && s.funMode && useEggs.getState().find("pet")) {
@@ -471,15 +475,25 @@ export function PetLayer() {
     try {
       const name = s.petName || sp.name;
       const res = await ask({
-        // 60 tokens is the whole point: this fires on a click, and a pet that
+        // The cap is the whole point: this fires on a click, and a pet that
         // costs real money to pat is a pet nobody pats.
-        maxTokens: 60,
+        maxTokens: PET_MAX_TOKENS,
         temperature: 1,
-        system: `You are ${name}, a small ${sp.name.toLowerCase()} living on the user's desktop in Web-AIOS, an AI desktop OS. ${persona.line} Reply with ONE sentence, under 18 words. No quotes, no emoji, no preamble, no name prefix.`,
+        system: composePetPrompt({
+          petName: name,
+          speciesName: sp.name,
+          modeId: s.petMode,
+          personalityId: s.petPersonality,
+          // Only the modes that asked for it actually receive this.
+          context: {
+            openApps: useWM.getState().windows.map((w) => w.title).slice(0, 6),
+            hour: new Date().getHours(),
+            pats: pats.current,
+          },
+        }),
         messages: [{ role: "user", content: "The user just clicked you. Say something." }],
       });
-      const line = res.text.trim().replace(/^["'\s]+|["'\s]+$/g, "").split("\n")[0];
-      setSay(line || canned);
+      setSay(tidyReply(res.text, canned, name));
     } catch {
       // Silent fallback by design: an error toast every time you pat the cat
       // would be worse than the cat having nothing new to say.

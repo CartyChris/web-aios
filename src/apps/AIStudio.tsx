@@ -5,6 +5,8 @@ import { useVFS } from "@/kernel/vfs";
 import { bus } from "@/kernel/bus";
 import { useSettings } from "@/kernel/settings";
 import { useUserApps, type UserApp } from "@/kernel/userapps";
+import { UPGRADE_INTENTS, diffVersions } from "@/lib/appversions";
+import { upgradeApp } from "@/lib/app-upgrade";
 import { ask } from "@/lib/useAI";
 import { extractCode } from "./IDE";
 import type { AppProps } from "@/kernel/types";
@@ -846,6 +848,7 @@ function McpTab() {
 function LibraryTab({ running, setRunning, onBuild }: { running: UserApp | null; setRunning: (a: UserApp | null) => void; onBuild: () => void }) {
   const store = useUserApps();
   const settings = useSettings();
+  const [panelFor, setPanelFor] = useState<string | null>(null);
 
   if (running) {
     return (
@@ -914,14 +917,136 @@ function LibraryTab({ running, setRunning, onBuild }: { running: UserApp | null;
                 >
                   <Icon name="download" size={11} />
                 </button>
+                <button
+                  className={cn("os-btn !px-2 !py-0.5 text-[10.5px]", panelFor === a.id && "!border-[var(--accent)]")}
+                  title="Upgrade with AI, or revert to an earlier version"
+                  onClick={() => setPanelFor(panelFor === a.id ? null : a.id)}
+                >
+                  <Icon name="wand" size={11} />
+                  <span className="ml-1">{store.historyFor(a.id).length}</span>
+                </button>
                 <button className="os-btn !px-2 !py-0.5 text-[10.5px]" onClick={() => store.remove(a.id)}>
                   <Icon name="close" size={11} />
                 </button>
               </div>
+              {panelFor === a.id && <VersionPanel app={a} onRan={() => setRunning(store.get(a.id) ?? a)} />}
             </div>
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   UPGRADE AND REVERT
+
+   The panel that makes "rewrite my app with AI" a tool rather than a gamble.
+   Every rewrite is committed as a version, so the worse result is one click
+   from being undone — and the undo appends rather than truncating, so the
+   attempt you reverted is still there if you change your mind again.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+function VersionPanel({ app, onRan }: { app: UserApp; onRan: () => void }) {
+  const store = useUserApps();
+  const [intent, setIntent] = useState(UPGRADE_INTENTS[0].id);
+  const [detail, setDetail] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
+  const abort = useRef<AbortController | null>(null);
+
+  const history = store.historyFor(app.id);
+  const needsDetail = intent === "feature" || intent === "fix";
+
+  const run = async () => {
+    const ctrl = new AbortController();
+    abort.current = ctrl;
+    setBusy(true);
+    setNote(null);
+    const r = await upgradeApp({ appId: app.id, intentId: intent, detail, signal: ctrl.signal });
+    setBusy(false);
+    abort.current = null;
+    if (!r.ok) setNote(r.reason);
+    else {
+      setDetail("");
+      setNote(`Saved as a new version. ${r.changedFiles} file(s), $${r.costUsd.toFixed(4)}.`);
+      onRan();
+    }
+  };
+
+  return (
+    <div className="mt-2 border-t border-[var(--border)] pt-2">
+      <div className="os-label mb-1">Upgrade with AI</div>
+      <select className="os-input mb-1.5 w-full !py-1 text-[11px]" value={intent} onChange={(e) => setIntent(e.target.value)}>
+        {UPGRADE_INTENTS.map((i) => <option key={i.id} value={i.id}>{i.label}</option>)}
+      </select>
+      <input
+        className="os-input mb-1.5 w-full text-[11px]"
+        placeholder={needsDetail ? "Describe it — required" : "Anything to add (optional)"}
+        value={detail}
+        onChange={(e) => setDetail(e.target.value)}
+        onKeyDown={(e) => { if (e.key === "Enter" && !busy) void run(); }}
+      />
+      <div className="mb-2 flex flex-wrap items-center gap-1.5">
+        {busy ? (
+          <button className="os-btn !px-2 !py-0.5 text-[10.5px]" onClick={() => abort.current?.abort()}>Stop</button>
+        ) : (
+          <button
+            className="os-btn !px-2 !py-0.5 text-[10.5px]"
+            data-variant="primary"
+            onClick={() => void run()}
+            disabled={needsDetail && !detail.trim()}
+          >
+            <Icon name="wand" size={11} className="mr-1" />Rewrite
+          </button>
+        )}
+        {busy && <span className="text-[10.5px] text-[var(--muted)]">Working. Nothing is replaced until it returns.</span>}
+      </div>
+      {note && <p className="mb-2 text-[10.5px] leading-snug text-[var(--muted)]">{note}</p>}
+
+      <div className="os-label mb-1">History ({history.length})</div>
+      <div className="space-y-0.5">
+        {history.slice().reverse().map((v, i) => {
+          const isCurrent = i === 0;
+          const previous = history[history.length - 2 - i];
+          const d = previous ? diffVersions(previous, v) : null;
+          return (
+            <div key={v.id} className="flex items-start gap-1.5 text-[10.5px]">
+              <Icon
+                name={isCurrent ? "check" : v.source === "revert" ? "arrowUp" : "circle"}
+                size={11}
+                className="mt-0.5 shrink-0"
+                style={{ color: isCurrent ? "var(--ok)" : "var(--muted)" }}
+              />
+              <span className="min-w-0 flex-1">
+                <span className={cn("block truncate", isCurrent && "font-medium")}>{v.label}</span>
+                <span className="block text-[var(--muted)]">
+                  {relTime(v.at)}
+                  {d && !d.identical ? ` · ${d.summary}` : ""}
+                </span>
+              </span>
+              {!isCurrent && (
+                <button
+                  className="os-btn shrink-0 !px-1.5 !py-0 !text-[10px]"
+                  title="Restore this version. Nothing is deleted — the restore is itself a new version."
+                  onClick={() => {
+                    const r = store.revertApp(app.id, v.id);
+                    setNote(r.ok ? `Restored "${v.label}". Nothing was deleted.` : r.reason);
+                    if (r.ok) onRan();
+                  }}
+                >
+                  Restore
+                </button>
+              )}
+            </div>
+          );
+        })}
+        {history.length === 0 && (
+          <p className="text-[10.5px] text-[var(--muted)]">
+            No history yet. Apps built before this feature start recording from their next change.
+          </p>
+        )}
+      </div>
     </div>
   );
 }
