@@ -563,3 +563,27 @@ export const VOICES: Array<{ id: string; name: string; line: string }> = [
 ];
 
 export const getVoice = (id: string) => VOICES.find((v) => v.id === id) ?? VOICES[0];
+
+/* ── steering the assistant ──────────────────────────────────────────────── */
+
+export type SteeringSource = "voice" | "pet";
+
+/**
+ * Which line steers the OS assistant: the assistant's own voice, or the pet's.
+ *
+ * It REPLACES rather than stacks, deliberately. `useAI` already carries the
+ * note that blending "deadpan" with "thorough" produces something that is
+ * neither, and that is exactly what appending both would do — two tone
+ * instructions in one prompt average into a model that commits to neither.
+ *
+ * Letting the pet drive is the point of asking for it: if you gave the thing on
+ * your wallpaper a personality, having the assistant answer in a different one
+ * makes the OS feel like two programs.
+ */
+export function assistantSteeringLine(source: SteeringSource, voiceId: string, personalityId: string): string {
+  if (source === "pet") return getPersonality(personalityId).line;
+  const voice = getVoice(voiceId);
+  // "direct" is the default and says nothing a model does not already do;
+  // spending prompt on it only dilutes the task.
+  return voice && voice.id !== "direct" ? voice.line : "";
+}

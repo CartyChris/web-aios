@@ -6,7 +6,8 @@ import { useCustomWidgets, widgetDocument, widgetStandalone, type CustomWidget }
 import { useVFS } from "@/kernel/vfs";
 import { bus } from "@/kernel/bus";
 import { ask } from "@/lib/useAI";
-import { extractCode } from "./IDE";
+import { extractCode, explainNoCode } from "@/lib/extract-code";
+import { ModelOverride, overrideOpts, type ModelChoice } from "@/shell/ModelOverride";
 import { relTime } from "@/lib/format";
 import { downloadZip } from "@/lib/zip";
 import { ErrorNote, Spinner, Empty, CopyButton } from "./_ui";
@@ -15,7 +16,7 @@ import { Icon } from "@/shell/icons";
 /* Describe a widget; the model writes it; it runs sandboxed on your desktop,
  * and leaves as a standalone file you can open or edit anywhere. */
 
-const SYSTEM = `You write small, self-contained desktop widgets.
+export const WIDGET_SYSTEM = `You write small, self-contained desktop widgets.
 
 Output ONLY an HTML fragment inside one fenced code block — the markup, a <style> block, and a <script> block. No <html>, <head> or <body> tags; the host supplies those.
 
@@ -44,6 +45,7 @@ export function WidgetBuilder() {
   const vfs = useVFS();
   const [prompt, setPrompt] = useState("");
   const [busy, setBusy] = useState(false);
+  const [choice, setChoice] = useState<ModelChoice>({});
   const [error, setError] = useState<string | null>(null);
   const [draft, setDraft] = useState<{ html: string; name: string } | null>(null);
   const [stream, setStream] = useState("");
@@ -55,20 +57,34 @@ export function WidgetBuilder() {
     if (!p || busy) return;
     setBusy(true); setError(null); setStream("");
     try {
-      const res = await ask({
-        messages: [{ role: "user", content: base ? `Current widget:\n\`\`\`html\n${base}\n\`\`\`\n\nChange it: ${p}` : p }],
-        system: SYSTEM,
-        maxTokens: 4000,
+      const user = base ? `Current widget:\n\`\`\`html\n${base}\n\`\`\`\n\nChange it: ${p}` : p;
+      const run = (content: string) => ask({
+        messages: [{ role: "user", content }],
+        system: WIDGET_SYSTEM,
+        // 4,000 truncated real widgets mid-script, and a cut-off reply is the
+        // commonest way this used to fail.
+        maxTokens: 8000,
+        // Code, not conversation: a pet personality steering the OS must not
+        // restyle the markup.
+        persona: false,
+        ...overrideOpts(choice),
         onDelta: (_d, full) => setStream(full),
       });
-      const code = extractCode(res.text);
-      if (!code) throw new Error("No HTML block came back. Try rephrasing, or use a stronger model.");
+      let res = await run(user);
+      let code = extractCode(res.text);
+      if (!code) {
+        // One repair attempt with the model's own reply in front of it. Cheap,
+        // and it rescues the models that answered in prose.
+        res = await run(`${user}\n\nYour previous reply contained no usable widget code:\n${res.text.slice(0, 1500)}\n\nReturn ONLY the widget as an HTML fragment inside a single \`\`\`html block. No explanation.`);
+        code = extractCode(res.text);
+      }
+      if (!code) throw new Error(explainNoCode(res.text));
       setDraft({ html: code, name: p.slice(0, 40) });
       setStream("");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Generation failed.");
     } finally { setBusy(false); }
-  }, [prompt, busy]);
+  }, [prompt, busy, choice]);
 
   const save = useCallback(() => {
     if (!draft) return;
@@ -78,16 +94,10 @@ export function WidgetBuilder() {
       setEditing(null);
     } else {
       const id = store.add({ name: draft.name || "Widget", prompt, html: draft.html, icon: "widgets", w: 260, h: 170 });
-      settings.addWidget("custom");
-      // The newest placed widget is the one we just created; point it at the
-      // custom definition so it renders rather than showing "unknown widget".
-      const placed = useSettings.getState().widgets;
-      const last = placed[placed.length - 1];
-      if (last) {
-        useSettings.setState({
-          widgets: placed.map((w) => (w.id === last.id ? { ...w, customId: id, w: 260, h: 170 } : w)),
-        });
-      }
+      // Placed with its definition attached in one write. The old way added a
+      // bare "custom" widget, then patched whichever widget happened to be
+      // last — which is the wrong one if anything else placed a widget between.
+      settings.addWidget("custom", { customId: id, w: 260, h: 170 });
       bus.emit("notify", { title: "Widget placed on the desktop", kind: "success" });
     }
     setDraft(null);
@@ -156,6 +166,7 @@ was exported with baked into \`:root\` — override those to restyle it.
           <button className="os-btn !py-1 text-[11px]" data-variant="primary" onClick={() => generate(undefined, editing?.html)} disabled={busy || !prompt.trim()}>
             {busy ? "Building…" : editing ? "Apply change" : "Build widget"}
           </button>
+          <ModelOverride id="widget" value={choice} onChange={setChoice} />
           {busy && <Spinner label={`${stream.length.toLocaleString()} chars`} />}
           {editing && <button className="os-btn !py-1 text-[11px]" onClick={() => { setEditing(null); setDraft(null); setPrompt(""); }}>Cancel</button>}
           <div className="flex-1" />
@@ -245,13 +256,7 @@ was exported with baked into \`:root\` — override those to restyle it.
                 <button
                   className="os-btn !px-2 !py-0.5 text-[10.5px]"
                   onClick={() => {
-                    const id = settings.addWidget("custom");
-                    const placed = useSettings.getState().widgets;
-                    const last = placed[placed.length - 1];
-                    if (last) {
-                      useSettings.setState({ widgets: placed.map((x) => (x.id === last.id ? { ...x, customId: w.id, w: w.w, h: w.h } : x)) });
-                    }
-                    void id;
+                    settings.addWidget("custom", { customId: w.id, w: w.w, h: w.h });
                     bus.emit("notify", { title: `Placed "${w.name}"`, kind: "success" });
                   }}
                 >

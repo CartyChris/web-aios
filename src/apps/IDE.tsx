@@ -1,5 +1,6 @@
 "use client";
 
+import { extractCode } from "@/lib/extract-code";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useVFS } from "@/kernel/vfs";
 import { bus } from "@/kernel/bus";
@@ -249,9 +250,6 @@ export default function IDE({ args }: AppProps) {
 
 /** Pull the largest fenced block, falling back to the whole response if the
  *  model ignored the fence instruction. */
-export function extractCode(text: string): string | null {
-  const blocks = [...text.matchAll(/```[\w-]*\n?([\s\S]*?)```/g)].map((m) => m[1]);
-  if (blocks.length) return blocks.sort((a, b) => b.length - a.length)[0].replace(/\n$/, "");
-  const t = text.trim();
-  return t.startsWith("<") || t.startsWith("import") || t.startsWith("function") ? t : null;
-}
+// Moved to lib so it can be tested; re-exported because AIStudio and
+// WidgetBuilder import it from here.
+export { extractCode };

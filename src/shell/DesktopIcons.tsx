@@ -9,6 +9,9 @@ import { useUserApps } from "@/kernel/userapps";
 import { bus } from "@/kernel/bus";
 import { Icon } from "./icons";
 import { cn } from "@/lib/cn";
+import { textStyleAt } from "@/lib/contrast";
+import { useBackdropLuminance } from "./useBackdropLuminance";
+import { useViewport } from "@/lib/useViewport";
 
 /* ────────────────────────────────────────────────────────────────────────────
    The desktop surface: marquee selection and free-positioned icons.
@@ -70,6 +73,10 @@ export function DesktopIcons({ topInset }: { topInset: number }) {
   const [dragDelta, setDragDelta] = useState<{ dx: number; dy: number }>({ dx: 0, dy: 0 });
 
   const items = settings.desktopItems;
+  // An icon label sits directly on the wallpaper, so its colour cannot come
+  // from a theme token — the theme has no idea what is painted behind it.
+  const backdrop = useBackdropLuminance();
+  const viewport = useViewport();
 
   /** Resolve an item to something renderable, whatever kind it is. */
   const resolve = useCallback(
@@ -221,6 +228,34 @@ export function DesktopIcons({ topInset }: { topInset: number }) {
     setDrag(null);
     setDragDelta({ dx: 0, dy: 0 });
   }, [drag, dragDelta, items, settings]);
+
+  /**
+   * The colour this label should paint itself, from the pixels beneath it.
+   *
+   * A selected icon keeps the theme's own text colour: it has an accent-tinted
+   * plate behind it, so the wallpaper is no longer what it sits on.
+   */
+  const labelStyle = useCallback(
+    (x: number, y: number) => {
+      // Geometry from props and the viewport store, never from surfaceRef:
+      // reading a ref during render is an eslint error here, and for a real
+      // reason — the value it returns is whatever the last commit left behind.
+      // The surface is `inset-x-0 bottom-0` under `top: topInset`, so its size
+      // is already known without measuring it.
+      const w = viewport.w || 1;
+      const h = Math.max(1, viewport.h - topInset);
+      // The grid spans the whole viewport; the surface starts below the top
+      // bar, so that offset comes back in or every label reads the wallpaper
+      // slightly above itself.
+      return textStyleAt(
+        backdrop,
+        (x + ICON_W / 2) / w,
+        (y + topInset + ICON_H / 2) / (h + topInset),
+        settings.wallpaperDim,
+      );
+    },
+    [backdrop, settings.wallpaperDim, viewport.w, viewport.h, topInset],
+  );
 
   /** Open one item by its desktop id. */
   const activate = useCallback(
@@ -418,7 +453,10 @@ export function DesktopIcons({ topInset }: { topInset: number }) {
                 className="w-full rounded bg-[var(--panel-solid)] px-1 text-center text-[10px] outline-none ring-1 ring-[var(--accent)]"
               />
             ) : (
-              <span className="w-full break-words text-[10px] leading-tight">
+              <span
+                className="w-full break-words text-[10px] leading-tight"
+                style={selected.includes(item.id) ? undefined : labelStyle(item.x, item.y)}
+              >
                 {view?.label ?? item.ref}
               </span>
             )}

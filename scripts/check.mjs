@@ -215,6 +215,16 @@ const lineAt = (src, index) => src.slice(0, index).split("\n").length;
     if (accentRatio < ACCENT_MIN) {
       problems.push(`theme "${id}": accent is ${accentRatio.toFixed(2)}:1 on its panel, under the ${ACCENT_MIN}:1 minimum for a UI mark`);
     }
+    // Text that sits ON the accent. Before this was computed per theme, the
+    // primary button hardcoded one dark blue and failed AA on 19 of 50
+    // palettes — worst case 2.5:1. Recomputed here from the same rule the
+    // runtime uses, so the two cannot drift apart.
+    const onAccent = luminance(accent) > 0.179 ? "#050506" : "#ffffff";
+    const onAccentRatio = contrast(onAccent, accent);
+    if (onAccentRatio < 4.5) {
+      problems.push(`theme "${id}": text on the accent reaches only ${onAccentRatio.toFixed(2)}:1 — a primary button would be unreadable`);
+    }
+
     const apart = redmean(accent, accent2);
     if (apart < DISTINCT_MIN) {
       problems.push(`theme "${id}": accent ${accent} and accent2 ${accent2} are only ${apart.toFixed(0)} apart — they mark different things and would read as one colour`);

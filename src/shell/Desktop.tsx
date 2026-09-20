@@ -24,6 +24,7 @@ import { EGGS, useEggs, watchSequences } from "@/lib/easter";
 import { installAiosApi } from "@/lib/aios-api";
 import { installTriggers, startTriggerRuntime, instrumentVfs } from "@/lib/harness-triggers";
 import { installSpanRecorder } from "@/kernel/spans";
+import { installActivityRecorder } from "@/kernel/activity";
 
 export function Desktop() {
   const hydrated = useHydrated();
@@ -56,12 +57,14 @@ export function Desktop() {
     // The span ring is the OS's, not Observatory's. A trace lost by closing a
     // window is exactly the trace you wanted afterwards.
     const stopSpans = installSpanRecorder(bus);
+    // What the user deliberately does, kept in this browser, feeding For You.
+    const stopActivity = installActivityRecorder();
     // The VFS does not publish its writes, so a file trigger would otherwise
     // never receive a signal. Wrapping the store once at boot is what puts
     // them on the bus.
     instrumentVfs();
     const stopTriggers = startTriggerRuntime();
-    return () => { stopSpans(); stopTriggers(); };
+    return () => { stopSpans(); stopActivity(); stopTriggers(); };
   }, []);
 
   // ── Startup apps ──────────────────────────────────────────────────────────

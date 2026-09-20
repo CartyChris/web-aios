@@ -11,6 +11,7 @@ import assert from "node:assert/strict";
 import {
   PET_MODES, PERSONALITIES, VOICES, getMode, getPersonality, getVoice,
   composePetPrompt, cannedLine, tidyReply, PET_MAX_WORDS, PET_MAX_TOKENS,
+  assistantSteeringLine,
 } from "../.test-build/petmind.js";
 
 const base = { petName: "Mochi", speciesName: "Fox", modeId: "tips", personalityId: "helpful" };
@@ -226,4 +227,41 @@ test("a pet name containing regex characters does not break the stripper", () =>
 test("a haiku's slashes survive tidying", () => {
   const h = "cold glass under thumbs / the machine hums its one note / nothing is finished";
   assert.equal(tidyReply(h, "fb"), h);
+});
+
+/* ── steering the OS assistant ───────────────────────────────────────────── */
+
+test("steering REPLACES rather than stacks", () => {
+  // Two tone instructions in one prompt average into a model that commits to
+  // neither — useAI already carried that warning about deadpan + thorough.
+  const fromPet = assistantSteeringLine("pet", "thorough", "deadpan");
+  const fromVoice = assistantSteeringLine("voice", "thorough", "deadpan");
+  assert.equal(fromPet, getPersonality("deadpan").line);
+  assert.equal(fromVoice, getVoice("thorough").line);
+  assert.notEqual(fromPet, fromVoice);
+  assert.ok(!fromPet.includes(getVoice("thorough").line), "the voice leaked into pet steering");
+  assert.ok(!fromVoice.includes(getPersonality("deadpan").line), "the pet leaked into voice steering");
+});
+
+test("the default voice contributes nothing, so it does not dilute the task", () => {
+  assert.equal(assistantSteeringLine("voice", "direct", "deadpan"), "");
+  assert.notEqual(assistantSteeringLine("voice", "pirate", "deadpan"), "");
+});
+
+test("pet steering still yields a line when the pet is on the default personality", () => {
+  // The negative control for the "direct is empty" rule: it must not also
+  // silence the pet.
+  assert.notEqual(assistantSteeringLine("pet", "direct", "helpful"), "");
+});
+
+test("an unknown id on either axis falls back rather than steering with undefined", () => {
+  assert.equal(assistantSteeringLine("pet", "x", "no_such"), getPersonality(PERSONALITIES[0].id).line);
+  assert.equal(assistantSteeringLine("voice", "no_such", "x"), "", "an unknown voice resolves to the default, which is silent");
+});
+
+test("every personality produces a usable steering line", () => {
+  for (const p of PERSONALITIES) {
+    const line = assistantSteeringLine("pet", "direct", p.id);
+    assert.ok(line.length > 20, `${p.id} steers with too little to act on`);
+  }
 });

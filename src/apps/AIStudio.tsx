@@ -8,7 +8,7 @@ import { useUserApps, type UserApp } from "@/kernel/userapps";
 import { UPGRADE_INTENTS, diffVersions } from "@/lib/appversions";
 import { upgradeApp } from "@/lib/app-upgrade";
 import { ask } from "@/lib/useAI";
-import { extractCode } from "./IDE";
+import { extractCode, explainNoCode } from "@/lib/extract-code";
 import type { AppProps } from "@/kernel/types";
 import { download, relTime, uid } from "@/lib/format";
 import { Tabs, ErrorNote, Empty, Spinner, CopyButton } from "./_ui";
@@ -103,7 +103,7 @@ export default function AIStudio({ args }: AppProps) {
         active={tab}
         onChange={(t) => setTab(t as Tab)}
       />
-      {tab === "build" && <BuildTab />}
+      {tab === "build" && <BuildTab initialPrompt={typeof args?.prompt === "string" ? args.prompt : ""} />}
       {tab === "image" && <MediaTab kind="image" />}
       {tab === "video" && <MediaTab kind="video" />}
       {tab === "mcp" && <McpTab />}
@@ -116,12 +116,13 @@ export default function AIStudio({ args }: AppProps) {
    BUILD
    ══════════════════════════════════════════════════════════════════════════ */
 
-function BuildTab() {
+/** `initialPrompt` lets another app hand AI Studio an idea to build. */
+function BuildTab({ initialPrompt = "" }: { initialPrompt?: string }) {
   const vfs = useVFS();
   const userApps = useUserApps();
   const [group, setGroup] = useState<(typeof TARGET_GROUPS)[number]["id"]>("web");
   const [targetId, setTargetId] = useState("single-html");
-  const [prompt, setPrompt] = useState("");
+  const [prompt, setPrompt] = useState(initialPrompt);
   const [files, setFiles] = useState<ProjectFile[] | null>(null);
   const [openFile, setOpenFile] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -166,7 +167,7 @@ function BuildTab() {
           onDelta: (_d, full) => setStream(full),
         });
         const code = extractCode(res.text);
-        if (!code) throw new Error("No HTML document came back. Try again, or pick a stronger model in Settings.");
+        if (!code) throw new Error(explainNoCode(res.text));
         setFiles([{ path: "index.html", content: code }, ...target.base(name)]);
         setOpenFile("index.html");
       } else {
@@ -207,7 +208,7 @@ function BuildTab() {
           onDelta: (_d, full) => setStream(full),
         });
         const code = extractCode(res.text);
-        if (!code) throw new Error("No HTML came back from that pass.");
+        if (!code) throw new Error(explainNoCode(res.text));
         setFiles(files.map((f) => (f.path === "index.html" ? { ...f, content: code } : f)));
       } else {
         const source = files

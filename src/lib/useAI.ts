@@ -2,7 +2,7 @@
 
 import { useCallback, useRef, useState } from "react";
 import { useSettings } from "@/kernel/settings";
-import { getVoice } from "@/kernel/pets";
+import { assistantSteeringLine } from "@/lib/petmind";
 import { bus } from "@/kernel/bus";
 import { getProvider, estimateCost, estimateTokens } from "./providers";
 import { streamChat, messageText, type ChatMessage } from "./ai-transport";
@@ -197,8 +197,10 @@ export async function ask(opts: AskOptions): Promise<AskResult> {
  *  model out of the thing it was actually asked to do. */
 export function withPersona(base: string, s = useSettings.getState()): string {
   const parts = [base].filter(Boolean);
-  const voice = getVoice(s.voice);
-  if (voice && voice.id !== "direct") parts.push(voice.line);
+  // One tone, from whichever source the user picked. Two would average into
+  // neither — see assistantSteeringLine.
+  const steer = assistantSteeringLine(s.assistantSteering, s.voice, s.petPersonality);
+  if (steer) parts.push(steer);
   if (s.aboutMe.trim()) parts.push(`About the person you are helping: ${s.aboutMe.trim()}`);
   return parts.join("\n\n");
 }

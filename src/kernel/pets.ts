@@ -1,3 +1,6 @@
+import type { PartValue } from "@/lib/petgen";
+import { create } from "zustand";
+import { persist, createJSONStorage } from "zustand/middleware";
 /* ────────────────────────────────────────────────────────────────────────────
    Desktop pets.
 
@@ -18,14 +21,14 @@
    Nothing here renders. The parts live in src/shell/pets.tsx.
    ──────────────────────────────────────────────────────────────────────────── */
 
-export type Body =
-  | "round" | "oval" | "tall" | "blob" | "fish" | "serpent"
-  | "boxy" | "cloud" | "crystal" | "flame" | "bean" | "orb";
-export type Ears = "none" | "pointed" | "round" | "long" | "antenna" | "horns" | "fin" | "leaf" | "crest" | "tuft";
-export type Tail = "none" | "curl" | "bushy" | "thin" | "fan" | "fin" | "spark" | "trail" | "stinger";
-export type Eyes = "dot" | "round" | "wide" | "sleepy" | "visor" | "star" | "cross" | "multi" | "single";
-export type Limbs = "none" | "paws" | "legs" | "tentacles" | "wings" | "hover" | "flipper";
-export type Pattern = "none" | "stripes" | "spots" | "belly" | "plates" | "glow" | "swirl" | "scales";
+// Derived from the one runtime list the AI pet validator also uses, so a part
+// a generated pet may name is always a part the renderer can draw.
+export type Body = PartValue<"body">;
+export type Ears = PartValue<"ears">;
+export type Tail = PartValue<"tail">;
+export type Eyes = PartValue<"eyes">;
+export type Limbs = PartValue<"limbs">;
+export type Pattern = PartValue<"pattern">;
 
 export interface Species {
   id: string;
@@ -161,7 +164,30 @@ export const SPECIES: Species[] = [
   { id: "satellite2", name: "Rover", family: "cosmic", body: "boxy", ears: "antenna", tail: "none", eyes: "visor", limbs: "legs", pattern: "plates", hue: ["#c0a87f", "#7c684a", "#efe3c8"], tempo: 0.4, blurb: "Still going. Still reporting." },
 ];
 
-export const getSpecies = (id: string) => SPECIES.find((s) => s.id === id);
+/** Pets a model designed for this user. Persisted separately so a catalogue
+ *  update can never overwrite them. Capped: each is small, but unbounded is
+ *  unbounded. */
+interface CustomPetState {
+  pets: Species[];
+  add: (s: Species) => void;
+  remove: (id: string) => void;
+}
+export const useCustomPets = create<CustomPetState>()(
+  persist(
+    (set) => ({
+      pets: [],
+      add: (sp) => set((st) => ({ pets: [sp, ...st.pets.filter((p) => p.id !== sp.id)].slice(0, 60) })),
+      remove: (id) => set((st) => ({ pets: st.pets.filter((p) => p.id !== id) })),
+    }),
+    { name: "webaios.custompets.v1", storage: createJSONStorage(() => localStorage) },
+  ),
+);
+
+/** Built-in first, then anything a model made. Reads the store directly, so
+ *  components that must re-render when a pet is added subscribe to
+ *  useCustomPets themselves. */
+export const getSpecies = (id: string): Species | undefined =>
+  SPECIES.find((s) => s.id === id) ?? useCustomPets.getState().pets.find((s) => s.id === id);
 
 export const PET_FAMILIES: Array<{ id: Species["family"]; label: string }> = [
   { id: "mammal", label: "Mammals" },

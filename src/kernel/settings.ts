@@ -70,6 +70,9 @@ export interface Settings {
 
   /** Tone the OS assistant writes in. Feeds every app's system prompt. */
   voice: string;
+  /** Whose tone the OS assistant answers in: its own voice, or the desktop
+   *  pet's personality. See lib/petmind.ts — it replaces rather than stacks. */
+  assistantSteering: "voice" | "pet";
   /** Free text appended to the assistant's system prompt — who you are, what
    *  you are working on, how you like answers. */
   aboutMe: string;
@@ -214,6 +217,7 @@ const DEFAULTS: Settings = {
   petTalks: true,
 
   voice: "direct",
+  assistantSteering: "voice",
   aboutMe: "",
   greeting: true,
   funMode: true,
@@ -249,9 +253,12 @@ export interface SettingsState extends Settings {
   reset: () => void;
   exportProfile: () => string;
   importProfile: (json: string) => { ok: boolean; error?: string };
-  addWidget: (kind: string) => void;
+  /** Returns the new widget's id, so a caller never has to guess which one it placed. */
+  addWidget: (kind: string, opts?: { config?: Record<string, unknown>; customId?: string; w?: number; h?: number }) => string;
   removeWidget: (id: string) => void;
   moveWidget: (id: string, x: number, y: number) => void;
+  /** Replace a widget's config — how News and Live Data widgets save their settings. */
+  configureWidget: (id: string, config: Record<string, unknown>) => void;
   resizeWidget: (id: string, w: number, h: number) => void;
   addDesktopItem: (item: Omit<DesktopItem, "id">) => string;
   moveDesktopItems: (moves: Array<{ id: string; x: number; y: number }>) => void;
@@ -327,15 +334,25 @@ export const useSettings = create<SettingsState>()(
         }
       },
 
-      addWidget: (kind) =>
+      addWidget: (kind, opts = {}) => {
+        const id = `wg_${Math.random().toString(36).slice(2, 8)}`;
         set((s) => ({
           widgets: [
             ...s.widgets,
-            { id: `wg_${Math.random().toString(36).slice(2, 8)}`, kind, x: 40 + s.widgets.length * 20, y: 80 + s.widgets.length * 20, w: 250, h: 160 },
+            {
+              id, kind,
+              x: 40 + s.widgets.length * 20, y: 80 + s.widgets.length * 20,
+              w: opts.w ?? 250, h: opts.h ?? 160,
+              ...(opts.customId ? { customId: opts.customId } : {}),
+              ...(opts.config ? { config: opts.config } : {}),
+            },
           ],
-        })),
+        }));
+        return id;
+      },
       removeWidget: (id) => set((s) => ({ widgets: s.widgets.filter((w) => w.id !== id) })),
       moveWidget: (id, x, y) => set((s) => ({ widgets: s.widgets.map((w) => (w.id === id ? { ...w, x, y } : w)) })),
+      configureWidget: (id, config) => set((s) => ({ widgets: s.widgets.map((w) => (w.id === id ? { ...w, config } : w)) })),
       resizeWidget: (id, w, h) => set((s) => ({ widgets: s.widgets.map((x) => (x.id === id ? { ...x, w, h } : x)) })),
 
       addDesktopItem: (item) => {

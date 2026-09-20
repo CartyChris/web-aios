@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useId, useRef, useState } from "react";
-import { getSpecies, type Species } from "@/kernel/pets";
+import { getSpecies, useCustomPets, type Species } from "@/kernel/pets";
 import { composePetPrompt, cannedLine, tidyReply, PET_MAX_TOKENS } from "@/lib/petmind";
 import { useWM } from "@/kernel/wm";
 import { useSettings } from "@/kernel/settings";
@@ -404,9 +404,12 @@ function Face({ sp, x, y, flat, live, mood, light }: {
 
 export function PetLayer() {
   const s = useSettings();
-  const sp = getSpecies(s.pet);
+  // Subscribed so an AI-made pet appears as soon as its store hydrates.
+  const custom = useCustomPets((c) => c.pets);
+  const sp = getSpecies(s.pet) ?? custom.find((p) => p.id === s.pet);
   const [say, setSay] = useState<string | null>(null);
   const [thinking, setThinking] = useState(false);
+  const [bounce, setBounce] = useState(0);
   // Where the pet *drifts* to. In "still" mode the stored position wins, so
   // there is nothing to synchronise and no effect writing state after render.
   const [drift, setDrift] = useState(s.petPos);
@@ -446,7 +449,9 @@ export function PetLayer() {
   useEffect(() => () => { if (hideTimer.current) clearTimeout(hideTimer.current); }, []);
 
   const speak = async () => {
-    if (busy.current || !sp) return;
+    if (!sp) return;
+    setBounce((b) => b + 1);
+    if (busy.current) return;
     // The canned line comes from the MODE, not the personality: the subject is
     // what you notice is missing when there is no model, and the voice is what
     // you notice is wrong.
@@ -536,7 +541,10 @@ export function PetLayer() {
         title={`${s.petName || sp.name} — click to talk, double-click to send it somewhere else`}
         aria-label={`${s.petName || sp.name}, desktop pet. Click to talk.`}
       >
-        <PetSprite species={sp} detail={detail} size={size} mood={thinking ? "think" : say ? "happy" : "idle"} outlined />
+        {/* Keyed on the pat count so each click restarts the bounce. */}
+        <span key={bounce} className={bounce ? "pet-bounce inline-block" : "inline-block"}>
+          <PetSprite species={sp} detail={detail} size={size} mood={thinking ? "think" : say ? "happy" : "idle"} outlined />
+        </span>
       </button>
     </div>
   );

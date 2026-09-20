@@ -1,5 +1,7 @@
 "use client";
 
+import { NewsWidget } from "./widgets/NewsWidget";
+import { DataWidget } from "./widgets/DataWidget";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSettings, type WidgetInstance } from "@/kernel/settings";
 import { useWM } from "@/kernel/wm";
@@ -19,6 +21,8 @@ export const WIDGET_KINDS = [
   { id: "notes", name: "Sticky Note", icon: "sticky" },
   { id: "ai", name: "AI Status", icon: "spark" },
   { id: "storage", name: "Storage", icon: "storage" },
+  { id: "news", name: "News", icon: "report", w: 320, h: 280 },
+  { id: "data", name: "Live data", icon: "signals", w: 300, h: 240 },
 ] as const;
 
 export function WidgetLayer() {
@@ -97,15 +101,20 @@ function WidgetHost({ widget, onMove, onRemove }: { widget: WidgetInstance; onMo
         </button>
       )}
       <div className={cn("h-full w-full overflow-hidden", widget.kind === "custom" ? "p-0" : "p-3")}>
-        <WidgetBody kind={widget.kind} customId={widget.customId} />
+        {/* Keyed on config so a saved setting remounts with a fresh load
+            instead of patching a live fetch mid-flight. */}
+        <WidgetBody key={JSON.stringify(widget.config ?? null)} id={widget.id} kind={widget.kind} customId={widget.customId} config={widget.config} />
       </div>
     </div>
   );
 }
 
-function WidgetBody({ kind, customId }: { kind: string; customId?: string }) {
+function WidgetBody({ id, kind, customId, config }: { id: string; kind: string; customId?: string; config?: Record<string, unknown> }) {
   if (kind === "custom") return <CustomWidgetFrame id={customId} />;
+  const onConfig = (c: Record<string, unknown>) => useSettings.getState().configureWidget(id, c);
   switch (kind) {
+    case "news": return <NewsWidget config={config} onConfig={onConfig} />;
+    case "data": return <DataWidget config={config} onConfig={onConfig} />;
     case "clock": return <ClockWidget />;
     case "calendar": return <CalendarWidget />;
     case "system": return <SystemWidget />;

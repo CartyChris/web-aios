@@ -48,6 +48,15 @@
     "src/lib/appversions.ts",
     "src/lib/swarm-plan.ts",
     "src/lib/window-open.ts",
+    "src/lib/contrast.ts",
+    "src/lib/interest-types.ts",
+    "src/lib/feeds.ts",
+    "src/lib/datawidget.ts",
+    "src/lib/interests.ts",
+    "src/lib/suggest.ts",
+    "src/lib/palette.ts",
+    "src/lib/extract-code.ts",
+    "src/lib/petgen.ts",
     "src/lib/petmind.ts"
   ]
 }

@@ -1,5 +1,11 @@
 # Web-AIOS — Development Handoff
 
+> **STALE — read [`docs/HANDOFF-2026-09-20.md`](docs/HANDOFF-2026-09-20.md) first.**
+> This file was verified at commit `a98e7e7` and its counts (204 tests, 29 apps) are no
+> longer true: the tree is at 676 tests and 34 apps. The 2026-09-20 hand-off supersedes
+> this file wherever the two disagree. Sections 6 (invariants), 7 (routing) and 12
+> (preferences) below are still worth reading.
+
 Paste this whole file as your first message in a fresh Claude Code session to pick up
 where the last one left off without breaking anything.
 

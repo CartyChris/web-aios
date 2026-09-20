@@ -18,6 +18,9 @@ export function WindowFrame({ win }: { win: WindowInstance }) {
   const focused = wm.focused === win.id;
   const [snapHint, setSnapHint] = useState<SnapZone | null>(null);
   const dragRef = useRef<{ dx: number; dy: number } | null>(null);
+  // A press on a MAXIMIZED title bar, not yet a drag. It becomes one only once
+  // the pointer travels, so a plain click or double-click still behaves.
+  const pendingRestore = useRef<{ x: number; y: number; ratio: number; offsetY: number } | null>(null);
   const frameRef = useRef<HTMLDivElement>(null);
 
   const minW = app?.minSize?.w ?? 360;
@@ -29,16 +32,45 @@ export function WindowFrame({ win }: { win: WindowInstance }) {
   const onTitlePointerDown = useCallback(
     (e: React.PointerEvent) => {
       if ((e.target as HTMLElement).closest("[data-no-drag]")) return;
-      if (win.state === "maximized") return;
+      if (win.state === "maximized") {
+        // Remember where along the bar it was grabbed, so the restored window
+        // lands under the cursor at the same relative spot — what macOS and
+        // Windows do, and why the gesture feels like pulling the window off.
+        wm.focus(win.id);
+        pendingRestore.current = {
+          x: e.clientX,
+          y: e.clientY,
+          ratio: Math.min(1, Math.max(0, (e.clientX - win.x) / Math.max(1, win.w))),
+          offsetY: e.clientY - win.y,
+        };
+        (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+        return;
+      }
       wm.focus(win.id);
       dragRef.current = { dx: e.clientX - win.x, dy: e.clientY - win.y };
       (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
     },
-    [win.id, win.x, win.y, win.state, wm],
+    [win.id, win.x, win.y, win.w, win.state, wm],
   );
 
   const onTitlePointerMove = useCallback(
     (e: React.PointerEvent) => {
+      const p = pendingRestore.current;
+      if (p) {
+        // A few pixels of slop, or every click on a maximized bar would
+        // un-maximize it.
+        if (Math.hypot(e.clientX - p.x, e.clientY - p.y) < 6) return;
+        pendingRestore.current = null;
+        // Must match the fallback toggleMaximize restores to, or the cursor
+        // math uses a width the window will not actually have.
+        const restoredW = win.restore?.w ?? 900;
+        const x = Math.round(e.clientX - p.ratio * restoredW);
+        const y = Math.max(settings.topBarVisible ? 40 : 0, e.clientY - p.offsetY);
+        wm.toggleMaximize(win.id);
+        wm.move(win.id, x, y);
+        dragRef.current = { dx: e.clientX - x, dy: e.clientY - y };
+        return;
+      }
       const d = dragRef.current;
       if (!d) return;
       const x = e.clientX - d.dx;
@@ -61,11 +93,12 @@ export function WindowFrame({ win }: { win: WindowInstance }) {
       else if (nearR) zone = "right";
       setSnapHint(zone);
     },
-    [win.id, wm, settings.snapEnabled, settings.topBarVisible],
+    [win.id, win.restore?.w, wm, settings.snapEnabled, settings.topBarVisible],
   );
 
   const onTitlePointerUp = useCallback(
     (e: React.PointerEvent) => {
+      pendingRestore.current = null;
       if (dragRef.current && snapHint) wm.snap(win.id, snapHint);
       dragRef.current = null;
       setSnapHint(null);
@@ -141,7 +174,7 @@ export function WindowFrame({ win }: { win: WindowInstance }) {
         onPointerDown={() => wm.focus(win.id)}
         onMouseEnter={() => settings.focusFollowsMouse && wm.focus(win.id)}
         className={cn(
-          "absolute flex flex-col overflow-hidden",
+          "os-window-enter absolute flex flex-col overflow-hidden",
           chrome === "glass" && "glass",
           chrome === "solid" && "border border-[var(--border)] bg-[var(--panel-solid)]",
           chrome === "outline" && "border-2 border-[var(--accent)]/40 bg-[var(--bg)]",
@@ -167,7 +200,7 @@ export function WindowFrame({ win }: { win: WindowInstance }) {
           className={cn(
             "no-select flex shrink-0 items-center gap-2 px-2.5",
             "border-b border-[var(--border)]",
-            win.state === "maximized" ? "cursor-default" : "cursor-grab active:cursor-grabbing",
+            "cursor-grab active:cursor-grabbing",
             minimal && "opacity-80 hover:opacity-100",
           )}
           style={{

@@ -1,5 +1,6 @@
 "use client";
 
+import { fetchServiceText } from "@/lib/service-fetch";
 import { useCallback, useMemo, useState } from "react";
 import { useVFS } from "@/kernel/vfs";
 import { bus } from "@/kernel/bus";
@@ -62,28 +63,6 @@ interface Outcome {
   url: string;
 }
 
-/** Fetch one service. A CORS-enabled host is called directly; everything else
- *  goes through the SSRF-guarded relay, which is the same path the Browser and
- *  Atlas apps already use. */
-async function fetchService(def: ServiceDef, args: Record<string, string>, signal: AbortSignal): Promise<{ body: string; url: string }> {
-  const url = def.url(args);
-  if (def.reach === "direct") {
-    const res = await fetch(url, { signal, headers: { accept: "application/json, text/plain, */*" } });
-    if (!res.ok) throw new Error(`${def.provider} answered HTTP ${res.status}.`);
-    return { body: await res.text(), url };
-  }
-  const res = await fetch(`/api/proxy?mode=raw&url=${encodeURIComponent(url)}`, { signal });
-  if (!res.ok) {
-    let detail = `HTTP ${res.status}`;
-    try {
-      const j = (await res.json()) as { error?: string };
-      if (j.error) detail = j.error;
-    } catch { /* a non-JSON error body is still an error */ }
-    throw new Error(detail);
-  }
-  return { body: await res.text(), url };
-}
-
 export default function OpenData({}: AppProps) {
   const vfs = useVFS();
   const [category, setCategory] = useState<string>("all");
@@ -127,12 +106,13 @@ export default function OpenData({}: AppProps) {
     const ctrl = new AbortController();
 
     try {
-      const { body, url } = await fetchService(selected, filled, ctrl.signal);
+      const { body, url } = await fetchServiceText(selected, filled, ctrl.signal);
       // Parsed in a second try so a parse failure is never reported as a
       // transport failure. They mean opposite things to whoever reads this.
       try {
         const data = selected.parse(body);
         setOutcome({ at: started, serviceId: selected.id, data, ms: Date.now() - started, url });
+        bus.emit("activity", { source: "service", text: `${selected.name} ${Object.values(filled).join(" ")}` });
       } catch (e) {
         setOutcome({
           at: started, serviceId: selected.id, ms: Date.now() - started, url,

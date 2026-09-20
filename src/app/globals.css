@@ -77,9 +77,22 @@ html, body {
 
 .glass {
   background: var(--panel);
-  backdrop-filter: blur(var(--glass)) saturate(150%);
-  -webkit-backdrop-filter: blur(var(--glass)) saturate(150%);
   border: 1px solid var(--border);
+}
+
+/* The blur lives in an @supports block on purpose.
+ *
+ * Declared plainly on .glass, the CSS build stripped BOTH backdrop-filter
+ * lines out of the compiled sheet — verified by reading document.styleSheets
+ * in the running app, where .glass arrived as background + border only. Every
+ * window is glass by default, so every window was simply see-through: widgets
+ * and wallpaper read straight through the panel. A minifier cannot evaluate an
+ * @supports condition, so it keeps what is inside verbatim. */
+@supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
+  .glass {
+    backdrop-filter: blur(var(--glass)) saturate(150%);
+    -webkit-backdrop-filter: blur(var(--glass)) saturate(150%);
+  }
 }
 
 .no-select { user-select: none; -webkit-user-select: none; }
@@ -124,7 +137,14 @@ input, textarea, select, button { font: inherit; color: inherit; }
 }
 .os-btn:hover { background: color-mix(in srgb, var(--accent) 16%, var(--panel-solid)); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
 .os-btn:active { transform: translateY(1px); }
-.os-btn[data-variant="primary"] { background: linear-gradient(140deg, var(--accent), var(--accent2)); color: #04121c; border-color: transparent; font-weight: 600; }
+/* Solid, not a gradient, so the text colour can be proven correct.
+ *
+ * A gradient has two ends and CSS cannot pick a label colour that suits both;
+ * with the old hardcoded #04121c this failed WCAG AA on 19 of 50 themes. One
+ * accent, one computed `--on-accent`, readable on every palette including a
+ * custom one. */
+.os-btn[data-variant="primary"] { background: var(--accent); color: var(--on-accent); border-color: transparent; font-weight: 600; }
+.os-btn[data-variant="primary"]:hover { background: color-mix(in srgb, var(--accent) 88%, var(--text)); }
 .os-btn[disabled] { opacity: 0.45; cursor: not-allowed; }
 .os-chip {
   display: inline-flex; align-items: center; gap: 5px; line-height: 1.2;
@@ -143,6 +163,15 @@ input, textarea, select, button { font: inherit; color: inherit; }
 @keyframes os-fade-up { from { opacity: 0; transform: translateY(8px) scale(0.985); } to { opacity: 1; transform: none; } }
 @keyframes os-spin { to { transform: rotate(360deg); } }
 @keyframes os-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+/* Windows open with a short lift. fill-mode BACKWARDS, not both: the frame
+   sets opacity inline so unfocused windows dim, and a forwards fill would pin
+   opacity at 1 for the life of the window. Scaled by --motion so the setting
+   and the OS reduced-motion preference both turn it off. */
+@keyframes os-window-in { from { opacity: 0; transform: translateY(8px) scale(0.965); } to { opacity: 1; transform: none; } }
+.os-window-enter { animation: os-window-in calc(200ms * var(--motion, 1)) cubic-bezier(0.2, 0.9, 0.3, 1.15) backwards; }
+@keyframes pet-bounce { 0%, 100% { transform: translateY(0) scale(1); } 30% { transform: translateY(-16%) scale(1.06, 0.94); } 62% { transform: translateY(0) scale(0.95, 1.05); } }
+.pet-bounce { animation: pet-bounce calc(420ms * var(--motion, 1)) ease-out; }
+@media (prefers-reduced-motion: reduce) { .os-window-enter, .pet-bounce { animation: none; } }
 
 /* Markdown output shared by Chat, Atlas, Deep Work and every agent surface. */
 .os-md h1, .os-md h2, .os-md h3, .os-md h4, .os-md h5, .os-md h6 { font-weight: 650; margin: 1em 0 0.4em; line-height: 1.25; }

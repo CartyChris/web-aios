@@ -47,6 +47,17 @@ export const APPS: AppManifest[] = [
     accent: "#fbbf24",
   },
   {
+    id: "foryou",
+    name: "For You",
+    icon: "sparkles",
+    category: "ai",
+    description: "The model in the top bar suggests widgets and apps from what you do here, and builds them in one click.",
+    component: lazy(() => import("@/apps/ForYou")),
+    defaultSize: { w: 960, h: 680 },
+    permissions: ["ai", "storage"],
+    accent: "#f472b6",
+  },
+  {
     id: "atlas",
     name: "Atlas Research",
     icon: "atlas",

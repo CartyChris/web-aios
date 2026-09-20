@@ -1,9 +1,13 @@
 "use client";
 
+import { WallpaperThemeButton } from "@/shell/WallpaperThemeButton";
 import { useCallback, useMemo, useRef, useState } from "react";
 import { useSettings, resolveTokens } from "@/kernel/settings";
 import { THEMES, WALLPAPERS, FONT_STACKS } from "@/kernel/themes";
-import { SPECIES, PET_FAMILIES, PERSONALITIES, PET_MODES, VOICES, getSpecies } from "@/kernel/pets";
+import { SPECIES, PET_FAMILIES, PERSONALITIES, PET_MODES, VOICES, getSpecies, useCustomPets } from "@/kernel/pets";
+import { petPrompt, parsePetSpec } from "@/lib/petgen";
+import { ask } from "@/lib/useAI";
+import { ModelOverride, overrideOpts, type ModelChoice } from "@/shell/ModelOverride";
 import { PROFILES } from "@/kernel/profiles";
 import { APPS, getApp } from "@/kernel/registry";
 import { WIDGET_KINDS } from "@/shell/Widgets";
@@ -121,6 +125,7 @@ export default function Personalize({}: AppProps) {
         {tab === "theme" && (
           <div className="grid gap-5 lg:grid-cols-2">
             <div>
+              <div className="mb-3"><WallpaperThemeButton /></div>
               <div className="mb-2 flex flex-wrap items-center gap-2">
                 <span className="os-label !mb-0">Palette</span>
                 <input
@@ -374,6 +379,8 @@ export default function Personalize({}: AppProps) {
                 </span>
               </div>
 
+              <PetMaker />
+
               {visibleSpecies.length === 0 && (
                 <p className="mb-4 text-[11px] text-[var(--muted)]">Nothing matches that. Try a family name, or part of a description.</p>
               )}
@@ -486,6 +493,12 @@ export default function Personalize({}: AppProps) {
               </p>
 
               <Toggle label="Let the pet use your model" checked={s.petTalks} onChange={(v) => s.set("petTalks", v)} hint="Off means it only uses its own written lines — free, offline, and still in character." />
+              <Toggle
+                label="The pet's personality steers the whole OS"
+                checked={s.assistantSteering === "pet"}
+                onChange={(v) => s.set("assistantSteering", v ? "pet" : "voice")}
+                hint="Every AI answer in the OS — Chat, the Swarm, AI Studio — takes this voice instead of the assistant voice under Settings. It replaces that voice rather than mixing with it: two tone instructions in one prompt average into neither."
+              />
 
               <div className="my-4 h-px bg-[var(--border)]" />
 
@@ -527,7 +540,7 @@ export default function Personalize({}: AppProps) {
             <p className="mb-3 text-[12px] text-[var(--muted)]">Widgets sit on the desktop behind your windows and can be dragged anywhere.</p>
             <div className="mb-4 flex flex-wrap gap-1.5">
               {WIDGET_KINDS.map((k) => (
-                <button key={k.id} className="os-btn !py-1 text-[11px]" onClick={() => s.addWidget(k.id)}>+ {k.icon} {k.name}</button>
+                <button key={k.id} className="os-btn !py-1 text-[11px]" onClick={() => s.addWidget(k.id, "w" in k ? { w: k.w, h: k.h } : undefined)}><Icon name={k.icon} size={12} /> {k.name}</button>
               ))}
             </div>
             <div className="os-label mb-1.5">Placed ({s.widgets.length})</div>
@@ -617,4 +630,67 @@ function cssVar(name: string): string {
   const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
   // <input type="color"> only accepts #rrggbb, so anything else needs a stand-in.
   return /^#[0-9a-f]{6}$/i.test(v) ? v : "#67e8f9";
+}
+
+/* A pet a model designs. The model only fills in the description the renderer
+   already knows how to draw, and parsePetSpec refuses any part it does not —
+   so a generated pet can never be an invisible one. */
+function PetMaker() {
+  const custom = useCustomPets((c) => c.pets);
+  const [desc, setDesc] = useState("");
+  const [choice, setChoice] = useState<ModelChoice>({});
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const create = async () => {
+    setBusy(true); setErr(null);
+    try {
+      const res = await ask({
+        system: "You design small desktop pets as JSON. You return JSON only.",
+        messages: [{ role: "user", content: petPrompt(desc) }],
+        persona: false, maxTokens: 700, temperature: 0.9, ...overrideOpts(choice),
+      });
+      const r = parsePetSpec(res.text, `ai_${Date.now().toString(36)}`);
+      if (!r.ok) throw new Error(r.reason);
+      useCustomPets.getState().add(r.species);
+      const st = useSettings.getState();
+      st.set("pet", r.species.id);
+      st.set("petVisible", true);
+      setDesc("");
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Could not make that pet.");
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <div className="os-card mb-4 !p-2.5">
+      <div className="os-label mb-1.5">Create a pet with AI</div>
+      <textarea className="os-input mb-1.5 w-full resize-none text-[12px]" rows={2} value={desc} onChange={(e) => setDesc(e.target.value)}
+        placeholder="e.g. a tiny storm cloud that crackles when it is happy" />
+      <div className="flex flex-wrap items-center gap-1.5">
+        <button className="os-btn !py-1 text-[11px]" data-variant="primary" disabled={busy || desc.trim().length < 3} onClick={() => void create()}>
+          <Icon name="wand" size={12} /> {busy ? "Designing…" : "Create"}
+        </button>
+        <ModelOverride id="petmaker" value={choice} onChange={setChoice} />
+      </div>
+      {err && <p className="mt-1.5 text-[11px] text-[var(--danger)]">{err}</p>}
+      {custom.length > 0 && (
+        <>
+          <div className="os-label mb-1 mt-2.5">Made by you ({custom.length})</div>
+          <div className="grid gap-2" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(96px, 1fr))" }}>
+            {custom.map((x) => (
+              <div key={x.id} className="os-card relative !p-1.5 text-center" title={x.blurb}>
+                <button className="w-full" onClick={() => { useSettings.getState().set("pet", x.id); useSettings.getState().set("petVisible", true); }}>
+                  <div className="flex justify-center" style={{ color: "var(--accent)" }}><PetSprite species={x} detail="expressive" size={52} /></div>
+                  <div className="truncate text-[10.5px]">{x.name}</div>
+                </button>
+                <button className="absolute right-1 top-1 opacity-50 hover:opacity-100" aria-label={`Delete ${x.name}`} title="Delete"
+                  onClick={() => useCustomPets.getState().remove(x.id)}><Icon name="close" size={10} /></button>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
 }

@@ -37,6 +37,7 @@ export default function Browser({ args }: AppProps) {
     setError(null);
     setUrl(target);
     setHistory((h) => [target, ...h.filter((x) => x !== target)].slice(0, 30));
+    bus.emit("activity", { source: "search", text: target });
 
     if (mode === "frame") { setLoaded(target); setReader(null); return; }
 
