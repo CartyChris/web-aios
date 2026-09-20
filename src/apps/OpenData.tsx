@@ -7,7 +7,7 @@ import { bus } from "@/kernel/bus";
 import type { AppProps } from "@/kernel/types";
 import {
   SERVICES, SERVICE_CATEGORIES, missingParams, withDefaults,
-  type ServiceDef, type ServiceResult,
+  type ServiceResult,
 } from "@/lib/services";
 import { download } from "@/lib/format";
 import { Empty, ErrorNote, Spinner, CopyButton } from "./_ui";

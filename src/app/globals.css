@@ -80,19 +80,20 @@ html, body {
   border: 1px solid var(--border);
 }
 
-/* The blur lives in an @supports block on purpose.
+/* Write ONLY the unprefixed backdrop-filter here. Do not add -webkit-.
  *
- * Declared plainly on .glass, the CSS build stripped BOTH backdrop-filter
- * lines out of the compiled sheet — verified by reading document.styleSheets
- * in the running app, where .glass arrived as background + border only. Every
- * window is glass by default, so every window was simply see-through: widgets
- * and wallpaper read straight through the panel. A minifier cannot evaluate an
- * @supports condition, so it keeps what is inside verbatim. */
-@supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
-  .glass {
-    backdrop-filter: blur(var(--glass)) saturate(150%);
-    -webkit-backdrop-filter: blur(var(--glass)) saturate(150%);
-  }
+ * Next minifies with Lightning CSS, which treats -webkit-backdrop-filter as the
+ * prefixed variant of the same property. Given both, it collapsed the pair and
+ * emitted the -webkit- form ALONE. Chromium supports backdrop-filter but not
+ * -webkit-backdrop-filter (CSS.supports says true and false respectively), so the
+ * rule became dead and every window lost its blur. It also read back from the
+ * CSSOM as background+border only, because a browser drops declarations it does
+ * not recognise -- which looks exactly like a minifier stripping the line, and
+ * cost this session an afternoon of chasing the wrong cause.
+ *
+ * Lightning CSS adds whatever prefix the browser targets need. Let it. */
+.glass {
+  backdrop-filter: blur(var(--glass)) saturate(150%);
 }
 
 .no-select { user-select: none; -webkit-user-select: none; }

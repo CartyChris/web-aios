@@ -81,6 +81,21 @@ export default function AIStudio({ args }: AppProps) {
   const apps = useUserApps((s) => s.apps);
   const [running, setRunning] = useState<UserApp | null>(null);
 
+  /* Re-opening an ALREADY-OPEN studio window does refresh this window's args --
+     wm.open stores `args: opts.args ?? w.args` on the focus path -- but a
+     useState initializer only reads them once, at mount. So a second
+     "Build in AI Studio" click from For You used to arrive here as a new prop
+     and be silently discarded, leaving the first suggestion's prompt in the box
+     and whatever tab the user was on. Consume it the same way runUserApp is
+     consumed below: adjust during render when the incoming value differs from
+     the one last taken. */
+  const promptArg = typeof args?.prompt === "string" ? args.prompt : "";
+  const [tookPrompt, setTookPrompt] = useState(promptArg);
+  if (promptArg && promptArg !== tookPrompt) {
+    setTookPrompt(promptArg);
+    setTab("build");
+  }
+
   // Launching from a desktop icon runs that app straight away.
   const runArg = args?.runUserApp as string | undefined;
   const [ranArg, setRanArg] = useState<string | undefined>(undefined);
@@ -123,6 +138,14 @@ function BuildTab({ initialPrompt = "" }: { initialPrompt?: string }) {
   const [group, setGroup] = useState<(typeof TARGET_GROUPS)[number]["id"]>("web");
   const [targetId, setTargetId] = useState("single-html");
   const [prompt, setPrompt] = useState(initialPrompt);
+  /* Same reason as the promptArg block in AIStudio: this component stays mounted
+     across a re-open, so a changed initialPrompt has to be adopted explicitly.
+     Gated on an actual CHANGE, so typing in the box is never overwritten. */
+  const [tookInitial, setTookInitial] = useState(initialPrompt);
+  if (initialPrompt && initialPrompt !== tookInitial) {
+    setTookInitial(initialPrompt);
+    setPrompt(initialPrompt);
+  }
   const [files, setFiles] = useState<ProjectFile[] | null>(null);
   const [openFile, setOpenFile] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { bus } from "@/kernel/bus";
 import { SERVICES, type ServiceDef } from "@/lib/services";
 import { fetchServiceText } from "@/lib/service-fetch";
@@ -37,33 +37,37 @@ function DataView({ config, onEdit }: { config: DataWidgetConfig; onEdit: () => 
   const def = SERVICES.find((s) => s.id === config.serviceId) as ServiceDef;
   const [load, setLoad] = useState<Load>(null);
   const now = useNow(30_000);
-  const abort = useRef<AbortController | null>(null);
-
-  const fetchNow = useCallback(async () => {
-    abort.current?.abort();
-    const ctrl = new AbortController();
-    abort.current = ctrl;
-    const c = withTodaysArgs(config);
-    let body: string;
-    try {
-      ({ body } = await fetchServiceText(def, c.args, ctrl.signal));
-    } catch (e) {
-      if ((e as Error).name !== "AbortError") setLoad({ error: e instanceof Error ? e.message : "Unreachable.", kind: "transport" });
-      return;
-    }
-    try {
-      const r = def.parse(body);
-      setLoad({ rows: compactRows(r, c.rows), at: Date.now(), empty: r.empty });
-    } catch (e) {
-      setLoad({ error: e instanceof Error ? e.message : "Unreadable reply.", kind: "parse" });
-    }
-  }, [config, def]);
+  // Same shape as NewsWidget: a reload TOKEN, not a memoized callback. The
+  // effect owns the fetch lifecycle end to end, which is what keeps the React
+  // Compiler happy and guarantees the controller dies with the effect.
+  const [reload, setReload] = useState(0);
 
   useEffect(() => {
-    void fetchNow();
-    const t = setInterval(() => { void fetchNow(); }, config.refreshMin * 60_000);
-    return () => { clearInterval(t); abort.current?.abort(); };
-  }, [fetchNow, config.refreshMin]);
+    const ctrl = new AbortController();
+    // A reply can still land between the await resolving and the state write,
+    // which an abort signal alone does not cover.
+    let live = true;
+    const run = async () => {
+      const c = withTodaysArgs(config);
+      let body: string;
+      try {
+        ({ body } = await fetchServiceText(def, c.args, ctrl.signal));
+      } catch (e) {
+        if (live && (e as Error).name !== "AbortError") setLoad({ error: e instanceof Error ? e.message : "Unreachable.", kind: "transport" });
+        return;
+      }
+      if (!live) return;
+      try {
+        const r = def.parse(body);
+        setLoad({ rows: compactRows(r, c.rows), at: Date.now(), empty: r.empty });
+      } catch (e) {
+        setLoad({ error: e instanceof Error ? e.message : "Unreadable reply.", kind: "parse" });
+      }
+    };
+    void run();
+    const t = setInterval(() => { void run(); }, config.refreshMin * 60_000);
+    return () => { live = false; ctrl.abort(); clearInterval(t); };
+  }, [config, def, config.refreshMin, reload]);
 
   const age = load && "at" in load ? Math.max(0, Math.round((now - load.at) / 60_000)) : null;
   return (
@@ -72,7 +76,7 @@ function DataView({ config, onEdit }: { config: DataWidgetConfig; onEdit: () => 
         <Icon name="signals" size={12} style={{ color: "var(--accent)" }} />
         <span className="min-w-0 flex-1 truncate font-medium">{def.name}</span>
         {age !== null && <span className="text-[9.5px] text-[var(--muted)]">{age === 0 ? "now" : `${age}m`}</span>}
-        <button className="opacity-60 hover:opacity-100" title="Refresh" aria-label="Refresh" onClick={() => void fetchNow()}><Icon name="refresh" size={11} /></button>
+        <button className="opacity-60 hover:opacity-100" title="Refresh" aria-label="Refresh" onClick={() => setReload((n) => n + 1)}><Icon name="refresh" size={11} /></button>
         <button className="opacity-60 hover:opacity-100" title="Configure" aria-label="Configure" onClick={onEdit}><Icon name="tune" size={11} /></button>
       </div>
       <div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto">

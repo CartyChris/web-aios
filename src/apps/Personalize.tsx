@@ -685,7 +685,17 @@ function PetMaker() {
                   <div className="truncate text-[10.5px]">{x.name}</div>
                 </button>
                 <button className="absolute right-1 top-1 opacity-50 hover:opacity-100" aria-label={`Delete ${x.name}`} title="Delete"
-                  onClick={() => useCustomPets.getState().remove(x.id)}><Icon name="close" size={10} /></button>
+                  onClick={() => {
+                    useCustomPets.getState().remove(x.id);
+                    /* Deleting the pet that is currently ON the desktop leaves
+                       settings.pet pointing at an id nothing resolves. PetLayer
+                       guards that with `!sp` and renders null, so the companion
+                       just disappears while petVisible stays true and no species
+                       reads as selected anywhere -- looking like a crash rather
+                       than a deletion. Fall back to a built-in. */
+                    const st = useSettings.getState();
+                    if (st.pet === x.id) st.set("pet", SPECIES[0].id);
+                  }}><Icon name="close" size={10} /></button>
               </div>
             ))}
           </div>

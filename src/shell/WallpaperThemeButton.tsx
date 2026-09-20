@@ -17,8 +17,15 @@ export function WallpaperThemeButton() {
   const image = useSettings((s) => s.wallpaperImage);
   const [prefer, setPrefer] = useState<"auto" | "dark" | "light">("auto");
   const [preview, setPreview] = useState<DerivedTheme | null>(null);
-  const [applied, setApplied] = useState(false);
   const [note, setNote] = useState<string | null>(null);
+
+  /* Whether a derived theme is currently in force is a fact about the PERSISTED
+     store, not about this component's lifetime. Held in useState it was lost on
+     reload: the overrides stayed in customVars, so the wallpaper theme was still
+     on screen, but the Revert button had vanished and the only way back was to
+     pick a named theme -- which wipes customVars wholesale. Read it from the
+     store and the button survives a refresh. */
+  const applied = useSettings((s) => DERIVED_VARS.every((v) => v in s.customVars));
 
   const derive = async (p = prefer) => {
     setNote(null);
@@ -37,13 +44,11 @@ export function WallpaperThemeButton() {
     // Every var, --on-accent included: themes.ts computes those per theme, so
     // overriding --accent alone would leave its button text for the old one.
     for (const v of DERIVED_VARS) s.setVar(v, preview.vars[v] as string);
-    setApplied(true);
     setPreview(null);
   };
   const revert = () => {
     const s = useSettings.getState();
     for (const v of DERIVED_VARS) s.clearVar(v);
-    setApplied(false);
   };
 
   return (

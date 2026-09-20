@@ -270,6 +270,45 @@ const lineAt = (src, index) => src.slice(0, index).split("\n").length;
   if (!count) notes.push("no console.log outside template literals");
 }
 
+/* ── Hand-written -webkit- prefixes on backdrop-filter ───────────────────────
+ *
+ * Next minifies with Lightning CSS, which treats -webkit-backdrop-filter as the
+ * prefixed variant of the same property. Given BOTH declarations it keeps the
+ * -webkit- one ALONE and drops the standard property. Chromium supports
+ * backdrop-filter but not -webkit-backdrop-filter, so the rule goes dead and
+ * every glass surface silently loses its blur. Reproduced directly against
+ * lightningcss: "both" compiles to -webkit- only, "standard alone" compiles to
+ * both. Writing only the unprefixed property is correct for every target.
+ *
+ * The symptom is deceptive: a browser drops declarations it cannot parse, so
+ * the rule reads back from the CSSOM as if a minifier had stripped it. This
+ * check exists so nobody has to rediscover that. */
+{
+  const cssFiles = [];
+  const walkCss = (dir) => {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      if (e.name === "node_modules" || e.name.startsWith(".")) continue;
+      const full = join(dir, e.name);
+      if (e.isDirectory()) walkCss(full);
+      else if (e.name.endsWith(".css")) cssFiles.push(full);
+    }
+  };
+  walkCss(join(ROOT, "src"));
+  let scanned = 0;
+  for (const f of cssFiles) {
+    scanned++;
+    const src = read(f);
+    for (const m of src.matchAll(/-webkit-backdrop-filter\s*:/g)) {
+      problems.push(
+        `${rel(f)}:${lineAt(src, m.index)} — hand-written -webkit-backdrop-filter. ` +
+        `Lightning CSS will keep this and DROP the standard backdrop-filter, killing the blur. ` +
+        `Declare only "backdrop-filter" and let the minifier add prefixes.`,
+      );
+    }
+  }
+  notes.push(`${scanned} stylesheet${scanned === 1 ? "" : "s"} checked for prefix-collapse hazards`);
+}
+
 /* ── Report ──────────────────────────────────────────────────────────────── */
 for (const n of notes) console.error(`  · ${n}`);
 if (problems.length) {

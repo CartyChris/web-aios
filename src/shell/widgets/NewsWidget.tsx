@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { bus } from "@/kernel/bus";
 import { NEWS_SOURCES, parseFeed, relativeAge, safeUrl, FeedParseError, type FeedItem } from "@/lib/feeds";
 import { useNow } from "@/lib/useNow";
@@ -26,36 +26,42 @@ export function NewsWidget({ config, onConfig }: { config?: Record<string, unkno
   const [editing, setEditing] = useState(false);
   const [draftUrl, setDraftUrl] = useState(custom ?? "");
   const now = useNow(60_000);
-  const abort = useRef<AbortController | null>(null);
-
-  const fetchNow = useCallback(async () => {
-    abort.current?.abort();
-    const ctrl = new AbortController();
-    abort.current = ctrl;
-    try {
-      const res = await fetch(`/api/proxy?mode=raw&url=${encodeURIComponent(url)}`, { signal: ctrl.signal });
-      if (!res.ok) throw new Error(`The feed answered HTTP ${res.status}.`);
-      const body = await res.text();
-      try {
-        setLoad({ items: parseFeed(body, custom ? undefined : source?.name).slice(0, limit), at: Date.now() });
-      } catch (e) {
-        // Reached, but not a feed — usually a moved URL serving an HTML page.
-        setLoad({ error: e instanceof FeedParseError ? e.message : "The reply is not a feed.", kind: "parse" });
-      }
-    } catch (e) {
-      if ((e as Error).name === "AbortError") return;
-      setLoad({ error: e instanceof Error ? e.message : "The feed could not be reached.", kind: "transport" });
-    } finally {
-      if (!ctrl.signal.aborted) setBusy(false);
-    }
-  }, [url, limit, custom, source?.name]);
+  // Bumped by the refresh button. A reload TOKEN rather than a callback: the
+  // effect below owns the entire fetch lifecycle, so there is no memoized
+  // function for the React Compiler to fail to preserve, and nothing outside
+  // the effect can leave an AbortController behind after unmount.
+  const [reload, setReload] = useState(0);
 
   useEffect(() => {
     if (!url) return;
-    void fetchNow();
-    const t = setInterval(() => { void fetchNow(); }, refreshMin * 60_000);
-    return () => { clearInterval(t); abort.current?.abort(); };
-  }, [url, refreshMin, fetchNow]);
+    const ctrl = new AbortController();
+    // Guards against a reply landing after this effect has been torn down:
+    // abort alone does not cover the window between `await res.text()`
+    // resolving and the state write.
+    let live = true;
+    const run = async () => {
+      try {
+        const res = await fetch(`/api/proxy?mode=raw&url=${encodeURIComponent(url)}`, { signal: ctrl.signal });
+        if (!res.ok) throw new Error(`The feed answered HTTP ${res.status}.`);
+        const body = await res.text();
+        if (!live) return;
+        try {
+          setLoad({ items: parseFeed(body, custom ? undefined : source?.name).slice(0, limit), at: Date.now() });
+        } catch (e) {
+          // Reached, but not a feed — usually a moved URL serving an HTML page.
+          setLoad({ error: e instanceof FeedParseError ? e.message : "The reply is not a feed.", kind: "parse" });
+        }
+      } catch (e) {
+        if (!live || (e as Error).name === "AbortError") return;
+        setLoad({ error: e instanceof Error ? e.message : "The feed could not be reached.", kind: "transport" });
+      } finally {
+        if (live) setBusy(false);
+      }
+    };
+    void run();
+    const t = setInterval(() => { void run(); }, refreshMin * 60_000);
+    return () => { live = false; ctrl.abort(); clearInterval(t); };
+  }, [url, refreshMin, limit, custom, source?.name, reload]);
 
   const save = (patch: Record<string, unknown>) => { onConfig?.({ ...config, ...patch }); setEditing(false); };
 
@@ -86,7 +92,7 @@ export function NewsWidget({ config, onConfig }: { config?: Record<string, unkno
       <div className="mb-1 flex items-center gap-1.5">
         <Icon name="report" size={12} style={{ color: "var(--accent)" }} />
         <span className="min-w-0 flex-1 truncate font-medium">{custom ? new URL(custom).hostname : source?.name}</span>
-        <button className="opacity-60 hover:opacity-100" title="Refresh" aria-label="Refresh" onClick={() => { setBusy(true); void fetchNow(); }}>
+        <button className="opacity-60 hover:opacity-100" title="Refresh" aria-label="Refresh" onClick={() => { setBusy(true); setReload((n) => n + 1); }}>
           <Icon name="refresh" size={11} className={busy ? "animate-spin" : undefined} />
         </button>
         <button className="opacity-60 hover:opacity-100" title="Choose a feed" aria-label="Choose a feed" onClick={() => setEditing(true)}>
