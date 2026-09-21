@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useWM, snapGeometry, type SnapZone } from "@/kernel/wm";
 import { useSettings } from "@/kernel/settings";
+import { workArea } from "@/kernel/wm";
+import { zoneAt } from "@/lib/zones";
 import { getApp } from "@/kernel/registry";
 import type { WindowInstance } from "@/kernel/types";
 import { cn } from "@/lib/cn";
@@ -78,20 +80,12 @@ export function WindowFrame({ win }: { win: WindowInstance }) {
       wm.move(win.id, x, y);
 
       if (!settings.snapEnabled) return;
-      const T = 18;
-      const vw = window.innerWidth;
-      const vh = window.innerHeight;
-      const nearL = e.clientX < T, nearR = e.clientX > vw - T;
-      const nearT = e.clientY < T + 40, nearB = e.clientY > vh - T;
-      let zone: SnapZone | null = null;
-      if (nearT && nearL) zone = "tl";
-      else if (nearT && nearR) zone = "tr";
-      else if (nearB && nearL) zone = "bl";
-      else if (nearB && nearR) zone = "br";
-      else if (nearT) zone = "max";
-      else if (nearL) zone = "left";
-      else if (nearR) zone = "right";
-      setSnapHint(zone);
+      // One implementation of "which zone is this pointer asking for", shared
+      // with the layout engine and covered by its tests, instead of a second
+      // copy of the same if-chain living here. It also adds the bottom half,
+      // which the inline version never offered although wm.snap accepts it.
+      const hit = zoneAt(e.clientX, e.clientY, workArea());
+      setSnapHint((hit?.zone ?? null) as SnapZone | null);
     },
     [win.id, win.restore?.w, wm, settings.snapEnabled, settings.topBarVisible],
   );
