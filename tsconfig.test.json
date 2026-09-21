@@ -63,6 +63,7 @@
     "src/lib/scenes.ts",
     "src/lib/ctxmenu.ts",
     "src/lib/harness/fold.ts",
-    "src/lib/mcp-wire.ts"
+    "src/lib/mcp-wire.ts",
+    "src/lib/harness/patterns.ts"
   ]
 }

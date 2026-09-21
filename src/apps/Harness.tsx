@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AppProps } from "@/kernel/types";
-import { useHarness } from "@/kernel/harness";
+import { useHarness, type RunSummary } from "@/kernel/harness";
 import { useVFS } from "@/kernel/vfs";
 import { bus } from "@/kernel/bus";
 import { startRun, installHarness } from "@/lib/harness-runtime";
@@ -11,10 +11,11 @@ import { FIXTURES } from "@/lib/harness/fixtures";
 import { DEFAULT_LOOP_CONFIG, DOD_EXPLORATORY } from "@/lib/harness/config";
 import { SEED_TASKS } from "@/lib/harness/tasks";
 import type { DefinitionOfDone, RunResult, ToolDef } from "@/lib/harness/types";
-import { Tabs, Empty, ErrorNote, Spinner, Markdown } from "./_ui";
+import { Tabs, Empty, ErrorNote, Spinner, Markdown, CopyButton } from "./_ui";
 import { useTriggers } from "@/kernel/triggers";
 import { runGoldenSet, allTasks, invalidTasks, baselineFrom, compare, currentFingerprint, installEvals, DEFAULT_EVAL_CONCURRENCY } from "@/lib/harness-evals";
 import { suiteToMarkdown } from "@/lib/harness/evals";
+import { minePatterns, proposeTask } from "@/lib/harness/patterns";
 import type { EvalBaseline, EvalSuiteResult } from "@/lib/harness/types";
 import { download } from "@/lib/format";
 import { fireNow } from "@/lib/harness-triggers";
@@ -103,6 +104,7 @@ export default function Harness({}: AppProps) {
           { id: "tools", label: `Tools (${TOOL_LIST.length})`, icon: "tune" },
           { id: "done", label: "Definition of done", icon: "gate" },
           { id: "golden", label: `Golden set (${store.tasks.length + SEED_TASKS.length})`, icon: "doubleCheck" },
+          { id: "patterns", label: "Patterns", icon: "signals" },
           { id: "triggers", label: `Triggers (${triggers.triggers.length})`, icon: "trigger" },
         ]}
         active={tab}
@@ -257,6 +259,7 @@ export default function Harness({}: AppProps) {
         )}
 
         {tab === "golden" && <GoldenPanel />}
+        {tab === "patterns" && <PatternsPanel runs={store.runs} />}
         {tab === "triggers" && <TriggersPanel dods={store.dods} />}
       </div>
     </div>
@@ -677,6 +680,74 @@ function RunReport({ result }: { result: RunResult }) {
           Waiting on a person for: {verdict!.pendingHuman.join(", ")}. The agent advises; a named person decides.
         </div>
       )}
+    </div>
+  );
+}
+
+/* What keeps going wrong, as opposed to what went wrong once.
+ *
+ * A trace answers "what happened in run 41"; it cannot answer "what should I
+ * fix". Only recurrent patterns appear here, and each one carries the run ids
+ * it was derived from so the claim can be checked rather than believed. */
+function PatternsPanel({ runs }: { runs: RunSummary[] }) {
+  const patterns = useMemo(() => minePatterns(runs), [runs]);
+
+  if (!runs.length) {
+    return <Empty icon="signals" title="No runs yet" body="Patterns appear once there are enough runs for a trend to mean anything." />;
+  }
+  if (!patterns.length) {
+    return (
+      <Empty
+        icon="doubleCheck"
+        title="Nothing recurring"
+        body={`Across ${runs.length} run${runs.length === 1 ? "" : "s"}, no problem has happened more than once. A single bad run is an anecdote, so nothing is reported.`}
+      />
+    );
+  }
+
+  return (
+    <div className="max-w-3xl">
+      <p className="mb-3 text-[12px] leading-relaxed text-[var(--muted)]">
+        Mined from {runs.length} runs. Only problems that recurred are shown — one bad run is an
+        anecdote, and changing the harness for an anecdote is how it fills up with special cases.
+      </p>
+      {patterns.map((p) => {
+        const task = proposeTask(p, runs);
+        return (
+          <div key={p.id} className="os-card mb-2 !p-2.5">
+            <div className="flex items-center gap-2">
+              <span className="min-w-0 flex-1 text-[12.5px] font-medium">{p.label}</span>
+              <span className="os-chip !py-0 !text-[10px]">{p.count} of {runs.length}</span>
+            </div>
+            <p className="mt-1 text-[11px] leading-snug text-[var(--muted)]">{p.detail}</p>
+            <div className="mt-1.5 flex flex-wrap items-center gap-1">
+              <span className="text-[10px] text-[var(--muted)]">from</span>
+              {p.runIds.slice(0, 6).map((id) => (
+                <span key={id} className="os-chip !px-1.5 !py-0 !text-[9.5px]" title={id}>{id.slice(0, 10)}</span>
+              ))}
+              {p.runIds.length > 6 && <span className="text-[10px] text-[var(--muted)]">+{p.runIds.length - 6}</span>}
+            </div>
+            {task && (
+              /* The objective, handed over for a person to turn into a task.
+                 Deliberately NOT auto-added: an EvalTask requires a definition
+                 of done and a mandatory negative control, and a machine-written
+                 anti-control that nothing could fail would quietly turn the
+                 golden set into "the guard still fires" -- which a guard that
+                 fires on everything also satisfies. */
+              <div className="mt-2 rounded border border-[var(--border)] p-2">
+                <div className="os-label mb-1">Worth a golden-set task</div>
+                <p className="mb-1.5 text-[11px]">{task.objective}</p>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <CopyButton text={task.objective} label="Copy objective" className="os-btn !py-1 text-[11px]" />
+                  <span className="text-[10px] text-[var(--muted)]">
+                    Add it under Golden set, with a definition of done and a negative control.
+                  </span>
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
