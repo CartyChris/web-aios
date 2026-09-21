@@ -7,6 +7,7 @@ import { useVFS } from "@/kernel/vfs";
 import { getApp } from "@/kernel/registry";
 import { useUserApps } from "@/kernel/userapps";
 import { bus } from "@/kernel/bus";
+import { registerContextTarget, useCtxMenu, type TargetContext } from "@/kernel/ctxmenu";
 import { Icon } from "./icons";
 import { cn } from "@/lib/cn";
 import { textStyleAt } from "@/lib/contrast";
@@ -61,9 +62,13 @@ export function DesktopIcons({ topInset }: { topInset: number }) {
   const [selected, setSelected] = useState<string[]>([]);
   const [marquee, setMarquee] = useState<Rect | null>(null);
   const [drag, setDrag] = useState<{ dx: number; dy: number; ids: string[] } | null>(null);
-  const [menu, setMenu] = useState<{ x: number; y: number; id: string } | null>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
   const surfaceRef = useRef<HTMLDivElement>(null);
+
+  /* Icons contribute to the one OS context menu instead of opening their own.
+     Registered once on the surface rather than per icon: the builder reads
+     which icon was hit from the event target, so adding an icon costs nothing
+     and there is no per-icon listener to leak. */
   const marqueeStart = useRef<{ x: number; y: number } | null>(null);
   // The press that is in flight: which icon, where it started, and whether it
   // has since travelled far enough to be a drag rather than a tap.
@@ -123,6 +128,35 @@ export function DesktopIcons({ topInset }: { topInset: number }) {
     [items, resolve],
   );
 
+  /* Re-registered whenever the selection or the resolved list changes. That is
+     a WeakMap.set, so it costs nothing, and it keeps the builder reading live
+     values without a ref -- mutating a ref during render is an error here. */
+  useEffect(() => {
+    const el = surfaceRef.current;
+    if (!el) return;
+    return registerContextTarget(el, ({ target }: TargetContext) => {
+      const hit = (target.closest("[data-desktop-icon]") as HTMLElement | null)?.dataset.desktopIcon;
+      if (!hit) return null;
+      // Right-clicking outside the current selection selects that icon first,
+      // which is what every file manager does and what makes "Open 3 items"
+      // mean what it says.
+      const ids = selected.includes(hit) ? selected : [hit];
+      if (!selected.includes(hit)) setSelected([hit]);
+      const count = ids.length;
+      return {
+        id: "icons",
+        entries: [
+          { id: "open", label: count > 1 ? `Open ${count} items` : "Open", icon: "app",
+            run: () => ids.forEach((id) => resolved.find((r) => r.item.id === id)?.view?.open()) },
+          { id: "rename", label: "Rename", icon: "name", disabled: count > 1, run: () => setRenaming(hit) },
+          { id: "remove", label: count > 1 ? `Remove ${count} from desktop` : "Remove from desktop", icon: "trash", danger: true,
+            run: () => { useSettings.getState().removeDesktopItems(ids); setSelected([]); } },
+          { id: "tidy", label: "Tidy up", icon: "grid", run: () => useSettings.getState().tidyDesktop() },
+        ],
+      };
+    });
+  }, [selected, resolved]);
+
   /* ── Marquee ─────────────────────────────────────────────────────────── */
   /**
    * Is this press on bare desktop?
@@ -158,7 +192,7 @@ export function DesktopIcons({ topInset }: { topInset: number }) {
       const y = e.clientY - box.top;
       marqueeStart.current = { x, y };
       setMarquee({ x, y, w: 0, h: 0 });
-      setMenu(null);
+      useCtxMenu.getState().hide();
       if (!e.shiftKey && !e.metaKey && !e.ctrlKey) setSelected([]);
       host.setPointerCapture(e.pointerId);
     },
@@ -293,7 +327,7 @@ export function DesktopIcons({ topInset }: { topInset: number }) {
     (e: React.PointerEvent, id: string) => {
       if (e.button === 2) return; // right-click opens the menu instead
       e.stopPropagation();
-      setMenu(null);
+      useCtxMenu.getState().hide();
 
       const additive = e.shiftKey || e.metaKey || e.ctrlKey;
       // A modifier click is a selection gesture, never an activation.
@@ -385,7 +419,7 @@ export function DesktopIcons({ topInset }: { topInset: number }) {
       const y = e.clientY - box.top;
       marqueeStart.current = { x, y };
       setMarquee({ x, y, w: 0, h: 0 });
-      setMenu(null);
+      useCtxMenu.getState().hide();
       if (!e.shiftKey && !e.metaKey && !e.ctrlKey) setSelected([]);
       try { host.setPointerCapture(e.pointerId); } catch { /* a stale pointer id is not worth throwing over */ }
     };
@@ -414,12 +448,6 @@ export function DesktopIcons({ topInset }: { topInset: number }) {
             key={item.id}
             data-desktop-icon={item.id}
             onPointerDown={(e) => onIconPointerDown(e, item.id)}
-            onContextMenu={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              if (!selected.includes(item.id)) setSelected([item.id]);
-              setMenu({ x: e.clientX, y: e.clientY, id: item.id });
-            }}
             className={cn(
               "no-select absolute flex cursor-default flex-col items-center gap-1 rounded-lg p-1.5 text-center",
               isSel ? "bg-[var(--accent)]/25 ring-1 ring-[var(--accent)]" : "hover:bg-white/10",
@@ -485,59 +513,7 @@ export function DesktopIcons({ topInset }: { topInset: number }) {
         </div>
       )}
 
-      {menu && (
-        <IconMenu
-          x={menu.x}
-          y={menu.y}
-          count={selected.length}
-          onClose={() => setMenu(null)}
-          onOpen={() => selected.forEach((id) => resolved.find((r) => r.item.id === id)?.view?.open())}
-          onRename={() => setRenaming(menu.id)}
-          onRemove={() => { settings.removeDesktopItems(selected); setSelected([]); }}
-          onTidy={() => settings.tidyDesktop()}
-        />
-      )}
     </div>
   );
 }
 
-function IconMenu({ x, y, count, onClose, onOpen, onRename, onRemove, onTidy }: {
-  x: number; y: number; count: number;
-  onClose: () => void; onOpen: () => void; onRename: () => void; onRemove: () => void; onTidy: () => void;
-}) {
-  useEffect(() => {
-    const close = () => onClose();
-    const t = setTimeout(() => window.addEventListener("pointerdown", close), 0);
-    window.addEventListener("keydown", close);
-    return () => { clearTimeout(t); window.removeEventListener("pointerdown", close); window.removeEventListener("keydown", close); };
-  }, [onClose]);
-
-  const items: Array<{ label: string; run: () => void; disabled?: boolean }> = [
-    { label: count > 1 ? `Open ${count} items` : "Open", run: onOpen },
-    { label: "Rename", run: onRename, disabled: count > 1 },
-    { label: count > 1 ? `Remove ${count} from desktop` : "Remove from desktop", run: onRemove },
-    { label: "Tidy up", run: onTidy },
-  ];
-  return (
-    <div
-      className="glass fixed z-[9800] w-52 p-1.5 shadow-2xl"
-      style={{
-        left: Math.min(x, window.innerWidth - 220),
-        top: Math.min(y, window.innerHeight - 180),
-        borderRadius: "var(--radius)",
-      }}
-      onPointerDown={(e) => e.stopPropagation()}
-    >
-      {items.map((it) => (
-        <button
-          key={it.label}
-          disabled={it.disabled}
-          onClick={() => { it.run(); onClose(); }}
-          className="w-full rounded-md px-2.5 py-1.5 text-left text-[12px] hover:bg-[var(--accent)]/18 disabled:opacity-40 disabled:hover:bg-transparent"
-        >
-          {it.label}
-        </button>
-      ))}
-    </div>
-  );
-}

@@ -165,6 +165,8 @@ export function WindowFrame({ win }: { win: WindowInstance }) {
         ref={frameRef}
         role="dialog"
         aria-label={win.title}
+        // Read by the global context menu to build this window's commands.
+        data-window-id={win.id}
         onPointerDown={() => wm.focus(win.id)}
         onMouseEnter={() => settings.focusFollowsMouse && wm.focus(win.id)}
         className={cn(

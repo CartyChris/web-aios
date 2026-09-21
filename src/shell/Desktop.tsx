@@ -6,6 +6,8 @@ import { useSettings, resolveTokens } from "@/kernel/settings";
 import { getApp } from "@/kernel/registry";
 import { useHydrated } from "@/lib/useHydrated";
 import { bus } from "@/kernel/bus";
+import { ContextMenuHost } from "./ContextMenu";
+import { useGlobalContextMenu } from "./useGlobalContextMenu";
 import { LAYOUTS } from "@/lib/zones";
 import { WindowFrame } from "./Window";
 import { Dock } from "./Dock";
@@ -34,7 +36,8 @@ export function Desktop() {
   const settings = useSettings();
   const [launcher, setLauncher] = useState(false);
   const [palette, setPalette] = useState(false);
-  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  // One document-level listener owns every right-click in the OS.
+  useGlobalContextMenu();
   const funMode = settings.funMode;
 
   // ── Token application ─────────────────────────────────────────────────────
@@ -146,7 +149,7 @@ export function Desktop() {
         const n = Number(e.key);
         if (n <= wm.workspaces) { e.preventDefault(); wm.setWorkspace(n); }
       }
-      if (e.key === "Escape") { setLauncher(false); setPalette(false); setMenu(null); }
+      if (e.key === "Escape") { setLauncher(false); setPalette(false); }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -218,12 +221,6 @@ export function Desktop() {
   return (
     <div
       className={cn("relative h-screen w-screen overflow-hidden", !settings.motion && "motion-off")}
-      onContextMenu={(e) => {
-        if ((e.target as HTMLElement).closest("[role=dialog]")) return;
-        e.preventDefault();
-        setMenu({ x: e.clientX, y: e.clientY });
-      }}
-      onClick={() => setMenu(null)}
     >
       <Wallpaper />
       <WidgetLayer />
@@ -239,7 +236,7 @@ export function Desktop() {
       {launcher && <Launcher onClose={() => setLauncher(false)} />}
       {palette && <CommandPalette onClose={() => setPalette(false)} />}
 
-      {menu && <DesktopMenu x={menu.x} y={menu.y} onClose={() => setMenu(null)} />}
+      <ContextMenuHost />
       <PinPicker />
 
       {/* Minimized windows live in a tray so nothing can be lost. */}
@@ -317,47 +314,3 @@ function MinimizedTray() {
   );
 }
 
-function DesktopMenu({ x, y, onClose }: { x: number; y: number; onClose: () => void }) {
-  const wm = useWM();
-  const settings = useSettings();
-  const items: Array<{ label: string; run: () => void } | "sep"> = [
-    { label: "Pin an app here…", run: () => bus.emit("desktop:pin-picker", { x, y }) },
-    { label: "New AI widget…", run: () => wm.open("personalize", { title: "Personalize", icon: "personalize", singleton: true, size: { w: 1020, h: 720 }, args: { tab: "widgets", newWidget: true } }) },
-    { label: "Build something with AI…", run: () => bus.emit("app:open", { appId: "studio" }) },
-    { label: "Tidy desktop icons", run: () => settings.tidyDesktop() },
-    { label: settings.snapIconsToGrid ? "Free icon placement" : "Snap icons to grid", run: () => settings.set("snapIconsToGrid", !settings.snapIconsToGrid) },
-    "sep",
-    { label: "Personalize…", run: () => wm.open("personalize", { title: "Personalize", icon: "personalize", singleton: true, size: { w: 1020, h: 720 } }) },
-    { label: "Settings…", run: () => wm.open("settings", { title: "Settings", icon: "settings", singleton: true, size: { w: 960, h: 680 } }) },
-    "sep",
-    { label: "Tile windows", run: () => wm.tileAll() },
-    { label: "Cascade windows", run: () => wm.cascadeAll() },
-    { label: "Show desktop", run: () => wm.minimizeAll() },
-    "sep",
-    { label: settings.showWidgets ? "Hide widgets" : "Show widgets", run: () => settings.set("showWidgets", !settings.showWidgets) },
-    { label: settings.showDesktopIcons ? "Hide desktop icons" : "Show desktop icons", run: () => settings.set("showDesktopIcons", !settings.showDesktopIcons) },
-    { label: settings.motion ? "Disable animations" : "Enable animations", run: () => settings.set("motion", !settings.motion) },
-    { label: settings.petVisible ? "Put the pet away" : "Bring out a pet", run: () => { if (!settings.petVisible && settings.pet === "none") settings.set("pet", "cat"); settings.set("petVisible", !settings.petVisible); } },
-  ];
-  return (
-    <div
-      className="glass fixed z-[9800] w-52 p-1.5 shadow-2xl"
-      style={{ left: Math.min(x, window.innerWidth - 220), top: Math.min(y, window.innerHeight - 380), borderRadius: "var(--radius)" }}
-      onClick={(e) => e.stopPropagation()}
-    >
-      {items.map((it, i) =>
-        it === "sep" ? (
-          <div key={i} className="my-1 h-px bg-[var(--border)]" />
-        ) : (
-          <button
-            key={i}
-            onClick={() => { it.run(); onClose(); }}
-            className="w-full rounded-md px-2.5 py-1.5 text-left text-[12px] hover:bg-[var(--accent)]/18"
-          >
-            {it.label}
-          </button>
-        ),
-      )}
-    </div>
-  );
-}

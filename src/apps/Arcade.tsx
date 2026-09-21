@@ -600,6 +600,9 @@ function Mines({ onScore, best }: { onScore: (n: number) => boolean; best: numbe
       footer="Click to clear, right-click or long-press to flag. Clearing faster scores higher."
     >
       <div
+        /* Right-click flags a square here, so the OS menu stays out of the way.
+           The browser's own menu is still suppressed by the global handler. */
+        data-ctx-skip
         className="grid aspect-square h-full max-h-full w-full max-w-[460px] gap-[2px] rounded-[calc(var(--radius)*0.6)] border border-[var(--border)] bg-black/20 p-1"
         style={{ gridTemplateColumns: `repeat(${W}, minmax(0, 1fr))` }}
       >

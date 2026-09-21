@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { APPS, CATEGORY_LABELS } from "@/kernel/registry";
 import { useWM } from "@/kernel/wm";
 import { useSettings } from "@/kernel/settings";
 import { bus } from "@/kernel/bus";
+import { registerContextTarget, type TargetContext } from "@/kernel/ctxmenu";
 import { cn } from "@/lib/cn";
 import { Icon } from "@/shell/icons";
 
@@ -16,6 +17,8 @@ export function Launcher({ onClose }: { onClose: () => void }) {
   const [q, setQ] = useState("");
   const [cat, setCat] = useState<string>("all");
   const inputRef = useRef<HTMLInputElement>(null);
+  const gridRef = useRef<HTMLDivElement>(null);
+
 
   useEffect(() => {
     // rAF, not a bare focus(): the input is not laid out until after paint.
@@ -31,7 +34,7 @@ export function Launcher({ onClose }: { onClose: () => void }) {
   }, [q, cat]);
 
   /** Drop it in the first free grid slot rather than on top of something. */
-  const pin = (id: string, name: string) => {
+  const pin = useCallback((id: string, name: string) => {
     const taken = new Set(settings.desktopItems.map((d) => `${d.x},${d.y}`));
     const COL = 92;
     const ROW = 100;
@@ -49,14 +52,33 @@ export function Launcher({ onClose }: { onClose: () => void }) {
     }
     settings.addDesktopItem({ kind: "app", ref: id, x, y });
     bus.emit("notify", { title: `Pinned "${name}" to the desktop`, kind: "success" });
-  };
+  }, [settings]);
 
-  const launch = (id: string) => {
+  const launch = useCallback((id: string) => {
     const app = APPS.find((a) => a.id === id);
     if (!app) return;
     wm.open(id, { title: app.name, icon: app.icon, size: app.defaultSize, singleton: app.singleton });
     onClose();
-  };
+  }, [wm, onClose]);
+
+  /* Pinning used to be an undiscoverable right-click that silently pinned and
+     told nobody. It is a named menu item now, on the same gesture. */
+  useEffect(() => {
+    const el = gridRef.current;
+    if (!el) return;
+    return registerContextTarget(el, ({ target }: TargetContext) => {
+      const id = (target.closest("[data-app-id]") as HTMLElement | null)?.dataset.appId;
+      const app = APPS.find((a) => a.id === id);
+      if (!app) return null;
+      return {
+        id: "launcher",
+        entries: [
+          { id: "open", label: `Open ${app.name}`, icon: app.icon, run: () => launch(app.id) },
+          { id: "pin", label: "Pin to the desktop", icon: "pin", run: () => pin(app.id, app.name) },
+        ],
+      };
+    });
+  }, [launch, pin]);
 
   const cats = ["all", ...Array.from(new Set(APPS.map((a) => a.category)))];
 
@@ -91,17 +113,13 @@ export function Launcher({ onClose }: { onClose: () => void }) {
         ))}
       </div>
 
-      <div className="grid w-full max-w-5xl gap-3 overflow-y-auto pb-16" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))" }}>
+      <div ref={gridRef} className="grid w-full max-w-5xl gap-3 overflow-y-auto pb-16" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))" }}>
         {results.map((app, i) => (
           <button
             key={app.id}
+            data-app-id={app.id}
             onClick={() => launch(app.id)}
-            // Pinning worked from the very start, behind a right-click on bare
-            // desktop — which nobody finds, and which the default layout hides
-            // further by covering the top-left with widgets. Here it is where
-            // people already are, on the thing they already want.
-            onContextMenu={(e) => { e.preventDefault(); pin(app.id, app.name); }}
-            title={`${app.description}\n\nRight-click to pin to the desktop`}
+            title={`${app.description}\n\nRight-click for more`}
             className="os-card group relative flex flex-col items-center gap-2 text-center transition hover:-translate-y-1"
             style={{ animation: `os-fade-up 260ms ease both`, animationDelay: `${Math.min(i * 18, 300)}ms` }}
           >
