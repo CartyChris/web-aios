@@ -361,3 +361,53 @@ test("mergeConfig refuses to let the judge share the worker's model", () => {
   const c = mergeConfig(DEFAULT_LOOP_CONFIG, { judge: { ...DEFAULT_LOOP_CONFIG.llm } });
   assert.notEqual(c.judge.model, c.llm.model);
 });
+
+/* ── context folding inside the loop ─────────────────────────────────────── */
+
+test("a long run folds its transcript in the PROMPT but not in the receipt", async () => {
+  // Every step calls the same tool and fails the same way, which is exactly the
+  // shape folding exists for: forty near-identical lines become one counted one.
+  const prompts = [];
+  const replies = Array.from({ length: 14 }, (_, n) => `Thought ${n + 1}: trying again\nAction ${n + 1}: nosuchtool {}`);
+  const r = await runReAct(
+    "test objective",
+    mergeConfig(DEFAULT_LOOP_CONFIG, { maxSteps: 12, maxToolErrors: 99, foldAfterSteps: 4, foldKeepRecent: 2 }),
+    dodContains("done"),
+    freshTrigger(),
+    deps(replies, {
+      llm: async (req) => {
+        prompts.push(req.prompt);
+        const text = replies[Math.min(prompts.length - 1, replies.length - 1)];
+        return { text, tokensIn: 10, tokensOut: 5, costUsd: 0.001, ms: 5, provider: "test", model: "test", spanId: `s${prompts.length}` };
+      },
+    }),
+  );
+
+  const last = prompts[prompts.length - 1];
+  assert.match(last, /# Earlier steps, folded/, "a long prompt must carry the ledger");
+  assert.match(last, /Full detail: \/harness\/runs\//, "and point at the full trace by path");
+
+  // The receipt keeps everything, which is the whole point of separating them.
+  assert.ok(!r.transcript.includes("# Earlier steps, folded"), "the receipt is never folded");
+  const thoughts = r.transcript.match(/^Thought \d+:/gm) ?? [];
+  assert.ok(thoughts.length > 4, `receipt kept ${thoughts.length} steps verbatim`);
+});
+
+test("a short run is not folded at all", async () => {
+  const prompts = [];
+  const r = await runReAct(
+    "test objective",
+    mergeConfig(DEFAULT_LOOP_CONFIG, { maxSteps: 3, foldAfterSteps: 8 }),
+    dodContains("done"),
+    freshTrigger(),
+    deps([], {
+      llm: async (req) => {
+        prompts.push(req.prompt);
+        return { text: `Thought 1: ok\nAction 1: nosuchtool {}`, tokensIn: 1, tokensOut: 1, costUsd: 0, ms: 1, provider: "t", model: "t", spanId: "s" };
+      },
+    }),
+  );
+  assert.ok(prompts.length > 0, "the model was actually called");
+  assert.ok(prompts.every((p) => !p.includes("# Earlier steps, folded")), "nothing to fold under the threshold");
+  assert.ok(!r.transcript.includes("# Earlier steps, folded"));
+});

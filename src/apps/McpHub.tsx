@@ -117,7 +117,7 @@ export default function McpHub({}: AppProps) {
       args[k] = prop?.type === "number" || prop?.type === "integer" ? Number(v) : v;
     }
     try {
-      const r = await callTool(serverFor(activeEntry), activeConn.sessionId, tool.name, args);
+      const r = await callTool(serverFor(activeEntry), activeConn.sessionId, tool.name, args, undefined, activeConn.protocol);
       setOutcome({ ok: r.ok, text: r.text, ms: Date.now() - started });
     } finally {
       setBusy(null);

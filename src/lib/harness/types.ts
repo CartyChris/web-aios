@@ -225,6 +225,12 @@ export interface LoopConfig {
   approvals: "never" | "destructive" | "always";
   /** Character budget for the trusted-context block. */
   contextMaxChars: number;
+  /** Fold the transcript once a run passes this many steps. 0 disables it.
+   *  Only the PROMPT is folded; run.transcript stays complete, because it is
+   *  the receipt. */
+  foldAfterSteps: number;
+  /** Steps kept verbatim at the tail when folding. */
+  foldKeepRecent: number;
 }
 
 export interface Action {

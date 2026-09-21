@@ -61,6 +61,8 @@
     "src/lib/sysupdate.ts",
     "src/lib/zones.ts",
     "src/lib/scenes.ts",
-    "src/lib/ctxmenu.ts"
+    "src/lib/ctxmenu.ts",
+    "src/lib/harness/fold.ts",
+    "src/lib/mcp-wire.ts"
   ]
 }

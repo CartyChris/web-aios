@@ -677,7 +677,7 @@ function McpTab() {
   const invoke = useCallback(async (tool: string, args: Record<string, unknown>) => {
     if (!server) return;
     setBusy(tool);
-    const out = await callTool(server, conn?.sessionId, tool, args);
+    const out = await callTool(server, conn?.sessionId, tool, args, undefined, conn?.protocol);
     setLog((l) => [{ id: uid("call"), tool, ok: out.ok, text: out.text }, ...l].slice(0, 40));
     setBusy(null);
     return out;

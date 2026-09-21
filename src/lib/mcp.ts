@@ -23,7 +23,23 @@ import { persist, createJSONStorage } from "zustand/middleware";
      against one server and fails against the next.
    ──────────────────────────────────────────────────────────────────────────── */
 
-export const MCP_PROTOCOL = "2025-06-18";
+import {
+  LATEST_PROTOCOL, negotiate, buildRequest, listTtl, isFresh, listCacheKey,
+  type ListCacheEntry, type ProtocolVersion,
+} from "./mcp-wire";
+
+/** What we advertise. The version actually spoken is whatever the server
+ *  answers `initialize` with — see negotiate() in mcp-wire.ts. */
+export const MCP_PROTOCOL = LATEST_PROTOCOL;
+
+const CLIENT = { name: "Web-AIOS", version: "2.0.0" } as const;
+
+/** tools/list results, which the 2026 revision makes cacheable. Keyed by
+ *  server AND negotiated version, because the same server can answer
+ *  differently under a different revision. */
+const listCache = new Map<string, ListCacheEntry<McpTool[]>>();
+
+export const clearListCache = (): void => listCache.clear();
 
 export interface McpTool {
   name: string;
@@ -45,6 +61,8 @@ export interface McpServer {
 
 export interface McpConnection {
   serverId: string;
+  /** The revision actually negotiated with this server. */
+  protocol?: ProtocolVersion;
   sessionId?: string;
   serverName?: string;
   tools: McpTool[];
@@ -70,16 +88,12 @@ async function rpc(
   params: Record<string, unknown> | undefined,
   sessionId: string | undefined,
   signal?: AbortSignal,
-): Promise<{ result: unknown; sessionId?: string }> {
-  const body = JSON.stringify({ jsonrpc: "2.0", id: Math.floor(Math.random() * 1e9), method, ...(params ? { params } : {}) });
-  const headers: Record<string, string> = {
-    "content-type": "application/json",
-    // Both, because the server picks which one it answers with.
-    accept: "application/json, text/event-stream",
-    "mcp-protocol-version": MCP_PROTOCOL,
-  };
-  if (sessionId) headers["mcp-session-id"] = sessionId;
-  if (server.token) headers.authorization = `Bearer ${server.token}`;
+  protocol: ProtocolVersion = MCP_PROTOCOL,
+): Promise<{ result: unknown; sessionId?: string; cacheControl?: string | null; etag?: string | null }> {
+  const { headers, body } = buildRequest(method, params, {
+    protocol, client: CLIENT, sessionId, token: server.token,
+    id: Math.floor(Math.random() * 1e9),
+  });
 
   // A localhost server is unreachable from a serverless function, so those
   // always leave from the browser regardless of the relay preference.
@@ -98,6 +112,8 @@ async function rpc(
   }
 
   const nextSession = res.headers.get("mcp-session-id") ?? sessionId;
+  const cacheControl = res.headers.get("cache-control");
+  const etag = res.headers.get("etag");
   const ctype = res.headers.get("content-type") ?? "";
   const raw = await res.text();
 
@@ -123,7 +139,7 @@ async function rpc(
     throw new Error("The server returned no JSON-RPC response.");
   }
   if (payload.error) throw new Error(`${payload.error.message} (code ${payload.error.code})`);
-  return { result: payload.result, sessionId: nextSession ?? undefined };
+  return { result: payload.result, sessionId: nextSession ?? undefined, cacheControl, etag };
 }
 
 /** Handshake, then list what the server can do. */
@@ -140,16 +156,33 @@ export async function connect(server: McpServer, signal?: AbortSignal): Promise<
     signal,
   );
   const sessionId = init.sessionId;
-  const info = (init.result as { serverInfo?: { name?: string } })?.serverInfo;
+  const res = init.result as { serverInfo?: { name?: string }; protocolVersion?: string };
+  // Speak whatever the server answered with, not what we asked for. Most
+  // servers are still on 2025-06-18, and a client that only speaks the newest
+  // revision is a client that talks to nothing.
+  const protocol = negotiate(res?.protocolVersion);
 
   // Required by the spec before any other request. A server that has not seen
   // it may legitimately refuse tools/list.
-  await rpc(server, "notifications/initialized", undefined, sessionId, signal).catch(() => undefined);
+  await rpc(server, "notifications/initialized", undefined, sessionId, signal, protocol).catch(() => undefined);
 
-  const listed = await rpc(server, "tools/list", {}, sessionId, signal);
-  const tools = ((listed.result as { tools?: McpTool[] })?.tools ?? []).filter((t) => typeof t?.name === "string");
+  // tools/list is cacheable from 2026-07-28. The key carries the negotiated
+  // version because the same server can answer differently under each.
+  const key = listCacheKey(server.id, "tools/list", protocol);
+  const cached = listCache.get(key);
+  let tools: McpTool[];
+  if (isFresh(cached, Date.now())) {
+    tools = cached!.value;
+  } else {
+    const listed = await rpc(server, "tools/list", {}, sessionId, signal, protocol);
+    tools = ((listed.result as { tools?: McpTool[] })?.tools ?? []).filter((t) => typeof t?.name === "string");
+    const maxAgeMs = listTtl(listed.cacheControl);
+    if (maxAgeMs > 0) {
+      listCache.set(key, { value: tools, etag: listed.etag ?? undefined, storedAt: Date.now(), maxAgeMs });
+    }
+  }
 
-  return { serverId: server.id, sessionId, serverName: info?.name, tools, connectedAt: Date.now() };
+  return { serverId: server.id, protocol, sessionId, serverName: res?.serverInfo?.name, tools, connectedAt: Date.now() };
 }
 
 export interface ToolOutcome {
@@ -165,9 +198,10 @@ export async function callTool(
   name: string,
   args: Record<string, unknown>,
   signal?: AbortSignal,
+  protocol: ProtocolVersion = MCP_PROTOCOL,
 ): Promise<ToolOutcome> {
   try {
-    const out = await rpc(server, "tools/call", { name, arguments: args }, sessionId, signal);
+    const out = await rpc(server, "tools/call", { name, arguments: args }, sessionId, signal, protocol);
     const r = out.result as { content?: Array<{ type: string; text?: string }>; isError?: boolean };
     const text = (r?.content ?? [])
       .map((c) => (c.type === "text" ? c.text ?? "" : `[${c.type}]`))

@@ -343,6 +343,36 @@ const lineAt = (src, index) => src.slice(0, index).split("\n").length;
   notes.push(`${checked} buttons checked for an accessible name`);
 }
 
+/* ── Source files must be greppable ──────────────────────────────────────────
+ *
+ * A raw control byte in a string literal is valid UTF-8 and compiles fine, but
+ * it makes the file "binary" to grep -- which then SKIPS IT SILENTLY. Searching
+ * the repo for a symbol defined in such a file returns nothing at all, and the
+ * obvious conclusion is that the symbol does not exist.
+ *
+ * harness/protocol.ts did exactly this with \u0000..\u0002 as fingerprint
+ * separators, and cost a search that came back empty on a function that was
+ * right there. Escape sequences are identical at runtime and stay searchable. */
+{
+  let scanned = 0;
+  for (const f of files) {
+    scanned++;
+    const buf = readFileSync(f);
+    for (let i = 0; i < buf.length; i++) {
+      const b = buf[i];
+      if (b < 32 && b !== 9 && b !== 10 && b !== 13) {
+        const line = read(f).slice(0, i).split("\n").length;
+        problems.push(
+          `${rel(f)}:${line} — raw control byte 0x${b.toString(16).padStart(2, "0")} in source. ` +
+          `grep skips binary files silently, so this module becomes unsearchable. Write it as an escape (\\u00${b.toString(16).padStart(2, "0")}).`,
+        );
+        break;
+      }
+    }
+  }
+  notes.push(`${scanned} source files checked for raw control bytes`);
+}
+
 /* ── Report ──────────────────────────────────────────────────────────────── */
 for (const n of notes) console.error(`  · ${n}`);
 if (problems.length) {

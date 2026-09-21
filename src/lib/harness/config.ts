@@ -71,6 +71,10 @@ export const DEFAULT_LOOP_CONFIG: LoopConfig = {
   dedupeMs: 60_000,
   approvals: "destructive",
   contextMaxChars: 6_000,
+  // Eight steps of ReAct is roughly where a transcript starts crowding out the
+  // context block it shares a window with.
+  foldAfterSteps: 8,
+  foldKeepRecent: 3,
 };
 
 /** The fallback definition of done.

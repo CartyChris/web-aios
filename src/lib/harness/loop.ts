@@ -35,6 +35,7 @@ import {
   splitThoughtAction,
   stopSequences,
 } from "./protocol";
+import { foldSteps, renderLedger } from "./fold";
 
 /* ────────────────────────────────────────────────────────────────────────────
    The ReAct loop.
@@ -520,8 +521,20 @@ export async function runReAct(
       const stepSpan = open({ parentId: root.id, name: `step ${i}`, kind: "app", role: "step", stepIndex: i });
 
       /* 9. Primed with the label, so the model never has to produce it — and
-         never gets the index wrong, which would break its own stop sequence. */
-      const prompt = buildUserPrompt(objective, renderTranscript(steps), block.volatile, i);
+         never gets the index wrong, which would break its own stop sequence.
+
+         Past foldAfterSteps the older steps are folded into a counted ledger
+         so a long run stops crowding out the context block it shares a window
+         with. Only what the MODEL sees is folded: run.transcript below stays
+         complete, because it is the receipt, and the ledger points at it by
+         path so the agent can read the detail back with the tools it has. */
+      const fold = config.foldAfterSteps > 0 && steps.length > config.foldAfterSteps
+        ? foldSteps(steps, { keepRecent: config.foldKeepRecent })
+        : null;
+      const transcript = fold && fold.foldedCount
+        ? `${renderLedger(fold, { artifactPath: `/harness/runs/${runId}.md` })}\n\n${renderTranscript(fold.kept)}`
+        : renderTranscript(steps);
+      const prompt = buildUserPrompt(objective, transcript, block.volatile, i);
 
       /* 10. */
       const req: LlmRequest = {
