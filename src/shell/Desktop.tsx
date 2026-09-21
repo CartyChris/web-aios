@@ -6,6 +6,7 @@ import { useSettings, resolveTokens } from "@/kernel/settings";
 import { getApp } from "@/kernel/registry";
 import { useHydrated } from "@/lib/useHydrated";
 import { bus } from "@/kernel/bus";
+import { LAYOUTS } from "@/lib/zones";
 import { WindowFrame } from "./Window";
 import { Dock } from "./Dock";
 import { TopBar } from "./TopBar";
@@ -126,8 +127,22 @@ export function Desktop() {
         if (kb[id] && matches(e, kb[id])) { e.preventDefault(); run(); return; }
       }
 
+      // ⌘/Ctrl + Alt + 1..7 applies a tiling layout.
+      //
+      // Checked BEFORE the workspace shortcut below, and matched on e.code
+      // rather than e.key, for two separate reasons. Order: the workspace rule
+      // is `(metaKey || ctrlKey) && digit`, which Ctrl+Alt+1 also satisfies, so
+      // testing it first would swallow every layout binding and change desktop
+      // instead. Code: holding Alt on macOS rewrites e.key, so Alt+1 arrives as
+      // "\u00a1" and a /^[1-9]$/ test never fires.
+      if ((e.metaKey || e.ctrlKey) && e.altKey) {
+        const m = /^Digit([1-9])$/.exec(e.code);
+        const layout = m ? LAYOUTS[Number(m[1]) - 1] : undefined;
+        if (layout) { e.preventDefault(); wm.applyLayout(layout.id); return; }
+      }
+
       // ⌘1..9 jumps straight to a workspace.
-      if ((e.metaKey || e.ctrlKey) && /^[1-9]$/.test(e.key)) {
+      if ((e.metaKey || e.ctrlKey) && !e.altKey && /^[1-9]$/.test(e.key)) {
         const n = Number(e.key);
         if (n <= wm.workspaces) { e.preventDefault(); wm.setWorkspace(n); }
       }

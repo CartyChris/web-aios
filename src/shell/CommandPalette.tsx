@@ -7,6 +7,9 @@ import { useSettings } from "@/kernel/settings";
 import { useVFS } from "@/kernel/vfs";
 import { WALLPAPERS } from "@/kernel/themes";
 import { useCustomThemes, allThemes } from "@/kernel/customthemes";
+import { useScenes } from "@/kernel/scenes";
+import { LAYOUTS } from "@/lib/zones";
+import { describeScene } from "@/lib/scenes";
 import { cn } from "@/lib/cn";
 import { Icon } from "./icons";
 
@@ -41,6 +44,7 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
   // See Personalize: allThemes() reads the custom-theme store through
   // getState(), so the subscription has to be explicit.
   const generatedThemes = useCustomThemes((s) => s.themes);
+  const scenes = useScenes((s) => s.scenes);
   const commands = useMemo<Command[]>(() => {
     const out: Command[] = [];
 
@@ -77,6 +81,30 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
     }
 
     out.push(
+      ...LAYOUTS.map((l) => ({
+        id: `layout:${l.id}`,
+        label: `Layout: ${l.name}`,
+        hint: l.hint,
+        group: "Window",
+        icon: "layout",
+        run: () => wm.applyLayout(l.id),
+      })),
+      ...scenes.map((sc) => ({
+        id: `scene:${sc.id}`,
+        label: `Scene: ${sc.name}`,
+        hint: describeScene(sc),
+        group: "Scenes",
+        icon: "backup",
+        run: () => useScenes.getState().restore(sc.id, { replace: true }),
+      })),
+      {
+        id: "scene.save",
+        label: "Save this arrangement as a scene",
+        hint: "Every window on every desktop, restorable later",
+        group: "Scenes",
+        icon: "save",
+        run: () => useScenes.getState().save(`Scene ${new Date().toLocaleString()}`),
+      },
       { id: "wm.tile", label: "Tile all windows", group: "Window", run: () => wm.tileAll() },
       { id: "wm.cascade", label: "Cascade all windows", group: "Window", run: () => wm.cascadeAll() },
       { id: "wm.minAll", label: "Show desktop (minimize all)", group: "Window", run: () => wm.minimizeAll() },
@@ -119,7 +147,7 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
     }
 
     return out;
-  }, [wm, settings, vfs, q, generatedThemes]);
+  }, [wm, settings, vfs, q, generatedThemes, scenes]);
 
   const results = useMemo(() => {
     const needle = q.trim().toLowerCase();

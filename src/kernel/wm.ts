@@ -3,6 +3,7 @@
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 import { resolveOpen } from "@/lib/window-open";
+import { tile } from "@/lib/zones";
 import type { Notification, WindowInstance, WindowState } from "./types";
 
 /** Where a window lands when dropped against an edge or driven by a keybinding. */
@@ -36,6 +37,12 @@ export interface WMState {
   setWorkspace: (n: number) => void;
   setWorkspaceCount: (n: number) => void;
   cycle: (dir: 1 | -1) => void;
+  /** Arrange every live window on this workspace under a named layout
+   *  from src/lib/zones.ts. Front window first, so "main + stack" gives the
+   *  large pane to whatever you were just using. */
+  applyLayout: (layoutId: string) => void;
+  /** The layout last applied, so it can be re-run after opening a window. */
+  lastLayout: string;
   tileAll: () => void;
   cascadeAll: () => void;
   minimizeAll: () => void;
@@ -64,6 +71,13 @@ export interface OpenOptions {
 const uid = () => `w_${Math.random().toString(36).slice(2, 10)}`;
 
 /** Usable desktop area, excluding the top bar and the dock. */
+/** The usable desktop: viewport minus the top bar and the dock strip. One
+ *  definition, exported, so layouts and scenes cannot drift from each other. */
+export function workArea(): { x: number; y: number; w: number; h: number } {
+  const v = viewport();
+  return { x: 0, y: v.top, w: v.w, h: v.h - v.top - v.bottom };
+}
+
 function viewport() {
   if (typeof window === "undefined") return { w: 1440, h: 900, top: 40, bottom: 76 };
   return { w: window.innerWidth, h: window.innerHeight, top: 40, bottom: 76 };
@@ -117,6 +131,7 @@ export const useWM = create<WMState>()(
   persist(
     (set, get) => ({
       windows: [],
+      lastLayout: "grid",
       workspaces: 4,
       activeWorkspace: 1,
       focused: null,
@@ -274,51 +289,35 @@ export const useWM = create<WMState>()(
         get().focus(next.id);
       },
 
-      tileAll: () => {
+      applyLayout: (layoutId) => {
         const s = get();
-        const live = s.windows.filter((w) => (w.workspace === s.activeWorkspace || w.pinned) && w.state !== "minimized");
+        // Front first: z descending. "Main + stack" is only useful if the pane
+        // you get is the window you were actually looking at.
+        const live = s.windows
+          .filter((w) => (w.workspace === s.activeWorkspace || w.pinned) && w.state !== "minimized")
+          .sort((a, b) => b.z - a.z);
         if (!live.length) return;
-        const v = viewport();
-        const availH = v.h - v.top - v.bottom;
-        const cols = Math.ceil(Math.sqrt(live.length));
-        const rows = Math.ceil(live.length / cols);
-        const cw = Math.floor(v.w / cols);
-        const ch = Math.floor(availH / rows);
+        const rects = tile(layoutId, live.length, workArea(), { gap: 8 });
+        // A Map, not findIndex inside the map: the old code was quadratic in
+        // the window count, and this runs on every layout keystroke.
+        const placed = new Map<string, { x: number; y: number; w: number; h: number }>();
+        for (let i = 0; i < live.length; i++) placed.set(live[i].id, rects[i]);
+
         set({
+          lastLayout: layoutId,
           windows: s.windows.map((w) => {
-            const i = live.findIndex((l) => l.id === w.id);
-            if (i === -1) return w;
-            return {
-              ...w,
-              x: (i % cols) * cw,
-              y: v.top + Math.floor(i / cols) * ch,
-              w: cw,
-              h: ch,
-              state: "normal" as WindowState,
-            };
+            const r = placed.get(w.id);
+            return r
+              ? { ...w, ...r, state: "normal" as WindowState, restore: w.restore ?? { x: w.x, y: w.y, w: w.w, h: w.h } }
+              : w;
           }),
         });
       },
 
-      cascadeAll: () => {
-        const s = get();
-        const live = s.windows.filter((w) => (w.workspace === s.activeWorkspace || w.pinned) && w.state !== "minimized");
-        const v = viewport();
-        set({
-          windows: s.windows.map((w) => {
-            const i = live.findIndex((l) => l.id === w.id);
-            if (i === -1) return w;
-            return {
-              ...w,
-              x: 40 + i * 30,
-              y: v.top + 20 + i * 30,
-              w: Math.min(900, v.w - 120),
-              h: Math.min(620, v.h - v.top - v.bottom - 60),
-              state: "normal" as WindowState,
-            };
-          }),
-        });
-      },
+      // Kept as named commands; both now go through the tested geometry, which
+      // also fixes the seam the old floor(v.w / cols) left down the right edge.
+      tileAll: () => get().applyLayout("grid"),
+      cascadeAll: () => get().applyLayout("cascade"),
 
       minimizeAll: () =>
         set((s) => ({

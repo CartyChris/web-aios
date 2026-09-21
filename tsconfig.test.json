@@ -58,6 +58,8 @@
     "src/lib/extract-code.ts",
     "src/lib/petgen.ts",
     "src/lib/petmind.ts",
-    "src/lib/sysupdate.ts"
+    "src/lib/sysupdate.ts",
+    "src/lib/zones.ts",
+    "src/lib/scenes.ts"
   ]
 }

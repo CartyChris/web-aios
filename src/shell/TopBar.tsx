@@ -7,6 +7,9 @@ import { getApp } from "@/kernel/registry";
 import { cn } from "@/lib/cn";
 import { relTime } from "@/lib/format";
 import { Icon } from "@/shell/icons";
+import { LAYOUTS } from "@/lib/zones";
+import { describeScene } from "@/lib/scenes";
+import { useScenes } from "@/kernel/scenes";
 import { bus } from "@/kernel/bus";
 import { EGGS, useEggs } from "@/lib/easter";
 import { ModelPicker } from "./ModelPicker";
@@ -17,7 +20,7 @@ export function TopBar({ onLauncher, onPalette }: { onLauncher: () => void; onPa
   const [clockTaps, setClockTaps] = useState(0);
   const [picker, setPicker] = useState(false);
   const [now, setNow] = useState(() => new Date());
-  const [openMenu, setOpenMenu] = useState<"notifications" | "workspaces" | null>(null);
+  const [openMenu, setOpenMenu] = useState<"notifications" | "workspaces" | "layouts" | null>(null);
   const [online, setOnline] = useState(true);
 
   useEffect(() => {
@@ -93,6 +96,11 @@ export function TopBar({ onLauncher, onPalette }: { onLauncher: () => void; onPa
         </div>
       )}
 
+      {/* Layouts and scenes. Rendered unconditionally rather than behind
+          has("layouts"): topBarItems is persisted, so gating it would leave the
+          control invisible for anyone who used the OS before it existed. */}
+      <LayoutMenu open={openMenu === "layouts"} onOpen={() => setOpenMenu(openMenu === "layouts" ? null : "layouts")} onClose={() => setOpenMenu(null)} />
+
       {has("ai") && (
         <button
           className="os-chip hidden lg:inline-flex hover:!border-[var(--accent)]"
@@ -166,6 +174,73 @@ export function TopBar({ onLauncher, onPalette }: { onLauncher: () => void; onPa
         >
           {now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
         </button>
+      )}
+    </div>
+  );
+}
+
+function LayoutMenu({ open, onOpen, onClose }: { open: boolean; onOpen: () => void; onClose: () => void }) {
+  const wm = useWM();
+  const scenes = useScenes((s) => s.scenes);
+  const [name, setName] = useState("");
+
+  const liveCount = wm.windows.filter((w) => (w.workspace === wm.activeWorkspace || w.pinned) && w.state !== "minimized").length;
+
+  return (
+    <div className="relative">
+      <button onClick={onOpen} className="os-btn !py-1" title="Layouts and scenes">
+        <Icon name="layout" size={12} />
+      </button>
+      {open && (
+        <Menu onClose={onClose}>
+          <div className="os-label mb-1.5">Arrange {liveCount} window{liveCount === 1 ? "" : "s"}</div>
+          <div className="mb-2 grid grid-cols-2 gap-1.5">
+            {LAYOUTS.map((l) => (
+              <button
+                key={l.id} title={l.hint}
+                onClick={() => { wm.applyLayout(l.id); onClose(); }}
+                className={cn("os-btn !px-2 !py-1 text-left text-[11px]", wm.lastLayout === l.id && "!border-[var(--accent)]")}
+              >
+                {l.name}
+              </button>
+            ))}
+          </div>
+
+          <div className="os-label mb-1.5">Scenes</div>
+          <div className="mb-1.5 flex gap-1">
+            <input
+              className="os-input min-w-0 flex-1 !py-1 text-[11px]" value={name} placeholder="Name this arrangement"
+              onChange={(e) => setName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key !== "Enter" || !name.trim()) return;
+                useScenes.getState().save(name);
+                setName("");
+              }}
+            />
+            <button
+              className="os-btn !py-1 text-[11px]" disabled={!name.trim()}
+              onClick={() => { useScenes.getState().save(name); setName(""); }}
+            >Save</button>
+          </div>
+          {scenes.length === 0
+            ? <p className="text-[10.5px] text-[var(--muted)]">Save what is open now, on every desktop, and come back to it later.</p>
+            : scenes.slice(0, 8).map((sc) => (
+              <div key={sc.id} className="mb-1 flex items-center gap-1">
+                <button
+                  className="os-btn min-w-0 flex-1 !py-1 text-left text-[11px]"
+                  title={`${describeScene(sc)} — restores in place of what is open`}
+                  onClick={() => { useScenes.getState().restore(sc.id, { replace: true }); onClose(); }}
+                >
+                  <span className="block truncate">{sc.name}</span>
+                  <span className="block truncate text-[9.5px] text-[var(--muted)]">{describeScene(sc)}</span>
+                </button>
+                <button className="os-btn !px-1.5 !py-1" title={`Delete "${sc.name}"`} aria-label={`Delete ${sc.name}`}
+                  onClick={() => useScenes.getState().remove(sc.id)}>
+                  <Icon name="close" size={10} />
+                </button>
+              </div>
+            ))}
+        </Menu>
       )}
     </div>
   );
