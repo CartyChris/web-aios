@@ -5,6 +5,8 @@ import { useWM } from "@/kernel/wm";
 import { useVFS } from "@/kernel/vfs";
 import { useUserApps } from "@/kernel/userapps";
 import { useCustomWidgets } from "@/kernel/widgets";
+import { useUpdates } from "@/kernel/updates";
+import { useCustomThemes } from "@/kernel/customthemes";
 import { useTriggers } from "@/kernel/triggers";
 import { APPS, getApp } from "@/kernel/registry";
 import { bus } from "@/kernel/bus";
@@ -73,6 +75,8 @@ const STORES = {
   mcp: useMcp,
   eggs: useEggs,
   triggers: useTriggers,
+  updates: useUpdates,
+  customThemes: useCustomThemes,
 } as const;
 
 function snapshot(): Record<string, unknown> {

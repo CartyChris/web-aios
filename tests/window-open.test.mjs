@@ -58,6 +58,25 @@ test("a pinned instance wins over an unpinned one on the current workspace", () 
   assert.equal(d.windowId, "pin");
 });
 
+test("a pinned NON-singleton instance is focused, not duplicated on top of itself", () => {
+  // The regression this file previously could not see. resolveOpen returned
+  // "create" for any non-singleton app BEFORE it reached the pinned branch, so
+  // the rule above was dead for every app except the three singletons. Pinning
+  // an AI Studio window and opening AI Studio again put a second copy directly
+  // over the visible one. Every test here passed throughout, because they all
+  // passed singleton: true.
+  const d = resolveOpen({ appId: "studio", windows: [w("p", "studio", 1, true)], activeWorkspace: 3, singleton: false });
+  assert.equal(d.action, "focus");
+  assert.equal(d.windowId, "p");
+  assert.match(d.reason, /pinned/);
+});
+
+test("forceNew still beats a pinned instance — asking for another one means another one", () => {
+  const d = resolveOpen({ appId: "studio", windows: [w("p", "studio", 1, true)], activeWorkspace: 1, singleton: false, forceNew: true });
+  assert.equal(d.action, "create");
+  assert.match(d.reason, /explicitly requested/);
+});
+
 /* ── everything that must NOT change ─────────────────────────────────────── */
 
 test("a non-singleton app always creates, however many are open", () => {

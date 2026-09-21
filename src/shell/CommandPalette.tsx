@@ -5,7 +5,8 @@ import { APPS } from "@/kernel/registry";
 import { useWM } from "@/kernel/wm";
 import { useSettings } from "@/kernel/settings";
 import { useVFS } from "@/kernel/vfs";
-import { THEMES, WALLPAPERS } from "@/kernel/themes";
+import { WALLPAPERS } from "@/kernel/themes";
+import { useCustomThemes, allThemes } from "@/kernel/customthemes";
 import { cn } from "@/lib/cn";
 import { Icon } from "./icons";
 
@@ -37,6 +38,9 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
     return () => cancelAnimationFrame(id);
   }, []);
 
+  // See Personalize: allThemes() reads the custom-theme store through
+  // getState(), so the subscription has to be explicit.
+  const generatedThemes = useCustomThemes((s) => s.themes);
   const commands = useMemo<Command[]>(() => {
     const out: Command[] = [];
 
@@ -62,7 +66,7 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
       });
     }
 
-    for (const t of THEMES) {
+    for (const t of allThemes(generatedThemes)) {
       out.push({ id: `theme:${t.id}`, label: `Theme: ${t.name}`, hint: t.dark ? "dark" : "light", group: "Appearance", icon: "personalize", run: () => settings.applyTheme(t.id) });
     }
     for (const wp of WALLPAPERS) {
@@ -115,7 +119,7 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
     }
 
     return out;
-  }, [wm, settings, vfs, q]);
+  }, [wm, settings, vfs, q, generatedThemes]);
 
   const results = useMemo(() => {
     const needle = q.trim().toLowerCase();

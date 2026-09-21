@@ -41,16 +41,25 @@ export interface ResolveOpenInput {
 }
 
 export function resolveOpen(input: ResolveOpenInput): OpenDecision {
-  if (!input.singleton) return { action: "create", reason: "the app allows more than one window" };
+  // An explicit "open another one" beats every other rule, including pinning.
   if (input.forceNew) return { action: "create", reason: "a new window was explicitly requested" };
 
   // A pinned instance is on screen here whatever workspace it belongs to, so
-  // it is the one to focus. Checked first: opening a second copy directly on
-  // top of a visible one is the worst of both behaviours.
+  // it is the one to focus. This is checked BEFORE the singleton rule on
+  // purpose. It used to sit after it, which made the whole pinned branch
+  // unreachable for the twenty-nine apps that are not singletons: pinning an
+  // AI Studio window and opening AI Studio again stacked a second copy
+  // directly on top of the visible one -- the exact outcome the rule exists to
+  // prevent, and the one the header comment above says it prevents. Pinning is
+  // a statement about where a window is VISIBLE, which has nothing to do with
+  // how many copies an app allows; `forceNew` remains the way to ask for
+  // another one anyway.
   const pinned = input.windows.find((w) => w.appId === input.appId && w.pinned);
   if (pinned) {
     return { action: "focus", windowId: pinned.id, reason: "an instance is pinned to every workspace" };
   }
+
+  if (!input.singleton) return { action: "create", reason: "the app allows more than one window" };
 
   const here = input.windows.find((w) => w.appId === input.appId && w.workspace === input.activeWorkspace);
   if (here) {

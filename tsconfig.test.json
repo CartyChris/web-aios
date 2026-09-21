@@ -57,6 +57,7 @@
     "src/lib/palette.ts",
     "src/lib/extract-code.ts",
     "src/lib/petgen.ts",
-    "src/lib/petmind.ts"
+    "src/lib/petmind.ts",
+    "src/lib/sysupdate.ts"
   ]
 }

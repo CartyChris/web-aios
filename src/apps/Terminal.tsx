@@ -6,7 +6,7 @@ import { useWM } from "@/kernel/wm";
 import { useSettings } from "@/kernel/settings";
 import { APPS, getApp } from "@/kernel/registry";
 import { PROFILES } from "@/kernel/profiles";
-import { THEMES } from "@/kernel/themes";
+import { allThemes } from "@/kernel/customthemes";
 import { ask } from "@/lib/useAI";
 import type { AppProps } from "@/kernel/types";
 import { bytes } from "@/lib/format";
@@ -155,8 +155,8 @@ export default function Terminal({}: AppProps) {
           break;
         }
         case "theme": {
-          if (!args[0]) { print(THEMES.map((t) => `${t.id.padEnd(12)} ${t.name}`).join("\n")); break; }
-          if (!THEMES.some((t) => t.id === args[0])) { print(`unknown theme "${args[0]}"`, "err"); break; }
+          if (!args[0]) { print(allThemes().map((t) => `${t.id.padEnd(12)} ${t.name}`).join("\n")); break; }
+          if (!allThemes().some((t) => t.id === args[0])) { print(`unknown theme "${args[0]}"`, "err"); break; }
           settings.applyTheme(args[0]);
           print(`applied theme ${args[0]}`);
           break;

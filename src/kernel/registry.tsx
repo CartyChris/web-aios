@@ -360,6 +360,18 @@ export const APPS: AppManifest[] = [
 
   // ── System ──────────────────────────────────────────────────────────────
   {
+    id: "updates",
+    name: "System Updates",
+    icon: "sparkles",
+    category: "system",
+    description: "Let a model propose themes, widgets and tuning for the OS itself — preview and edit every change, and revert any of it.",
+    component: lazy(() => import("@/apps/Updates")),
+    defaultSize: { w: 860, h: 720 },
+    permissions: ["ai", "storage"],
+    accent: "#f0abfc",
+    singleton: true,
+  },
+  {
     id: "personalize",
     name: "Personalize",
     icon: "personalize",

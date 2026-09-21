@@ -3,7 +3,8 @@
 import { WallpaperThemeButton } from "@/shell/WallpaperThemeButton";
 import { useCallback, useMemo, useRef, useState } from "react";
 import { useSettings, resolveTokens } from "@/kernel/settings";
-import { THEMES, WALLPAPERS, FONT_STACKS } from "@/kernel/themes";
+import { WALLPAPERS, FONT_STACKS } from "@/kernel/themes";
+import { useCustomThemes, allThemes } from "@/kernel/customthemes";
 import { SPECIES, PET_FAMILIES, PERSONALITIES, PET_MODES, VOICES, getSpecies, useCustomPets } from "@/kernel/pets";
 import { petPrompt, parsePetSpec } from "@/lib/petgen";
 import { ask } from "@/lib/useAI";
@@ -41,14 +42,18 @@ export default function Personalize({}: AppProps) {
   const [themeKind, setThemeKind] = useState<"all" | "dark" | "light">("all");
   const [petQuery, setPetQuery] = useState("");
 
+  // Subscribed, not just read: allThemes() reaches into the custom-theme store
+  // with getState(), which does not re-render on its own. A theme a system
+  // update just generated would otherwise not appear until this app remounted.
+  const generatedThemes = useCustomThemes((s) => s.themes);
   const visibleThemes = useMemo(() => {
     const q = themeQuery.trim().toLowerCase();
-    return THEMES.filter((t) => {
+    return allThemes(generatedThemes).filter((t) => {
       if (themeKind === "dark" && !t.dark) return false;
       if (themeKind === "light" && t.dark) return false;
       return !q || t.name.toLowerCase().includes(q) || t.id.includes(q);
     });
-  }, [themeQuery, themeKind]);
+  }, [themeQuery, themeKind, generatedThemes]);
 
   const visibleSpecies = useMemo(() => {
     const q = petQuery.trim().toLowerCase();
@@ -130,7 +135,7 @@ export default function Personalize({}: AppProps) {
                 <span className="os-label !mb-0">Palette</span>
                 <input
                   className="os-input !w-40 !py-1 text-[11px]"
-                  placeholder={`Filter ${THEMES.length} themes`}
+                  placeholder={`Filter ${allThemes(generatedThemes).length} themes`}
                   value={themeQuery}
                   onChange={(e) => setThemeQuery(e.target.value)}
                 />

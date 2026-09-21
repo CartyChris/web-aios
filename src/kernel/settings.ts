@@ -3,6 +3,7 @@
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 import { THEMES, FONT_STACKS, type Theme, type WallpaperId } from "./themes";
+import { allThemes } from "./customthemes";
 import { PROFILES, getProfile } from "./profiles";
 
 export interface Settings {
@@ -445,7 +446,9 @@ export function resolveTokens(s: Settings): Record<string, string> {
   const profileTheme = PROFILES.find((p) => p.id === s.profileId)?.theme;
   const theme: Theme =
     (profileTheme && profileTheme.id === s.themeId ? profileTheme : undefined) ??
-    THEMES.find((t) => t.id === s.themeId) ??
+    // allThemes(), not THEMES: a theme a system update generated has to resolve
+    // here or selecting it would silently fall through to the first built-in.
+    allThemes().find((t) => t.id === s.themeId) ??
     profileTheme ??
     THEMES[0];
   const font = FONT_STACKS.find((f) => f.id === s.fontId) ?? FONT_STACKS[0];
