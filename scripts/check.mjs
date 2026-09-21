@@ -309,6 +309,40 @@ const lineAt = (src, index) => src.slice(0, index).split("\n").length;
   notes.push(`${scanned} stylesheet${scanned === 1 ? "" : "s"} checked for prefix-collapse hazards`);
 }
 
+/* ── Icon-only buttons need an accessible name ───────────────────────────────
+ *
+ * A button whose entire content is an <Icon> renders as an empty button to a
+ * screen reader. `title` is not a reliable substitute: it is announced
+ * inconsistently across screen readers and never on touch, so this asks for an
+ * explicit aria-label.
+ *
+ * Text inside a JSX expression counts as a label -- `{busy ? "Saving" : "Save"}`
+ * is a perfectly good button. An earlier version of this check stripped
+ * expressions before looking for text and reported twenty-five false positives
+ * as a result, which is why the expression handling below is deliberate rather
+ * than incidental. */
+{
+  let checked = 0;
+  for (const f of files.filter((f) => f.endsWith(".tsx"))) {
+    const src = read(f);
+    for (const m of src.matchAll(/<button\b([^>]*)>([\s\S]*?)<\/button>/g)) {
+      checked++;
+      const [, attrs, inner] = m;
+      if (/aria-label\s*=/.test(attrs)) continue;
+      const noTags = inner.replace(/<[^>]*\/>/g, "").replace(/<[^>]*>/g, "");
+      const bare = noTags.replace(/\{[\s\S]*?\}/g, "").trim();
+      const exprs = [...noTags.matchAll(/\{([\s\S]*?)\}/g)].map((x) => x[1]);
+      const exprText = exprs.some((e) => /["'`]\s*\S/.test(e) || /\b(label|name|title|text)\b/.test(e));
+      if (bare || exprText) continue;
+      problems.push(
+        `${rel(f)}:${lineAt(src, m.index)} — a button with no text needs aria-label; ` +
+        `an <Icon> alone reads as an empty button.`,
+      );
+    }
+  }
+  notes.push(`${checked} buttons checked for an accessible name`);
+}
+
 /* ── Report ──────────────────────────────────────────────────────────────── */
 for (const n of notes) console.error(`  · ${n}`);
 if (problems.length) {

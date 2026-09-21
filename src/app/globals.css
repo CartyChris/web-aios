@@ -67,12 +67,39 @@ html, body {
   overscroll-behavior: none;
 }
 
-/* One switch kills every animation in the OS — respected by the reduced-motion
-   media query as well as the user's own toggle. */
-@media (prefers-reduced-motion: reduce) { :root { --motion: 0; } }
+/* One switch kills every animation in the OS: the user's own toggle, which adds
+   .motion-off, OR the system preference.
+ *
+ * The system half used to set `--motion: 0` and stop there. Nothing reads that
+ * custom property in CSS, and nothing sets data-motion either, so the ONLY
+ * thing that actually suppressed animation was the in-app toggle -- someone who
+ * had turned on "Reduce motion" in macOS or Windows still got every transition
+ * unless they went and found the switch in Personalize. The preference has to
+ * drive the same declarations the class does. */
 .motion-off *, :root[data-motion="0"] * {
   transition-duration: 0ms !important;
   animation-duration: 0ms !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  :root { --motion: 0; }
+  *, *::before, *::after {
+    transition-duration: 0ms !important;
+    animation-duration: 0ms !important;
+    /* An infinite animation with a zero duration still spins forever in some
+       engines; pinning the count is what actually stops it. */
+    animation-iteration-count: 1 !important;
+  }
+  html { scroll-behavior: auto !important; }
+}
+
+/* Transparency and contrast are accessibility settings too, and the glass
+   surface is exactly what they are about. Neither was honoured before. */
+@media (prefers-reduced-transparency: reduce) {
+  .glass { backdrop-filter: none; background: var(--panel-solid); }
+}
+@media (prefers-contrast: more) {
+  :root { --border: currentColor; }
+  .glass { background: var(--panel-solid); }
 }
 
 .glass {

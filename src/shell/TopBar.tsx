@@ -188,7 +188,7 @@ function LayoutMenu({ open, onOpen, onClose }: { open: boolean; onOpen: () => vo
 
   return (
     <div className="relative">
-      <button onClick={onOpen} className="os-btn !py-1" title="Layouts and scenes">
+      <button onClick={onOpen} className="os-btn !py-1" title="Layouts and scenes" aria-label="Layouts and scenes">
         <Icon name="layout" size={12} />
       </button>
       {open && (
