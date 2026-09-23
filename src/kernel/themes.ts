@@ -124,6 +124,19 @@ export const THEMES: Theme[] = [
   t("parchment", "Parchment", false, "#f9f4e8", "#e4d9bd", "rgb(255 253 246 / 0.88)", "#fffdf6", "#2b2617", "#6a6148", "#92400e", "#166534"),
   t("slateday", "Slate Day", false, "#f4f6f8", "#dde3ea", "rgb(255 255 255 / 0.9)", "#ffffff", "#141a21", "#57626e", "#0f766e", "#b45309"),
   t("citrus", "Citrus", false, "#fffdf0", "#faedbb", "rgb(255 254 247 / 0.88)", "#fffef7", "#2c2707", "#6d6435", "#a16207", "#0d9488"),
+
+  /* ── Round three: themes cut to pair with the shader wallpapers ─────────
+     Each was tuned against one wallpaper in lib/wallpaper-shaders.ts (the
+     recipe's `theme` field names it), and each still clears every gate above
+     on its own, so it is a good theme on any wallpaper. */
+  t("borealis", "Borealis", true, "#040b14", "#0c2a36", "rgb(6 16 26 / 0.84)", "#0a1a26", "#e8fbf5", "#9cc7bd", "#4ade80", "#a78bfa"),
+  t("chrome", "Chrome", true, "#0b0d12", "#2b303b", "rgb(14 16 22 / 0.86)", "#161a22", "#f1f4f9", "#a9b2c3", "#a5c8ff", "#f0a6d8"),
+  t("nebula", "Nebula", true, "#07040f", "#1f0d38", "rgb(10 6 22 / 0.86)", "#140a26", "#f7efff", "#bfaedb", "#e879f9", "#38bdf8"),
+  t("biolume", "Bioluminescence", true, "#010a10", "#04293a", "rgb(2 12 20 / 0.86)", "#051a26", "#e3fbff", "#8fc3cf", "#2ef2d0", "#7c8cff"),
+  t("dusk", "Dusk", true, "#0e0618", "#2d0d3f", "rgb(16 7 28 / 0.85)", "#1c0b2c", "#fff0f5", "#d9b0cf", "#ff8a5b", "#c084fc"),
+  t("silk", "Silk", false, "#f7f4fb", "#e4dcf3", "rgb(255 253 255 / 0.86)", "#fefcff", "#1d1830", "#5e5875", "#5a4fcf", "#d23f80"),
+  t("survey", "Survey", false, "#f4f1e8", "#dde5d6", "rgb(253 252 247 / 0.88)", "#fdfcf7", "#1c231e", "#56625a", "#b4531a", "#2f6f8f"),
+  t("sumi", "Sumi", false, "#f3efe6", "#e0d9c9", "rgb(252 250 245 / 0.9)", "#fcfaf5", "#1a1814", "#5e574a", "#1e293b", "#b91c1c"),
 ];
 
 /* Wallpapers are drawn procedurally on one canvas — see shell/Wallpaper.tsx.
@@ -140,7 +153,25 @@ export const WALLPAPERS = [
   { id: "flat", name: "Flat Gradient" },
   { id: "solid", name: "Solid" },
   { id: "image", name: "Custom Image" },
+  /* WebGL shader wallpapers — composed from shared GLSL nodes in
+     lib/wallpaper-shaders.ts and drawn by shell/ShaderWallpaper.tsx. `theme`
+     is the palette each was designed against; Personalize offers it as a
+     one-click pairing. Colours still come from the live theme tokens. */
+  { id: "borealis", name: "Aurora Ridge", theme: "borealis" },
+  { id: "chrome", name: "Liquid Chrome", theme: "chrome" },
+  { id: "nebula", name: "Nebula", theme: "nebula" },
+  { id: "biolume", name: "Bioluminescence", theme: "biolume" },
+  { id: "silk", name: "Soft Silk", theme: "silk" },
+  { id: "contours", name: "Contour Lines", theme: "survey" },
+  { id: "horizon", name: "Synth Horizon", theme: "dusk" },
+  { id: "ink", name: "Ink in Water", theme: "sumi" },
 ] as const;
+
+/** The theme a wallpaper was designed against, if it names one. */
+export function pairedTheme(wallpaper: string): string | undefined {
+  const w = WALLPAPERS.find((x) => x.id === wallpaper);
+  return w && "theme" in w ? w.theme : undefined;
+}
 
 export type WallpaperId = (typeof WALLPAPERS)[number]["id"];
 

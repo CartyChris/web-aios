@@ -1,7 +1,8 @@
 "use client";
 
 import { useSettings } from "@/kernel/settings";
-import { PROVIDERS, getProvider } from "@/lib/providers";
+import { useModelCatalog, modelsFor } from "@/kernel/modelcatalog";
+import { PROVIDERS } from "@/lib/providers";
 
 /** A per-task model choice. Empty means "the model in the top bar", which is
  *  the default everywhere — this only exists for the one generation where you
@@ -11,7 +12,9 @@ export interface ModelChoice { provider?: string; model?: string }
 export function ModelOverride({ value, onChange, id }: { value: ModelChoice; onChange: (v: ModelChoice) => void; id: string }) {
   const ai = useSettings((s) => s.ai);
   const provider = value.provider ?? "";
-  const models = getProvider(provider || ai.provider)?.models ?? [];
+  // The refreshed list when there is one (Settings or the picker), else the catalogue.
+  const lists = useModelCatalog((s) => s.lists);
+  const models = modelsFor(provider || ai.provider, lists).map((m) => m.id);
   return (
     <span className="inline-flex flex-wrap items-center gap-1 text-[11px]">
       <select

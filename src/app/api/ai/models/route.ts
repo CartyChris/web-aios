@@ -1,5 +1,7 @@
 import { NextRequest } from "next/server";
+import { checkBaseUrl } from "@/lib/server-guard";
 import { getProvider, PROVIDERS } from "@/lib/providers";
+import { parseAnthropicModels, parseGoogleModels } from "@/lib/model-lists";
 
 export const runtime = "nodejs";
 
@@ -19,11 +21,53 @@ export async function GET(req: NextRequest) {
   const apiKey = req.headers.get("x-api-key") || (provider.envKey ? process.env[provider.envKey] : "") || "";
   const baseUrl = req.nextUrl.searchParams.get("baseUrl") || provider.baseUrl;
 
+  // Every fallback says why, so the UI can tell the user plainly instead of
+  // silently showing the built-in list as if it were live.
+  const catalog = (reason: string) => Response.json({ models: provider.models.map(asEntry), source: "catalog", reason });
+
+  // Local providers are listed from the browser: this server (possibly on
+  // Vercel) has no route to the user's localhost, and must not try.
+  if (provider.local) return catalog(`${provider.name} is listed from this browser, not the server`);
+  if (!baseUrl) return catalog("no base URL set");
+  const blocked = await checkBaseUrl(req.nextUrl.searchParams.get("baseUrl"), provider.baseUrl);
+  if (blocked) return catalog(blocked);
+
   // OpenRouter's catalogue is public, so the picker works before you have a
   // key. Everything else needs one to list anything.
   const keyless = provider.id === "openrouter";
-  if (provider.local || provider.dialect !== "openai" || (!apiKey && !keyless) || !baseUrl) {
-    return Response.json({ models: provider.models.map(asEntry), source: "catalog" });
+  if (!apiKey && !keyless) return catalog(`no API key for ${provider.name}`);
+
+  const root = baseUrl.replace(/\/+$/, "");
+
+  // Anthropic: GET /v1/models with its own auth headers. Pages of up to 1000,
+  // which is every Claude model there is.
+  if (provider.dialect === "anthropic") {
+    try {
+      const res = await fetch(`${root}/models?limit=1000`, {
+        headers: { "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
+        signal: AbortSignal.timeout(12000),
+      });
+      if (!res.ok) return catalog(`${provider.name} answered ${res.status}`);
+      const models = parseAnthropicModels(await res.json());
+      return models.length ? Response.json({ models, source: "live" }) : catalog(`${provider.name} listed no models`);
+    } catch {
+      return catalog(`could not reach ${provider.name}`);
+    }
+  }
+
+  // Google: GET /v1beta/models?key=…, "models/" prefixed names, and only the
+  // ones that can generateContent are chat models.
+  if (provider.dialect === "google") {
+    try {
+      const res = await fetch(`${root}/models?pageSize=1000&key=${encodeURIComponent(apiKey)}`, {
+        signal: AbortSignal.timeout(12000),
+      });
+      if (!res.ok) return catalog(`${provider.name} answered ${res.status}`);
+      const models = parseGoogleModels(await res.json());
+      return models.length ? Response.json({ models, source: "live" }) : catalog(`${provider.name} listed no chat models`);
+    } catch {
+      return catalog(`could not reach ${provider.name}`);
+    }
   }
 
   try {
@@ -31,18 +75,16 @@ export async function GET(req: NextRequest) {
       headers: apiKey ? { authorization: `Bearer ${apiKey}` } : {},
       signal: AbortSignal.timeout(12000),
     });
-    if (!res.ok) return Response.json({ models: provider.models.map(asEntry), source: "catalog" });
+    if (!res.ok) return catalog(`${provider.name} answered ${res.status}`);
     const data = (await res.json()) as { data?: RawModel[] };
     const models = (data.data ?? []).map(normalise).filter((m) => m.id);
     // Newest first where the provider says, then alphabetical. A picker sorted
     // purely by id buries this week's model in the middle of the list.
     models.sort((a, b) => (b.created ?? 0) - (a.created ?? 0) || a.id.localeCompare(b.id));
-    return Response.json({
-      models: models.length ? models : provider.models.map(asEntry),
-      source: models.length ? "live" : "catalog",
-    });
+    if (!models.length) return catalog(`${provider.name} listed no models`);
+    return Response.json({ models, source: "live" });
   } catch {
-    return Response.json({ models: provider.models.map(asEntry), source: "catalog" });
+    return catalog(`could not reach ${provider.name}`);
   }
 }
 

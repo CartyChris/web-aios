@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { checkBaseUrl } from "@/lib/server-guard";
 import { getProvider } from "@/lib/providers";
 import { streamChat, type ChatMessage } from "@/lib/ai-transport";
 
@@ -24,6 +25,7 @@ export async function POST(req: NextRequest) {
     apiKey?: string;
     baseUrl?: string;
     web?: boolean;
+    reasoningEffort?: string;
   };
   try {
     body = await req.json();
@@ -47,6 +49,8 @@ export async function POST(req: NextRequest) {
 
   const baseUrl = body.baseUrl?.trim() || provider.baseUrl;
   if (!baseUrl) return json({ error: "No base URL configured for this provider." }, 400);
+  const blocked = await checkBaseUrl(body.baseUrl, provider.baseUrl);
+  if (blocked) return json({ error: blocked }, 403);
 
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
@@ -62,9 +66,14 @@ export async function POST(req: NextRequest) {
           temperature: body.temperature,
           maxTokens: body.maxTokens,
           web: body.web,
+          reasoningEffort: body.reasoningEffort === "low" || body.reasoningEffort === "medium" || body.reasoningEffort === "high" ? body.reasoningEffort : undefined,
           signal: req.signal,
         })) {
           if (chunk.delta) send({ delta: chunk.delta });
+          // Thinking and the stop reason travel too: a client that never sees
+          // them cannot tell "said nothing" from "ran out of room thinking".
+          if (chunk.reasoning) send({ reasoning: chunk.reasoning });
+          if (chunk.finish) send({ finish: chunk.finish });
           if (chunk.usage) send({ usage: chunk.usage });
           if (chunk.done) break;
         }

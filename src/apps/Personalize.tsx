@@ -3,7 +3,7 @@
 import { WallpaperThemeButton } from "@/shell/WallpaperThemeButton";
 import { useCallback, useMemo, useRef, useState } from "react";
 import { useSettings, resolveTokens } from "@/kernel/settings";
-import { WALLPAPERS, FONT_STACKS } from "@/kernel/themes";
+import { WALLPAPERS, FONT_STACKS, pairedTheme } from "@/kernel/themes";
 import { useCustomThemes, allThemes } from "@/kernel/customthemes";
 import { SPECIES, PET_FAMILIES, PERSONALITIES, PET_MODES, VOICES, getSpecies, useCustomPets } from "@/kernel/pets";
 import { petPrompt, parsePetSpec } from "@/lib/petgen";
@@ -242,6 +242,32 @@ export default function Personalize({}: AppProps) {
                 </button>
               ))}
             </div>
+
+            {(() => {
+              // Shader wallpapers name the palette they were designed against.
+              // Offered, never forced: every theme still works on every wallpaper.
+              const pairId = pairedTheme(s.wallpaper);
+              const pair = pairId ? allThemes(generatedThemes).find((t) => t.id === pairId) : undefined;
+              if (!pair) return null;
+              const active = s.themeId === pair.id;
+              return (
+                <div className="os-card mb-4 flex flex-wrap items-center gap-2 !p-2.5">
+                  <div className="flex h-5 w-16 overflow-hidden rounded" aria-hidden>
+                    {(["--bg", "--bg2", "--accent", "--accent2"] as const).map((v) => <div key={v} className="flex-1" style={{ background: pair.vars[v] }} />)}
+                  </div>
+                  <span className="text-[11px] text-[var(--muted)]">Designed for the {pair.name} theme.</span>
+                  <button
+                    className="os-btn ml-auto !py-1 text-[11px]"
+                    data-variant={active ? undefined : "primary"}
+                    disabled={active}
+                    aria-label={active ? `${pair.name} theme is active` : `Use the ${pair.name} theme`}
+                    onClick={() => s.applyTheme(pair.id)}
+                  >
+                    {active ? "Theme applied" : `Use ${pair.name}`}
+                  </button>
+                </div>
+              );
+            })()}
 
             {s.wallpaper === "image" && (
               <div className="mb-4">

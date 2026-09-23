@@ -2,6 +2,8 @@
 
 import { useEffect, useRef } from "react";
 import { useSettings } from "@/kernel/settings";
+import { isShaderWallpaper } from "@/lib/wallpaper-shaders";
+import { ShaderWallpaper } from "./ShaderWallpaper";
 
 /** Procedural wallpapers drawn on one canvas.
  *
@@ -244,6 +246,13 @@ export function Wallpaper() {
           className="absolute inset-0 bg-cover bg-center"
           style={{ backgroundImage: `url(${image})`, filter: blur ? `blur(${blur}px)` : undefined, transform: blur ? "scale(1.06)" : undefined }}
         />
+      ) : isShaderWallpaper(kind) ? (
+        // Keyed by kind: a fresh canvas per shader, so no GL state from the
+        // previous recipe can leak into the next one. The gradient underneath
+        // is what shows if WebGL2 is unavailable or a shader fails to compile.
+        <div className="absolute inset-0" style={{ background: "linear-gradient(135deg, var(--bg), var(--bg2))" }}>
+          <ShaderWallpaper key={kind} kind={kind} animate={animate && motion} blur={blur} />
+        </div>
       ) : (
         <canvas ref={canvasRef} className="absolute inset-0 h-full w-full" style={{ filter: blur ? `blur(${blur}px)` : undefined }} />
       )}

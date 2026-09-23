@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useWM } from "@/kernel/wm";
+import { handoffUrl } from "@/kernel/scenes";
 import { useSettings } from "@/kernel/settings";
 import { APPS, getApp } from "@/kernel/registry";
 import type { AppManifest } from "@/kernel/types";
@@ -133,10 +134,11 @@ export function MobileShell() {
       {view === "app" && activeWin && activeApp && (
         <div
           className="absolute inset-0 flex flex-col"
-          // max(), not a bare inset: in a browser tab the safe-area inset is 0
-          // and the app header would sit under the status bar. On a real iPhone
-          // the inset is larger and wins.
-          style={{ paddingTop: "max(env(safe-area-inset-top, 0px), 26px)", background: "var(--bg)" }}
+          // The same sum as the status bar's height, not max(): the status bar
+          // is inset + 26px tall, so on an iPhone home-screen app (inset ~59px)
+          // max(inset, 26px) started the header 26px too high and the clock
+          // drew straight over "Home". In a browser tab both are 26px.
+          style={{ paddingTop: "calc(env(safe-area-inset-top, 0px) + 26px)", background: "var(--bg)" }}
         >
           <div
             className="flex shrink-0 items-center gap-2 border-b border-[var(--border)] px-3"
@@ -151,7 +153,10 @@ export function MobileShell() {
           <div className="app-surface min-h-0 flex-1 overflow-hidden">
             <activeApp.component win={activeWin} args={activeWin.args} />
           </div>
-          <div style={{ height: "env(safe-area-inset-bottom, 0px)" }} />
+          {/* Room for the home indicator below, which sits 5px above the
+              inset and is 4px tall: without this it drew over the app's last
+              row (Forge 3D's rotation fields). */}
+          <div style={{ height: "calc(env(safe-area-inset-bottom, 0px) + 14px)" }} />
         </div>
       )}
 
@@ -258,7 +263,7 @@ export function MobileShell() {
           className="absolute inset-0 flex flex-col"
           style={{ background: "color-mix(in srgb, var(--bg) 88%, transparent)", paddingTop: "calc(env(safe-area-inset-top, 0px) + 36px)" }}
         >
-          <div className="flex items-center gap-2 px-4 pb-3">
+          <div className="flex flex-wrap items-center gap-2 px-4 pb-3">
             <span className="os-label">Open apps ({wm.windows.length})</span>
             <div className="flex-1" />
             {wm.windows.length > 0 && (
@@ -267,6 +272,11 @@ export function MobileShell() {
             <button className="os-btn !py-1 text-[11px]" onClick={goDesktop} aria-label="Switch to full desktop">
               <Icon name="monitor" size={12} className="mr-1" />Full desktop
             </button>
+            {wm.windows.length > 0 && (
+              <button className="os-btn !py-1 text-[11px]" onClick={() => void shareHandoff()} aria-label="Hand off these apps to another device">
+                <Icon name="link" size={12} className="mr-1" />Hand off
+              </button>
+            )}
             <button className="os-btn !py-1 text-[11px]" onClick={() => setView("home")}>Done</button>
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-6">
@@ -350,6 +360,20 @@ export function MobileShell() {
       )}
     </div>
   );
+}
+
+/** Phone side of "hand off this desktop": the share sheet where there is one,
+ *  the clipboard where there is not. */
+async function shareHandoff() {
+  const h = handoffUrl();
+  const nav = navigator as Navigator & { share?: (d: { title?: string; url?: string }) => Promise<void> };
+  try {
+    if (nav.share) await nav.share({ title: "My Web-AIOS apps", url: h.url });
+    else {
+      await navigator.clipboard.writeText(h.url);
+      bus.emit("notify", { title: "Handoff link copied", body: `${h.windows} app${h.windows === 1 ? "" : "s"}. Open it in any browser.`, kind: "success" });
+    }
+  } catch { /* Share sheet dismissed. */ }
 }
 
 function MobileStatusBar() {

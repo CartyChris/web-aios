@@ -115,6 +115,17 @@ export const APPS: AppManifest[] = [
     permissions: ["ai", "storage"],
     accent: "#22d3ee",
   },
+  {
+    id: "systemone",
+    name: "System One",
+    icon: "gate",
+    category: "ai",
+    description: "A harness whose decider answers typed questions with probabilities and refuses to act when unsure, plus a router that picks harnesses for a task and merges their work.",
+    component: lazy(() => import("@/apps/SystemOne")),
+    defaultSize: { w: 1080, h: 720 },
+    permissions: ["ai", "network", "storage"],
+    accent: "#a3e635",
+  },
 
   // ── Build ───────────────────────────────────────────────────────────────
   {

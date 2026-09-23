@@ -255,3 +255,17 @@ export function labelFor(selection: string, max = 24): string {
   const sp = cut.lastIndexOf(" ");
   return `${sp > max * 0.6 ? cut.slice(0, sp) : cut}…`;
 }
+
+/* ── window text for "Ask about this window" ─────────────────────────────── */
+
+/** A window's visible text, sized for a prompt. Whitespace runs collapse, and
+ *  a long window keeps its head and its tail: the top says what the app is,
+ *  and the bottom is usually where the newest output or the error is. */
+export function digestWindowText(raw: string, max = 8000): string {
+  const text = raw.replace(/[ \t\f\v]+/g, " ").replace(/\s*\n\s*(\n\s*)+/g, "\n\n").trim();
+  if (text.length <= max) return text;
+  const head = Math.floor(max * 0.4);
+  const tail = max - head;
+  const cut = text.length - head - tail;
+  return `${text.slice(0, head)}\n\n[... ${cut.toLocaleString("en-US")} characters omitted ...]\n\n${text.slice(-tail)}`;
+}

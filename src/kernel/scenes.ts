@@ -10,6 +10,8 @@ import { useWM, workArea } from "./wm";
 import { getApp } from "./registry";
 import { bus } from "./bus";
 import { captureScene, planRestore, parseScene, type Scene } from "@/lib/scenes";
+import { encodeHandoff, decodeHandoff } from "@/lib/handoff";
+import { useJobs } from "./jobs";
 
 interface SceneState {
   scenes: Scene[];
@@ -100,3 +102,60 @@ export const useScenes = create<SceneState>()(
     { name: "webaios.scenes.v1", storage: createJSONStorage(() => localStorage) },
   ),
 );
+
+/* ── Handoff: this desktop, on another device ────────────────────────────── */
+
+/** Everything open right now, as a scene, without saving it. */
+export function currentScene(name: string): Scene {
+  const wm = useWM.getState();
+  return captureScene(
+    name,
+    wm.windows.map((w) => ({
+      appId: w.appId, title: w.title, x: w.x, y: w.y, w: w.w, h: w.h,
+      state: w.state, workspace: w.workspace, pinned: w.pinned, args: w.args,
+    })),
+    wm.activeWorkspace,
+    workArea(),
+    Date.now(),
+  );
+}
+
+/** A link that reopens what is open now on whatever device follows it. */
+export function handoffUrl(): { url: string; windows: number; dropped: number } {
+  const scene = currentScene(`Handed off ${new Date().toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`);
+  const { code, dropped } = encodeHandoff(scene);
+  return { url: `${location.origin}${location.pathname}#handoff=${code}`, windows: scene.windows.length - dropped, dropped };
+}
+
+/** If this page was opened from a handoff link, offer to open what it
+ *  carries. Asks first: anyone can craft a link, and a page that opens forty
+ *  windows because a URL said so is not one to trust. The fragment is cleared
+ *  either way so a reload does not ask again. */
+export function receiveHandoff(): void {
+  if (typeof location === "undefined" || !/[#&]handoff=/.test(location.hash)) return;
+  const r = decodeHandoff(location.hash, Date.now());
+  history.replaceState(null, "", location.pathname + location.search);
+  if (!r.ok) {
+    bus.emit("notify", { title: "That handoff link could not be opened", body: r.reason, kind: "warn" });
+    return;
+  }
+  const scene = r.scene;
+  const apps = [...new Set(scene.windows.map((w) => getApp(w.appId)?.name).filter(Boolean))];
+  const jobs = useJobs.getState();
+  const id = jobs.start({
+    kind: "task", status: "blocked",
+    title: `Open a handed-off desktop? ${scene.windows.length} window${scene.windows.length === 1 ? "" : "s"}`,
+    detail: apps.slice(0, 6).join(", ") + (apps.length > 6 ? ` and ${apps.length - 6} more` : ""),
+    actions: [
+      {
+        id: "open", label: "Open them", run: () => {
+          useScenes.setState((s) => ({ scenes: [scene, ...s.scenes.filter((x) => x.id !== scene.id)].slice(0, 40) }));
+          useScenes.getState().restore(scene.id);
+          useJobs.getState().finish(id, "done", "Opened; also saved under Scenes.");
+        },
+      },
+      { id: "dismiss", label: "Not now", run: () => useJobs.getState().remove(id) },
+    ],
+  });
+  bus.emit("notify", { title: "A desktop was handed to this device", body: "Open it from the live notification, or dismiss it.", kind: "info", jobId: id });
+}

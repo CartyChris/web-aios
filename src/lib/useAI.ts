@@ -30,12 +30,24 @@ export interface AskOptions {
    *  opts out: it has a personality of its own, and blending "deadpan" with
    *  "thorough" produces something that is neither. */
   persona?: boolean;
+  /** Streams a reasoning model's thinking, which is not part of `text`. */
+  onReasoning?: (delta: string, full: string) => void;
+  reasoningEffort?: "low" | "medium" | "high";
+  /** Default true: an empty answer is retried once with more room and less
+   *  thinking. Set false where an empty reply is itself the signal. */
+  rescueEmpty?: boolean;
 }
 
 export interface AskResult {
   text: string;
   costUsd: number;
   ms: number;
+  /** The model's thinking, when it streamed any. */
+  reasoning?: string;
+  /** "length" means the token cap cut the reply off. */
+  finish?: "stop" | "length";
+  /** True when the first attempt came back empty and this is the retry. */
+  rescued?: boolean;
 }
 
 /* ────────────────────────────────────────────────────────────────────────────
@@ -77,7 +89,38 @@ const nextSpanId = () => `sp_${(spanSeq++).toString(36)}_${Math.floor(performanc
  *  function has no path to the user's localhost. Everything else goes through
  *  /api/ai/chat, which lets the deployment supply a key so a visitor without
  *  one still gets a working desktop. */
+/** Providers cap output differently (DeepSeek's chat model stops at 8192),
+ *  and a request above the cap is rejected outright rather than clamped. One
+ *  step down to a size every current provider accepts, then give up. */
+const TOKEN_LIMIT_ERROR = /max[_ ]?(?:completion[_ ]?)?tokens|maximum.{0,40}tokens|tokens.{0,40}(?:exceed|too large|must be|less than)/i;
+async function askSized(opts: AskOptions): Promise<AskResult> {
+  try {
+    return await askOnce(opts);
+  } catch (e) {
+    const wanted = opts.maxTokens ?? 0;
+    if (wanted > 8192 && TOKEN_LIMIT_ERROR.test((e as Error)?.message ?? "")) return askOnce({ ...opts, maxTokens: 8192 });
+    throw e;
+  }
+}
+
 export async function ask(opts: AskOptions): Promise<AskResult> {
+  const first = await askSized(opts);
+  if (first.text.trim() || opts.rescueEmpty === false || opts.signal?.aborted) return first;
+  // Empty answer. With a reasoning model this is almost always the whole
+  // max_tokens budget spent thinking, so the fix is room plus an instruction to
+  // stop deliberating, not the same request again.
+  const s = useSettings.getState();
+  const base = opts.maxTokens ?? s.ai.maxTokens;
+  const second = await askSized({
+    ...opts,
+    maxTokens: Math.min(32000, Math.max(base * 2, 8000)),
+    reasoningEffort: "low",
+    system: `${opts.system ?? s.ai.systemPrompt ?? ""}\n\nYour previous attempt produced no answer text${first.finish === "length" ? " because it ran out of tokens while thinking" : ""}. Think briefly, then write the final answer itself in full.`.trim(),
+  });
+  return { ...second, costUsd: first.costUsd + second.costUsd, ms: first.ms + second.ms, rescued: true };
+}
+
+async function askOnce(opts: AskOptions): Promise<AskResult> {
   const s = useSettings.getState();
   const providerId = opts.provider ?? s.ai.provider;
   const provider = getProvider(providerId);
@@ -97,6 +140,8 @@ export async function ask(opts: AskOptions): Promise<AskResult> {
 
   const started = performance.now();
   let text = "";
+  let reasoning = "";
+  let finish: AskResult["finish"];
   let usage = { inputTokens: 0, outputTokens: 0 };
 
   const spanId = nextSpanId();
@@ -124,9 +169,12 @@ export async function ask(opts: AskOptions): Promise<AskResult> {
       temperature: opts.temperature ?? s.ai.temperature,
       maxTokens: opts.maxTokens ?? s.ai.maxTokens,
       web: opts.web ?? s.ai.webAccess,
+      reasoningEffort: opts.reasoningEffort,
       signal: opts.signal,
     })) {
       if (chunk.delta) { text += chunk.delta; opts.onDelta?.(chunk.delta, text); }
+      if (chunk.reasoning) { reasoning += chunk.reasoning; opts.onReasoning?.(chunk.reasoning, reasoning); }
+      if (chunk.finish) finish = chunk.finish;
       if (chunk.usage) usage = chunk.usage;
       if (chunk.done) break;
     }
@@ -141,6 +189,7 @@ export async function ask(opts: AskOptions): Promise<AskResult> {
         apiKey: apiKey || undefined,
         baseUrl: s.ai.baseUrls[providerId] || undefined,
         web: opts.web ?? s.ai.webAccess,
+        reasoningEffort: opts.reasoningEffort,
       }),
       signal: opts.signal,
     });
@@ -167,9 +216,11 @@ export async function ask(opts: AskOptions): Promise<AskResult> {
       for (const frame of frames) {
         const line = frame.split("\n").find((l) => l.startsWith("data:"));
         if (!line) continue;
-        const evt = JSON.parse(line.slice(5).trim()) as { delta?: string; usage?: typeof usage; error?: string; done?: boolean };
+        const evt = JSON.parse(line.slice(5).trim()) as { delta?: string; reasoning?: string; finish?: AskResult["finish"]; usage?: typeof usage; error?: string; done?: boolean };
         if (evt.error) throw new Error(evt.error);
         if (evt.delta) { text += evt.delta; opts.onDelta?.(evt.delta, text); }
+        if (evt.reasoning) { reasoning += evt.reasoning; opts.onReasoning?.(evt.reasoning, reasoning); }
+        if (evt.finish) finish = evt.finish;
         if (evt.usage) usage = evt.usage;
         if (evt.done) break outer;
       }
@@ -179,7 +230,9 @@ export async function ask(opts: AskOptions): Promise<AskResult> {
   // Providers that omit usage still need a budget estimate, so fall back to a
   // character-count approximation rather than silently charging nothing.
   const inTok = usage.inputTokens || estimateTokens(messages.map(messageText).join(" "));
-  const outTok = usage.outputTokens || estimateTokens(text);
+  // Thinking is billed as output, so an estimate that ignores it undercounts
+  // exactly the calls that cost the most.
+  const outTok = usage.outputTokens || estimateTokens(text + reasoning);
   const costUsd = estimateCost(model, inTok, outTok);
   useSettings.getState().setAI("spentUsd", +(s.ai.spentUsd + costUsd).toFixed(6));
   const ms = Math.round(performance.now() - started);
@@ -189,7 +242,7 @@ export async function ask(opts: AskOptions): Promise<AskResult> {
   // stores down with it.
   emitSpan({ endedAt: Date.now(), tokensIn: inTok, tokensOut: outTok, costUsd, text: text.slice(0, 4000) });
 
-  return { text, costUsd, ms };
+  return { text, costUsd, ms, ...(reasoning ? { reasoning } : {}), ...(finish ? { finish } : {}) };
 }
 
 /** Layer the user's chosen voice and their "about you" note over a task

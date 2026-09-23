@@ -2,9 +2,11 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSettings } from "@/kernel/settings";
+import { useModelCatalog, modelsFor } from "@/kernel/modelcatalog";
 import { PROVIDERS, getProvider } from "@/lib/providers";
 import { cn } from "@/lib/cn";
 import { Icon } from "./icons";
+import { ModelRefreshButton, ModelRefreshStatus } from "./ModelRefresh";
 
 /* ────────────────────────────────────────────────────────────────────────────
    The model picker.
@@ -31,7 +33,13 @@ export interface ModelEntry {
   inUsd?: number;
   outUsd?: number;
   free?: boolean;
+  /** In the built-in list but not in the provider's live listing. */
+  unlisted?: boolean;
 }
+
+/** A list this recent is not re-fetched just because the picker opened. The
+ *  refresh button always asks again. */
+const AUTO_REFRESH_AFTER_MS = 10 * 60_000;
 
 const fmtContext = (n?: number) =>
   !n ? "" : n >= 1_000_000 ? `${(n / 1_000_000).toFixed(n % 1_000_000 ? 1 : 0)}M` : n >= 1000 ? `${Math.round(n / 1000)}K` : String(n);
@@ -85,43 +93,30 @@ function ModelResults({ providerId, query, setQuery, onClose }: {
   onClose: () => void;
 }) {
   const s = useSettings();
-  /** null means "still asking" — a separate boolean would have to be set
-   *  synchronously at mount, which is the cascading render React warns about. */
-  const [models, setModels] = useState<ModelEntry[] | null>(null);
-  const [source, setSource] = useState<"live" | "catalog">("catalog");
   const [active, setActive] = useState(0);
   const listRef = useRef<HTMLDivElement>(null);
   const provider = getProvider(providerId);
 
+  // The list lives in the model-catalogue store: the last refresh for this
+  // provider, persisted, or the built-in catalogue until there has been one.
+  // The store owns the fetch, so nothing here sets React state from an effect.
+  const lists = useModelCatalog((st) => st.lists);
+  const busy = useModelCatalog((st) => Boolean(st.busy[providerId]));
+  const models: ModelEntry[] = useMemo(() => modelsFor(providerId, lists), [providerId, lists]);
+
+  // Opening the picker still fetches the live list, as it always has (OpenRouter
+  // needs no key, so its whole catalogue appears before you sign up) — unless a
+  // refresh just happened. Local providers wait for the button: probing
+  // localhost on every open would log a connection error whenever nothing runs.
   useEffect(() => {
-    let alive = true;
-    const ctrl = new AbortController();
-    (async () => {
-      try {
-        const { keys, baseUrls } = useSettings.getState().ai;
-        const key = keys[providerId] ?? "";
-        const base = baseUrls[providerId];
-        const res = await fetch(
-          `/api/ai/models?provider=${encodeURIComponent(providerId)}${base ? `&baseUrl=${encodeURIComponent(base)}` : ""}`,
-          { headers: key ? { "x-api-key": key } : {}, signal: ctrl.signal },
-        );
-        const data = (await res.json()) as { models?: Array<ModelEntry | string>; source?: "live" | "catalog" };
-        if (!alive) return;
-        // The route used to return bare strings; tolerate both so a stale
-        // cached response cannot blank the list.
-        setModels((data.models ?? []).map((m) => (typeof m === "string" ? { id: m, name: m } : m)));
-        setSource(data.source ?? "catalog");
-      } catch {
-        if (!alive) return;
-        setModels((getProvider(providerId)?.models ?? []).map((m) => ({ id: m, name: m })));
-        setSource("catalog");
-      }
-    })();
-    return () => { alive = false; ctrl.abort(); };
+    if (getProvider(providerId)?.local) return;
+    const last = useModelCatalog.getState().lists[providerId];
+    if (last && last.source === "live" && Date.now() - last.at < AUTO_REFRESH_AFTER_MS) return;
+    void useModelCatalog.getState().refresh(providerId);
   }, [providerId]);
 
   const filtered = useMemo(() => {
-    const all = models ?? [];
+    const all = models;
     const q = query.trim().toLowerCase();
     if (!q) return all;
     const terms = q.split(/\s+/);
@@ -157,7 +152,8 @@ function ModelResults({ providerId, query, setQuery, onClose }: {
     if (e.key === "Enter" && filtered[active]) { e.preventDefault(); choose(filtered[active]); }
   };
 
-  const loading = models === null;
+  // Spinner while asking; the built-in list stays visible underneath.
+  const loading = busy;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col" onKeyDown={onKey}>
@@ -167,17 +163,17 @@ function ModelResults({ providerId, query, setQuery, onClose }: {
           autoFocus
           value={query}
           onChange={(e) => { setQuery(e.target.value); setActive(0); }}
-          placeholder={`Search ${models?.length || ""} models — name, "vision", "free"…`}
+          placeholder={`Search ${models.length || ""} models — name, "vision", "free"…`}
           className="min-w-0 flex-1 bg-transparent text-[14px] outline-none placeholder:text-[var(--muted)]"
         />
-        {loading && <span className="inline-block h-3.5 w-3.5 shrink-0 rounded-full border-2 border-[var(--accent)] border-t-transparent" style={{ animation: "os-spin 700ms linear infinite" }} />}
+        <ModelRefreshButton providerId={providerId} compact />
         <button onClick={onClose} className="shrink-0 opacity-50 hover:opacity-100" aria-label="Close"><Icon name="close" size={13} /></button>
       </div>
 
       <div ref={listRef} className="min-h-0 flex-1 overflow-y-auto p-1.5">
         {!loading && filtered.length === 0 && (
           <div className="px-3 py-10 text-center text-[12.5px] text-[var(--muted)]">
-            {(models?.length ?? 0) === 0
+            {models.length === 0
               ? `No model list for ${provider?.name}. Add a key in Settings → Providers and try again.`
               : `Nothing matches “${query}”.`}
           </div>
@@ -200,6 +196,7 @@ function ModelResults({ providerId, query, setQuery, onClose }: {
                 <div className="flex items-center gap-1.5">
                   <span className="truncate text-[13px]">{m.name}</span>
                   {current && <span className="os-chip !px-1.5 !py-0 !text-[9px]">current</span>}
+                  {m.unlisted && <span className="os-chip !px-1.5 !py-0 !text-[9px] opacity-70" title="In the built-in list, but the provider's live listing did not include it (retired, renamed, or not enabled for your key)">not listed</span>}
                 </div>
                 <div className="truncate font-[family-name:var(--font-mono)] text-[10px] text-[var(--muted)]">{m.id}</div>
               </div>
@@ -220,9 +217,9 @@ function ModelResults({ providerId, query, setQuery, onClose }: {
       </div>
 
       <div className="flex shrink-0 flex-wrap items-center gap-2 border-t border-[var(--border)] px-3 py-1.5 text-[10.5px] text-[var(--muted)]">
-        <span>{filtered.length} of {models?.length ?? 0}</span>
+        <span>{filtered.length} of {models.length}</span>
         <span className="opacity-50">·</span>
-        <span>{source === "live" ? "live from the provider" : "built-in list"}</span>
+        <ModelRefreshStatus providerId={providerId} className="min-w-0 truncate" />
         <div className="flex-1" />
         <label className="flex items-center gap-1.5" title="OpenRouter can hand any model a live web search tool">
           <input type="checkbox" checked={s.ai.webAccess} onChange={(e) => s.setAI("webAccess", e.target.checked)} />

@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import { useSettings } from "@/kernel/settings";
 import { luminanceGrid, type LuminanceGrid } from "@/lib/contrast";
+import { isShaderWallpaper } from "@/lib/wallpaper-shaders";
+import { readShaderWallpaperPixels } from "./ShaderWallpaper";
 
 /* ────────────────────────────────────────────────────────────────────────────
    What the wallpaper actually looks like, as numbers.
@@ -99,6 +101,9 @@ export async function readWallpaperPixels(kind: string, image: string | null): P
       img.src = image;
     });
   }
+  // A shader wallpaper is a WebGL canvas: a 2D context cannot read it, and its
+  // buffer is not preserved between frames. The renderer hands over a frame.
+  if (isShaderWallpaper(kind)) return readShaderWallpaperPixels();
   const canvas = document.querySelector<HTMLCanvasElement>("canvas");
   if (!canvas || canvas.width === 0 || canvas.height === 0) return null;
   try {

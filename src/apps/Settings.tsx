@@ -1,7 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { useSettings, DEFAULT_KEYBINDS } from "@/kernel/settings";
+import { useModelCatalog, modelsFor } from "@/kernel/modelcatalog";
+import { ModelRefreshButton, ModelRefreshStatus } from "@/shell/ModelRefresh";
 import { useVFS } from "@/kernel/vfs";
 import { useWM } from "@/kernel/wm";
 import { PROVIDERS, getProvider } from "@/lib/providers";
@@ -21,36 +23,17 @@ export default function Settings({}: AppProps) {
   const [tab, setTab] = useState("providers");
   const [error, setError] = useState<string | null>(null);
   const [reveal, setReveal] = useState<string | null>(null);
-  // null means "nothing fetched yet", so the catalogue shows through.
-  const [liveModels, setLiveModels] = useState<string[] | null>(null);
-  const [loadingModels, setLoadingModels] = useState(false);
   const [capturing, setCapturing] = useState<string | null>(null);
 
   const provider = getProvider(s.ai.provider);
 
-  const refreshModels = useCallback(async () => {
-    if (!provider) return;
-    setLoadingModels(true);
-    try {
-      const res = await fetch(`/api/ai/models?provider=${provider.id}${s.ai.baseUrls[provider.id] ? `&baseUrl=${encodeURIComponent(s.ai.baseUrls[provider.id])}` : ""}`, {
-        headers: s.ai.keys[provider.id] ? { "x-api-key": s.ai.keys[provider.id] } : {},
-      });
-      const data = await res.json();
-      setLiveModels(data.models ?? null);
-    } catch {
-      setLiveModels(null);
-    } finally {
-      setLoadingModels(false);
-    }
-  }, [provider, s.ai.keys, s.ai.baseUrls]);
-
-  // Switching provider discards a stale live list rather than syncing it.
-  const [modelsFor, setModelsFor] = useState<string | undefined>(provider?.id);
-  if (provider?.id !== modelsFor) {
-    setModelsFor(provider?.id);
-    setLiveModels(null);
-  }
-  const models = liveModels ?? provider?.models ?? [];
+  // The refreshed list for the active provider, persisted per provider in the
+  // model-catalogue store (so a refresh here also updates the model picker),
+  // or the built-in catalogue until the first refresh. Keyed by provider, so
+  // switching provider can never show another provider's stale list.
+  const catalogLists = useModelCatalog((st) => st.lists);
+  const models = provider ? modelsFor(provider.id, catalogLists).map((m) => m.id) : [];
+  const loadingModels = useModelCatalog((st) => Boolean(provider && st.busy[provider.id]));
 
   // Keybinding capture: read the next chord the user presses.
   useEffect(() => {
@@ -155,6 +138,15 @@ export default function Settings({}: AppProps) {
                       placeholder={p.baseUrl || "Base URL (OpenAI-compatible)"}
                       className="os-input !py-1 font-[family-name:var(--font-mono)] text-[11px]"
                     />
+
+                    {/* The model list: refresh asks the provider (with the key
+                        and base URL above) and every picker uses the result. */}
+                    <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[10.5px] text-[var(--muted)]">
+                      <ModelRefreshButton providerId={p.id} />
+                      <span className="tabular-nums">{modelsFor(p.id, catalogLists).length} models</span>
+                      <span className="opacity-50">·</span>
+                      <ModelRefreshStatus providerId={p.id} className="min-w-0" />
+                    </div>
                   </div>
                 );
               })}
@@ -167,10 +159,9 @@ export default function Settings({}: AppProps) {
             <Field label="Model" hint="Any model id the provider accepts — the list is a convenience, not a limit.">
               <div className="flex gap-1.5">
                 <input value={s.ai.model} onChange={(e) => s.setAI("model", e.target.value)} list="settings-models" className="os-input flex-1" />
-                <button className="os-btn !py-1 text-[11px]" onClick={refreshModels} disabled={loadingModels}>
-                  {loadingModels ? "…" : "Refresh"}
-                </button>
+                {provider && <ModelRefreshButton providerId={provider.id} />}
               </div>
+              {provider && <ModelRefreshStatus providerId={provider.id} className="mt-1 block text-[10.5px] text-[var(--muted)]" />}
               <datalist id="settings-models">{models.map((m) => <option key={m} value={m} />)}</datalist>
             </Field>
             {loadingModels && <div className="mt-1"><Spinner label="Querying provider…" /></div>}

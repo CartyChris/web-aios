@@ -62,12 +62,21 @@ export interface ChatRequest {
   web?: boolean;
   /** Ask for an image back as well as text (OpenRouter image models). */
   wantImage?: boolean;
+  /** How hard a reasoning model should think. Sent as OpenRouter's
+   *  `reasoning.effort` or OpenAI's `reasoning_effort`; ignored elsewhere. */
+  reasoningEffort?: "low" | "medium" | "high";
 }
 
 export interface ChatChunk {
   delta: string;
   done: boolean;
   usage?: { inputTokens: number; outputTokens: number };
+  /** Thinking text from a reasoning model. Kept apart from `delta` because it
+   *  is not the answer; dropping it entirely is how a model that spent its
+   *  whole budget thinking came back looking like it had said nothing. */
+  reasoning?: string;
+  /** Normalised stop reason: "stop", or "length" when the token cap cut it off. */
+  finish?: "stop" | "length";
 }
 
 /** Build the provider-specific HTTP request. Exported so the server route and
@@ -125,6 +134,10 @@ export function buildRequest(req: ChatRequest): { url: string; init: RequestInit
   const extras: Record<string, unknown> = {};
   if (isOpenRouter && req.web) extras.plugins = [{ id: "web", max_results: 5 }];
   if (isOpenRouter && req.wantImage) extras.modalities = ["image", "text"];
+  if (req.reasoningEffort) {
+    if (isOpenRouter) extras.reasoning = { effort: req.reasoningEffort };
+    else if (/api\.openai\.com/i.test(base)) extras.reasoning_effort = req.reasoningEffort;
+  }
 
   return {
     url: `${base}/chat/completions`,
@@ -203,12 +216,16 @@ export function parseChunk(dialect: ChatRequest["dialect"], raw: string): ChatCh
   if (dialect === "anthropic") {
     const type = json.type as string;
     if (type === "content_block_delta") {
-      const d = json.delta as { text?: string } | undefined;
-      return { delta: d?.text ?? "", done: false };
+      const d = json.delta as { text?: string; thinking?: string } | undefined;
+      return { delta: d?.text ?? "", done: false, ...(d?.thinking ? { reasoning: d.thinking } : {}) };
     }
     if (type === "message_delta") {
       const u = json.usage as { output_tokens?: number } | undefined;
-      return { delta: "", done: false, usage: { inputTokens: 0, outputTokens: u?.output_tokens ?? 0 } };
+      const stop = (json.delta as { stop_reason?: string } | undefined)?.stop_reason;
+      return {
+        delta: "", done: false, usage: { inputTokens: 0, outputTokens: u?.output_tokens ?? 0 },
+        ...(stop ? { finish: stop === "max_tokens" ? "length" as const : "stop" as const } : {}),
+      };
     }
     if (type === "message_stop") return { delta: "", done: true };
     if (type === "error") {
@@ -219,24 +236,37 @@ export function parseChunk(dialect: ChatRequest["dialect"], raw: string): ChatCh
   }
 
   if (dialect === "google") {
-    const cands = json.candidates as Array<{ content?: { parts?: Array<{ text?: string }> } }> | undefined;
-    const text = cands?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
+    const cands = json.candidates as Array<{ content?: { parts?: Array<{ text?: string; thought?: boolean }> }; finishReason?: string }> | undefined;
+    const parts = cands?.[0]?.content?.parts ?? [];
+    const text = parts.filter((p) => !p.thought).map((p) => p.text ?? "").join("");
+    const thought = parts.filter((p) => p.thought).map((p) => p.text ?? "").join("");
+    const fr = cands?.[0]?.finishReason;
     const um = json.usageMetadata as { promptTokenCount?: number; candidatesTokenCount?: number } | undefined;
     return {
       delta: text,
       done: false,
+      ...(thought ? { reasoning: thought } : {}),
+      ...(fr ? { finish: fr === "MAX_TOKENS" ? "length" as const : "stop" as const } : {}),
       ...(um ? { usage: { inputTokens: um.promptTokenCount ?? 0, outputTokens: um.candidatesTokenCount ?? 0 } } : {}),
     };
   }
 
   const err = json.error as { message?: string } | undefined;
   if (err) throw new Error(err.message ?? "Provider error");
-  const choices = json.choices as Array<{ delta?: { content?: string }; message?: { content?: string } }> | undefined;
-  const delta = choices?.[0]?.delta?.content ?? choices?.[0]?.message?.content ?? "";
+  type Msg = { content?: string | null; reasoning?: string | null; reasoning_content?: string | null };
+  const choices = json.choices as Array<{ delta?: Msg; message?: Msg; finish_reason?: string | null }> | undefined;
+  const c0 = choices?.[0];
+  const delta = c0?.delta?.content ?? c0?.message?.content ?? "";
+  // OpenRouter streams thinking as `reasoning`, DeepSeek and several
+  // OpenAI-compatible hosts as `reasoning_content`.
+  const reasoning = c0?.delta?.reasoning ?? c0?.delta?.reasoning_content ?? c0?.message?.reasoning ?? c0?.message?.reasoning_content ?? "";
+  const fr = c0?.finish_reason;
   const usage = json.usage as { prompt_tokens?: number; completion_tokens?: number } | undefined;
   return {
     delta,
     done: false,
+    ...(reasoning ? { reasoning } : {}),
+    ...(fr ? { finish: fr === "length" ? "length" as const : "stop" as const } : {}),
     ...(usage ? { usage: { inputTokens: usage.prompt_tokens ?? 0, outputTokens: usage.completion_tokens ?? 0 } } : {}),
   };
 }

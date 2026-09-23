@@ -7,7 +7,7 @@ import { getApp } from "@/kernel/registry";
 import { bus } from "@/kernel/bus";
 import { useScenes } from "@/kernel/scenes";
 import { useCtxMenu, collectSections } from "@/kernel/ctxmenu";
-import { mergeSections, labelFor, type Entry, type MenuSection } from "@/lib/ctxmenu";
+import { mergeSections, labelFor, digestWindowText, type Entry, type MenuSection } from "@/lib/ctxmenu";
 import { LAYOUTS } from "@/lib/zones";
 
 /* Right-click works everywhere, and it is this listener that guarantees it.
@@ -248,6 +248,14 @@ function windowSections(target: HTMLElement): MenuSection[] {
             run: () => useWM.getState().sendToWorkspace(id, n),
           })),
         },
+        {
+          id: "ask", label: "Ask AI about this window", icon: "agents",
+          submenu: [
+            { id: "ask:q", label: "Ask AIOS Chat about it", run: () => askAboutWindow(frame, win.title, "") },
+            { id: "ask:sum", label: "Summarize it", run: () => askAboutWindow(frame, win.title, "Summarize what this window shows in a few bullet points.") },
+            { id: "ask:fix", label: "Explain what is wrong", run: () => askAboutWindow(frame, win.title, "Is anything in this window an error, a failure or a problem? If so, explain the cause plainly and what to do about it. If not, say so.") },
+          ],
+        },
         { separator: true },
         ...(app && !app.singleton
           ? [{ id: "dup", label: `New ${app.name} window`, icon: "plus", run: () => useWM.getState().open(app.id, { title: app.name, icon: app.icon, size: app.defaultSize, forceNew: true }) }]
@@ -256,6 +264,17 @@ function windowSections(target: HTMLElement): MenuSection[] {
       ],
     },
   ];
+}
+
+/** Hand a window's visible text to AIOS Chat as context the model sees but
+ *  the transcript does not repeat. An empty prompt asks the general question. */
+function askAboutWindow(frame: HTMLElement | null, title: string, prompt: string) {
+  const surface = (frame?.querySelector(".app-surface") as HTMLElement | null) ?? frame;
+  const text = digestWindowText(surface?.innerText ?? "");
+  bus.emit("aios-chat:ask", {
+    prompt: prompt || `What is in the "${title}" window, and what should I know about it?`,
+    context: { label: `the "${title}" window`, text: text || "(the window shows no text)" },
+  });
 }
 
 /* ── the bare desktop ────────────────────────────────────────────────────── */

@@ -1,7 +1,6 @@
 import { NextRequest } from "next/server";
-import { lookup } from "node:dns/promises";
-import { isIP } from "node:net";
-import { isPrivateAddress } from "@/lib/ssrf";
+import { assertPublic } from "@/lib/public-url";
+import { frameVerdict } from "@/lib/webproxy";
 
 // Node runtime, not edge: the SSRF guard below needs real DNS resolution, and
 // the edge runtime has no resolver.
@@ -16,40 +15,11 @@ export const maxDuration = 30;
  *  against the resolved address — not just the hostname, which DNS can lie
  *  about — and redirects are followed manually so each hop is re-checked. */
 
-const BLOCKED_HOSTS = new Set(["localhost", "metadata.google.internal", "metadata.goog", "instance-data"]);
 const MAX_BYTES = 5 * 1024 * 1024;
 const MAX_REDIRECTS = 4;
 
-async function assertPublic(rawUrl: string): Promise<URL> {
-  let url: URL;
-  try {
-    url = new URL(rawUrl);
-  } catch {
-    throw new Error("Not a valid URL.");
-  }
-  if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error("Only http and https are allowed.");
-
-  const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, "");
-  if (BLOCKED_HOSTS.has(host) || host.endsWith(".local") || host.endsWith(".internal") || host.endsWith(".localhost")) {
-    throw new Error("That host is not reachable through the proxy.");
-  }
-
-  // Resolve first, then judge the address. Checking only the hostname is what
-  // makes most naive proxies trivially bypassable.
-  if (isIP(host)) {
-    if (isPrivateAddress(host)) throw new Error("That address range is not reachable through the proxy.");
-  } else {
-    let addrs: Array<{ address: string }>;
-    try {
-      addrs = await lookup(host, { all: true });
-    } catch {
-      throw new Error("Could not resolve that host.");
-    }
-    if (!addrs.length) throw new Error("Could not resolve that host.");
-    if (addrs.some((a) => isPrivateAddress(a.address))) throw new Error("That host resolves to a private address.");
-  }
-  return url;
-}
+// assertPublic (the SSRF gate) lives in src/lib/public-url.ts, shared with the
+// rewriting proxy at /api/web so the two routes cannot drift apart.
 
 export async function GET(req: NextRequest) {
   const target = req.nextUrl.searchParams.get("url");
@@ -77,6 +47,14 @@ export async function GET(req: NextRequest) {
         if (!loc) break;
         current = new URL(loc, url).toString();
         continue;
+      }
+
+      // mode=headers: can this page be framed? The Browser's "auto" mode asks
+      // this before choosing between a plain iframe and the rewriting proxy.
+      if (mode === "headers") {
+        await res.body?.cancel().catch(() => {});
+        const verdict = frameVerdict(res.headers.get("x-frame-options"), res.headers.get("content-security-policy"));
+        return Response.json({ url: url.toString(), finalUrl: current, status: res.status, contentType: res.headers.get("content-type") ?? "", ...verdict });
       }
 
       const type = res.headers.get("content-type") ?? "text/plain";

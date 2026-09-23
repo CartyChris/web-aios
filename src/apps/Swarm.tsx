@@ -5,7 +5,8 @@ import { useSettings } from "@/kernel/settings";
 import { useVFS } from "@/kernel/vfs";
 import { bus } from "@/kernel/bus";
 import { ask } from "@/lib/useAI";
-import { PROVIDERS, getProvider } from "@/lib/providers";
+import { PROVIDERS } from "@/lib/providers";
+import { useModelCatalog, modelsFor } from "@/kernel/modelcatalog";
 import type { AppProps } from "@/kernel/types";
 import { uid, download } from "@/lib/format";
 import { Markdown, CopyButton, ErrorNote, Tabs, Slider, Toggle } from "./_ui";
@@ -232,6 +233,8 @@ function materialise(f: Formation): Agent[] {
 
 export default function Swarm({}: AppProps) {
   const settings = useSettings();
+  // Refreshed model lists (Settings / the picker), else the built-in catalogue.
+  const modelLists = useModelCatalog((s) => s.lists);
   const vfs = useVFS();
   const [tab, setTab] = useState("run");
   const [question, setQuestion] = useState("");
@@ -760,7 +763,7 @@ export default function Swarm({}: AppProps) {
                   list={`models-${agent.id}`}
                 />
                 <datalist id={`models-${agent.id}`}>
-                  {(getProvider(agent.provider ?? settings.ai.provider)?.models ?? []).map((m) => <option key={m} value={m} />)}
+                  {modelsFor(agent.provider ?? settings.ai.provider, modelLists).map((m) => <option key={m.id} value={m.id} />)}
                 </datalist>
                 <input
                   className="os-input !w-24 !py-1 text-[11px]"

@@ -30,6 +30,7 @@ import { installAiosApi } from "@/lib/aios-api";
 import { installTriggers, startTriggerRuntime, instrumentVfs } from "@/lib/harness-triggers";
 import { installSpanRecorder } from "@/kernel/spans";
 import { installActivityRecorder } from "@/kernel/activity";
+import { receiveHandoff } from "@/kernel/scenes";
 
 export function Desktop() {
   const hydrated = useHydrated();
@@ -72,6 +73,13 @@ export function Desktop() {
     const stopTriggers = startTriggerRuntime();
     return () => { stopSpans(); stopActivity(); stopTriggers(); };
   }, []);
+
+  // ── Handoff ───────────────────────────────────────────────────────────────
+  // Opened from a "hand off this desktop" link? Offer what it carries. Waits
+  // for hydration so the offer is not raced by the persisted window list.
+  useEffect(() => {
+    if (hydrated) receiveHandoff();
+  }, [hydrated]);
 
   // ── Startup apps ──────────────────────────────────────────────────────────
   useEffect(() => {

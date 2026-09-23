@@ -8,7 +8,7 @@ import { cn } from "@/lib/cn";
 import { Icon } from "@/shell/icons";
 import { LAYOUTS } from "@/lib/zones";
 import { describeScene } from "@/lib/scenes";
-import { useScenes } from "@/kernel/scenes";
+import { useScenes, handoffUrl } from "@/kernel/scenes";
 import { bus } from "@/kernel/bus";
 import { EGGS, useEggs } from "@/lib/easter";
 import { ModelPicker } from "./ModelPicker";
@@ -230,6 +230,7 @@ function LayoutMenu({ open, onOpen, onClose }: { open: boolean; onOpen: () => vo
               onClick={() => { useScenes.getState().save(name); setName(""); }}
             >Save</button>
           </div>
+          <HandoffRow />
           {scenes.length === 0
             ? <p className="text-[10.5px] text-[var(--muted)]">Save what is open now, on every desktop, and come back to it later.</p>
             : scenes.slice(0, 8).map((sc) => (
@@ -249,6 +250,40 @@ function LayoutMenu({ open, onOpen, onClose }: { open: boolean; onOpen: () => vo
               </div>
             ))}
         </Menu>
+      )}
+    </div>
+  );
+}
+
+/** "Hand off this desktop": a link that reopens what is open now on another
+ *  device. On a phone the share sheet is the natural carrier; elsewhere the
+ *  link is copied and shown so it can go by any route. */
+function HandoffRow() {
+  const [link, setLink] = useState<{ url: string; windows: number; dropped: number } | null>(null);
+  const [copied, setCopied] = useState(false);
+  const count = useWM((s) => s.windows.length);
+  const make = async () => {
+    const h = handoffUrl();
+    setLink(h);
+    setCopied(false);
+    const nav = navigator as Navigator & { share?: (d: { title?: string; url?: string }) => Promise<void> };
+    try {
+      if (nav.share && matchMedia("(pointer: coarse)").matches) { await nav.share({ title: "My Web-AIOS desktop", url: h.url }); return; }
+      await navigator.clipboard.writeText(h.url);
+      setCopied(true);
+    } catch { /* The link is on screen either way. */ }
+  };
+  return (
+    <div className="mb-2 border-b border-[var(--border)] pb-2">
+      <button className="os-btn w-full !py-1 text-[11px]" onClick={() => void make()} disabled={count === 0}
+        title="A link that opens these same apps, in this layout, on your phone or any other browser">
+        <Icon name="link" size={11} className="mr-1" />Hand off this desktop
+      </button>
+      {link && (
+        <div className="mt-1.5 text-[10.5px] text-[var(--muted)]">
+          {copied ? "Link copied. " : ""}Open it on the other device: {link.windows} window{link.windows === 1 ? "" : "s"}{link.dropped ? ` (${link.dropped} left out to keep the link short)` : ""}. It asks before opening anything.
+          <input readOnly value={link.url} onFocus={(e) => e.currentTarget.select()} className="os-input mt-1 !py-0.5 font-mono text-[10px]" aria-label="Handoff link" />
+        </div>
       )}
     </div>
   );

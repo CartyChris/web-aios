@@ -16,6 +16,7 @@
   "include": [
     "src/lib/ai-transport.ts",
     "src/lib/ssrf.ts",
+    "src/lib/webproxy.ts",
     "src/lib/zip.ts",
     "src/lib/scaffold.ts",
     "src/lib/deflate.ts",
@@ -61,11 +62,23 @@
     "src/lib/sysupdate.ts",
     "src/lib/zones.ts",
     "src/lib/scenes.ts",
+    "src/lib/handoff.ts",
     "src/lib/ctxmenu.ts",
     "src/lib/harness/fold.ts",
     "src/lib/mcp-wire.ts",
     "src/lib/harness/patterns.ts",
+    "src/lib/loop-policy.ts",
     "src/lib/shell-mode.ts",
-    "src/lib/aios-agent.ts"
+    "src/lib/aios-agent.ts",
+    "src/lib/model-lists.ts",
+    "src/lib/s1/types.ts",
+    "src/lib/s1/schema.ts",
+    "src/lib/s1/compile.ts",
+    "src/lib/s1/parse.ts",
+    "src/lib/s1/run.ts",
+    "src/lib/s1/emulated.ts",
+    "src/lib/s1/orderdesk.ts",
+    "src/lib/s1/router.ts",
+    "src/lib/wallpaper-shaders.ts"
   ]
 }
