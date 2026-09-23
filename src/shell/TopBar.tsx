@@ -5,7 +5,6 @@ import { useWM } from "@/kernel/wm";
 import { useSettings } from "@/kernel/settings";
 import { getApp } from "@/kernel/registry";
 import { cn } from "@/lib/cn";
-import { relTime } from "@/lib/format";
 import { Icon } from "@/shell/icons";
 import { LAYOUTS } from "@/lib/zones";
 import { describeScene } from "@/lib/scenes";
@@ -13,6 +12,9 @@ import { useScenes } from "@/kernel/scenes";
 import { bus } from "@/kernel/bus";
 import { EGGS, useEggs } from "@/lib/easter";
 import { ModelPicker } from "./ModelPicker";
+import { AiosChat } from "./AiosChat";
+import { useJobs, isActive } from "@/kernel/jobs";
+import { JobRow, NotificationRow, Spinner } from "./LiveToasts";
 
 export function TopBar({ onLauncher, onPalette }: { onLauncher: () => void; onPalette: () => void }) {
   const wm = useWM();
@@ -22,6 +24,8 @@ export function TopBar({ onLauncher, onPalette }: { onLauncher: () => void; onPa
   const [now, setNow] = useState(() => new Date());
   const [openMenu, setOpenMenu] = useState<"notifications" | "workspaces" | "layouts" | null>(null);
   const [online, setOnline] = useState(true);
+  const jobs = useJobs((s) => s.jobs);
+  const clearFinished = useJobs((s) => s.clearFinished);
 
   useEffect(() => {
     const t = setInterval(() => setNow(new Date()), 1000);
@@ -37,6 +41,8 @@ export function TopBar({ onLauncher, onPalette }: { onLauncher: () => void; onPa
   const focusedWin = wm.windows.find((w) => w.id === wm.focused);
   const focusedApp = focusedWin ? getApp(focusedWin.appId) : null;
   const unread = wm.notifications.filter((n) => !n.read).length;
+  const activeJobs = jobs.filter(isActive).length;
+  const blocked = jobs.filter((j) => j.status === "blocked" || j.status === "timeout").length;
   const has = (k: string) => topBarItems.includes(k);
 
   return (
@@ -60,6 +66,8 @@ export function TopBar({ onLauncher, onPalette }: { onLauncher: () => void; onPa
           <kbd className="ml-2 hidden rounded bg-white/10 px-1 text-[10px] md:inline">⌘K</kbd>
         </button>
       )}
+
+      <AiosChat />
 
       {has("workspaces") && (
         <div className="relative">
@@ -123,10 +131,10 @@ export function TopBar({ onLauncher, onPalette }: { onLauncher: () => void; onPa
       {has("notifications") && (
         <div className="relative">
           <button onClick={() => { setOpenMenu(openMenu === "notifications" ? null : "notifications"); wm.markAllRead(); }} className="os-btn relative !py-1" title="Notifications">
-            <Icon name="bell" size={13} />
-            {unread > 0 && (
+            {activeJobs > 0 ? <Spinner size={13} /> : <Icon name="bell" size={13} />}
+            {unread + blocked > 0 && (
               <span className="absolute -right-1 -top-1 grid h-4 min-w-4 place-items-center rounded-full bg-[var(--danger)] px-1 text-[9px] font-bold text-black">
-                {unread}
+                {unread + blocked}
               </span>
             )}
           </button>
@@ -137,19 +145,19 @@ export function TopBar({ onLauncher, onPalette }: { onLauncher: () => void; onPa
                 <button className="os-btn !px-2 !py-0.5 text-[10px]" onClick={() => wm.clearNotifications()}>Clear all</button>
               </div>
               <div className="max-h-80 space-y-1.5 overflow-y-auto">
-                {wm.notifications.length === 0 && <div className="py-6 text-center text-[var(--muted)]">Nothing here yet.</div>}
-                {wm.notifications.map((n) => (
-                  <div key={n.id} className="os-card !p-2">
-                    <div className="flex items-start gap-2">
-                      <Icon name={n.kind === "error" ? "close" : n.kind === "warn" ? "warning" : n.kind === "success" ? "check" : "info"} size={13} style={{ marginTop: 2, color: n.kind === "error" ? "var(--danger)" : n.kind === "warn" ? "var(--warn)" : n.kind === "success" ? "var(--ok)" : "var(--muted)" }} />
-                      <div className="min-w-0 flex-1">
-                        <div className="truncate text-[12px] font-medium">{n.title}</div>
-                        {n.body && <div className="text-[11px] text-[var(--muted)]">{n.body}</div>}
-                        <div className="mt-0.5 text-[10px] text-[var(--muted)]">{relTime(n.ts)}</div>
-                      </div>
-                      <button className="text-[var(--muted)] hover:text-[var(--text)]" onClick={() => wm.dismiss(n.id)} aria-label="Dismiss"><Icon name="close" size={11} /></button>
+                {jobs.length > 0 && (
+                  <>
+                    <div className="flex items-center justify-between pt-0.5">
+                      <div className="os-label">Activity</div>
+                      {jobs.some((j) => !isActive(j)) && <button className="os-btn !px-2 !py-0.5 text-[10px]" onClick={() => clearFinished()}>Clear finished</button>}
                     </div>
-                  </div>
+                    {jobs.map((j) => <JobRow key={j.id} job={j} onNavigate={() => setOpenMenu(null)} />)}
+                    <div className="os-label pt-1">Recent</div>
+                  </>
+                )}
+                {wm.notifications.length === 0 && jobs.length === 0 && <div className="py-6 text-center text-[var(--muted)]">Nothing here yet.</div>}
+                {wm.notifications.map((n) => (
+                  <NotificationRow key={n.id} n={n} onNavigate={() => setOpenMenu(null)} onDismiss={() => wm.dismiss(n.id)} />
                 ))}
               </div>
             </Menu>

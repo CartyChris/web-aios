@@ -10,6 +10,10 @@ import { CommandPalette } from "./CommandPalette";
 import { cn } from "@/lib/cn";
 import { useViewport } from "@/lib/useViewport";
 import { Icon } from "./icons";
+import { bus } from "@/kernel/bus";
+import { ContextMenuHost } from "./ContextMenu";
+import { LiveToasts } from "./LiveToasts";
+import { AiosChat } from "./AiosChat";
 
 /* ────────────────────────────────────────────────────────────────────────────
    MobileShell — the phone paradigm.
@@ -36,6 +40,21 @@ export function MobileShell() {
   const [palette, setPalette] = useState(false);
   const [search, setSearch] = useState("");
   const touchStart = useRef<{ x: number; y: number; t: number } | null>(null);
+
+  // Something outside the shell (a finished job's toast, a notification)
+  // focused a window and wants it on screen. The focus change itself happens in
+  // the window manager; this only brings the app surface forward. setView runs
+  // inside the event handler, not in the effect body.
+  useEffect(() => {
+    const show = () => { setView("app"); };
+    // app:open covers every other app-to-app hand-off (AIOS Chat, Files, AI
+    // Studio): the desktop handler opens the window, this shows it.
+    const offs = [bus.on("shell:show-app", show), bus.on("app:open", show)];
+    return () => { for (const off of offs) off(); };
+  }, []);
+
+  const goDesktop = () => settings.set("phoneMode", "desktop");
+  const dismissTip = () => settings.set("phoneTipSeen", true);
 
   const activeWin = wm.windows.find((w) => w.id === wm.focused) ?? null;
   const activeApp = activeWin ? getApp(activeWin.appId) : null;
@@ -142,7 +161,7 @@ export function MobileShell() {
           className="absolute inset-0 flex flex-col"
           style={{ paddingTop: "calc(env(safe-area-inset-top, 0px) + 28px)" }}
         >
-          <div className="px-4 pb-2">
+          <div className="flex items-center gap-2 px-4 pb-2">
             <input
               value={search}
               onChange={(e) => { setSearch(e.target.value); setPage(0); }}
@@ -152,6 +171,15 @@ export function MobileShell() {
               autoCapitalize="none"
               autoCorrect="off"
             />
+            <button
+              onClick={goDesktop}
+              className="os-btn shrink-0 !px-2 !py-1.5 text-[11px]"
+              aria-label="Switch to full desktop"
+              title="Switch to full desktop"
+            >
+              <Icon name="monitor" size={14} className="mr-1" />Full desktop
+            </button>
+            <AiosChat />
           </div>
 
           <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-2">
@@ -236,6 +264,9 @@ export function MobileShell() {
             {wm.windows.length > 0 && (
               <button className="os-btn !py-1 text-[11px]" onClick={() => { wm.closeAll(); setView("home"); }}>Close all</button>
             )}
+            <button className="os-btn !py-1 text-[11px]" onClick={goDesktop} aria-label="Switch to full desktop">
+              <Icon name="monitor" size={12} className="mr-1" />Full desktop
+            </button>
             <button className="os-btn !py-1 text-[11px]" onClick={() => setView("home")}>Done</button>
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-6">
@@ -265,6 +296,47 @@ export function MobileShell() {
       )}
 
       {palette && <CommandPalette onClose={() => setPalette(false)} />}
+
+      {/* Right-click and long-press menus, and live job toasts, need their
+          hosts in this tree too — the desktop's copies are not mounted here. */}
+      <ContextMenuHost />
+      <LiveToasts compact />
+
+      {/* One-time notice: the full desktop is one rotation away. */}
+      {!settings.phoneTipSeen && (
+        <div
+          className="absolute inset-0 z-[10000] flex items-end justify-center px-4"
+          style={{
+            background: "color-mix(in srgb, var(--bg) 55%, transparent)",
+            // Clear of the Dynamic Island at the top and the home indicator below.
+            paddingTop: "calc(env(safe-area-inset-top, 0px) + 48px)",
+            paddingBottom: "calc(env(safe-area-inset-bottom, 0px) + 20px)",
+          }}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="phone-tip-title"
+        >
+          <div className="glass os-card w-full max-w-sm p-4" style={{ borderRadius: 20 }}>
+            <div className="mb-2 flex items-center gap-2">
+              <Icon name="monitor" size={18} style={{ color: "var(--accent)" }} />
+              <span id="phone-tip-title" className="text-[14px] font-semibold">Want the full desktop?</span>
+            </div>
+            <p className="mb-3 text-[13px] leading-relaxed text-[var(--muted)]">
+              Turn your phone on its side for the full desktop experience — or switch to full desktop now.
+            </p>
+            <div className="flex flex-wrap justify-end gap-2">
+              <button className="os-btn !py-1.5 text-[12px]" onClick={dismissTip}>Got it</button>
+              <button
+                className="os-btn !py-1.5 text-[12px]"
+                data-variant="primary"
+                onClick={() => { dismissTip(); goDesktop(); }}
+              >
+                Switch to full desktop
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Home indicator — a real affordance, and it keeps content clear of the
           hardware one on devices that have it. */}

@@ -82,6 +82,7 @@ export default function Settings({}: AppProps) {
           { id: "providers", label: "Providers & Keys", icon: "key" },
           { id: "ai", label: "AI", icon: "spark" },
           { id: "keys", label: "Keyboard", icon: "keyboard" },
+          { id: "screen", label: "Phone & Screen", icon: "monitor" },
           { id: "privacy", label: "Privacy", icon: "shield" },
           { id: "storage", label: "Storage", icon: "backup" },
           { id: "about", label: "About", icon: "info" },
@@ -225,6 +226,42 @@ export default function Settings({}: AppProps) {
               ))}
             </div>
             <button className="os-btn mt-3 !py-1 text-[11px]" onClick={() => s.set("keybinds", { ...DEFAULT_KEYBINDS })}>Reset all shortcuts</button>
+          </div>
+        )}
+
+        {tab === "screen" && (
+          <div className="max-w-xl">
+            <div className="os-card mb-3">
+              <div className="mb-1.5 font-medium text-[13px]">On a phone, show</div>
+              <p className="mb-2 text-[12px] text-[var(--muted)]">
+                Automatic gives a phone the single-app phone view when upright and the full desktop when you turn it on its side.
+              </p>
+              <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="Phone layout">
+                {([
+                  ["auto", "Automatic"],
+                  ["phone", "Always phone view"],
+                  ["desktop", "Always full desktop"],
+                ] as const).map(([id, label]) => (
+                  <button
+                    key={id}
+                    role="radio"
+                    aria-checked={s.phoneMode === id}
+                    className="os-btn !py-1 text-[11px]"
+                    data-variant={s.phoneMode === id ? "primary" : undefined}
+                    onClick={() => s.set("phoneMode", id)}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="os-card">
+              <div className="mb-1.5 font-medium text-[13px]">Phone tips</div>
+              <p className="mb-2 text-[12px] text-[var(--muted)]">Show the one-time &ldquo;turn your phone on its side&rdquo; notice again the next time the phone view opens.</p>
+              <button className="os-btn !py-1 text-[11px]" disabled={!s.phoneTipSeen} onClick={() => s.set("phoneTipSeen", false)}>
+                Show the notice again
+              </button>
+            </div>
           </div>
         )}
 

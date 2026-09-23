@@ -61,6 +61,11 @@ export interface Notification {
   body?: string;
   kind: "info" | "success" | "warn" | "error";
   appId?: string;
+  /** Where clicking the notification takes the user. Serializable on purpose:
+   *  notifications persist, so this cannot be a callback. */
+  target?: { appId: string; args?: Record<string, unknown>; windowId?: string };
+  /** A live job (kernel/jobs) this notification is about, for its Redo/Approve buttons. */
+  jobId?: string;
   ts: number;
   read?: boolean;
 }

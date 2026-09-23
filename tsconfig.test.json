@@ -64,6 +64,8 @@
     "src/lib/ctxmenu.ts",
     "src/lib/harness/fold.ts",
     "src/lib/mcp-wire.ts",
-    "src/lib/harness/patterns.ts"
+    "src/lib/harness/patterns.ts",
+    "src/lib/shell-mode.ts",
+    "src/lib/aios-agent.ts"
   ]
 }

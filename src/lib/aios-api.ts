@@ -8,6 +8,7 @@ import { useCustomWidgets } from "@/kernel/widgets";
 import { useUpdates } from "@/kernel/updates";
 import { useCustomThemes } from "@/kernel/customthemes";
 import { useScenes } from "@/kernel/scenes";
+import { useJobs } from "@/kernel/jobs";
 import { useTriggers } from "@/kernel/triggers";
 import { APPS, getApp } from "@/kernel/registry";
 import { bus } from "@/kernel/bus";
@@ -79,6 +80,7 @@ const STORES = {
   updates: useUpdates,
   customThemes: useCustomThemes,
   scenes: useScenes,
+  jobs: useJobs,
 } as const;
 
 function snapshot(): Record<string, unknown> {

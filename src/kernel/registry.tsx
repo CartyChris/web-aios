@@ -1,7 +1,9 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import type { ComponentType } from "react";
+import { useEffect, type ComponentType } from "react";
+import { useWM } from "./wm";
+import { useJobs } from "./jobs";
 import type { AppManifest, AppProps } from "./types";
 
 /** Every app is code-split. The desktop shell boots in one small chunk and an
@@ -11,6 +13,18 @@ const lazy = (loader: () => Promise<{ default: ComponentType<AppProps> }>): Comp
   dynamic(loader, { ssr: false, loading: () => <AppSkeleton /> }) as ComponentType<AppProps>;
 
 function AppSkeleton() {
+  // A module that takes more than a moment to arrive shows up in the live
+  // notifications, pointed at the window it is loading into. Quick loads never
+  // register, so opening an app does not flash a toast every time.
+  useEffect(() => {
+    let jobId: string | null = null;
+    const t = setTimeout(() => {
+      const wm = useWM.getState();
+      const win = wm.windows.find((w) => w.id === wm.focused);
+      jobId = useJobs.getState().start({ kind: "load", title: win ? `Opening ${win.title}` : "Opening app", target: win ? { appId: win.appId, windowId: win.id } : undefined });
+    }, 250);
+    return () => { clearTimeout(t); if (jobId) useJobs.getState().remove(jobId); };
+  }, []);
   return (
     <div className="flex h-full w-full items-center justify-center gap-3 text-[var(--muted)]">
       <span

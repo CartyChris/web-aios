@@ -5,6 +5,7 @@ import { useVFS } from "@/kernel/vfs";
 import { useHarness } from "@/kernel/harness";
 import { useTriggers, attemptFrom } from "@/kernel/triggers";
 import { useSettings } from "@/kernel/settings";
+import { useJobs } from "@/kernel/jobs";
 import { registerAiosModule } from "./aios-api";
 import { uid } from "./format";
 import { startRun } from "./harness-runtime";
@@ -91,12 +92,16 @@ async function dispatch(kind: TriggerKind, signal: string, payload: unknown) {
     store.markFired(spec.id, now);
     store.recordAttempt(attempt);
 
+    // An automated run is exactly the work a user cannot otherwise see: it
+    // started without them. It gets a live job that leads to the Harness.
+    const jobId = useJobs.getState().start({ kind: "task", title: `Automation: ${spec.kind}${spec.match ? ` ${spec.match}` : ""}`, detail: decision.objective.slice(0, 120), target: { appId: "harness" } });
     try {
       const result = await startRun({
         objective: decision.objective,
         dod,
         trigger: { triggerId: spec.id, kind, payload, dedupeKey: decision.event.dedupeKey },
       });
+      useJobs.getState().finish(jobId, result.status === "finished" ? "done" : "error", `${result.status} · ${result.totals.steps} steps`);
       store.recordAttempt({
         ...attempt,
         id: uid("att"),
@@ -105,6 +110,7 @@ async function dispatch(kind: TriggerKind, signal: string, payload: unknown) {
         runId: result.runId,
       });
     } catch (e) {
+      useJobs.getState().finish(jobId, "error", e instanceof Error ? e.message : "The run threw.");
       store.recordAttempt({
         ...attempt,
         id: uid("att"),

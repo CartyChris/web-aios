@@ -239,6 +239,10 @@ input, textarea, select, button { font: inherit; color: inherit; }
     border-left: 0;
     border-bottom: 1px solid var(--border);
     flex-shrink: 0;
+    /* Without this a long list (MCP Hub's tool list) overflows its capped
+       height and paints on top of the pane stacked below it. Scroll instead. */
+    overflow-y: auto;
+    overscroll-behavior: contain;
   }
   /* Panels docked to the right become a bottom sheet rather than a squeezed column. */
   .app-aside {

@@ -7,6 +7,7 @@ import { getApp } from "@/kernel/registry";
 import { useHydrated } from "@/lib/useHydrated";
 import { bus } from "@/kernel/bus";
 import { ContextMenuHost } from "./ContextMenu";
+import { LiveToasts } from "./LiveToasts";
 import { useGlobalContextMenu } from "./useGlobalContextMenu";
 import { LAYOUTS } from "@/lib/zones";
 import { WindowFrame } from "./Window";
@@ -18,6 +19,7 @@ import { WidgetLayer } from "./Widgets";
 import { Wallpaper } from "./Wallpaper";
 import { MobileShell } from "./MobileShell";
 import { useViewport } from "@/lib/useViewport";
+import { chooseShell, offerPhoneView } from "@/lib/shell-mode";
 import { cn } from "@/lib/cn";
 import { Icon } from "./icons";
 import { PetLayer } from "./pets";
@@ -192,8 +194,8 @@ export function Desktop() {
       if (app) wm.open(app.id, { title: app.name, icon: app.icon, size: app.defaultSize, singleton: app.singleton, args });
     });
     const offNotify = bus.on("notify", (p) => {
-      const n = (p ?? {}) as { title?: string; body?: string; kind?: "info" | "success" | "warn" | "error" };
-      if (n.title) wm.notify({ title: n.title, body: n.body, kind: n.kind ?? "info" });
+      const n = (p ?? {}) as { title?: string; body?: string; kind?: "info" | "success" | "warn" | "error"; appId?: string; target?: { appId: string; args?: Record<string, unknown>; windowId?: string }; jobId?: string };
+      if (n.title) wm.notify({ title: n.title, body: n.body, kind: n.kind ?? "info", appId: n.appId, target: n.target, jobId: n.jobId });
     });
     return () => { offOpen(); offNotify(); };
   }, [wm]);
@@ -216,7 +218,12 @@ export function Desktop() {
 
   // Below tablet width the floating-window metaphor stops working, so the shell
   // swaps to the phone paradigm. Same kernel, same apps — different presentation.
-  if (vp.isPhone) return <MobileShell />;
+  //
+  // The rule lives in lib/shell-mode.ts: width alone kept a phone turned on its
+  // side (still under 768px wide) in the phone view forever, so "auto" gives a
+  // sideways phone the full desktop, and the Phone & Screen setting can force
+  // either shell.
+  if (chooseShell(settings.phoneMode, vp) === "mobile") return <MobileShell />;
 
   return (
     <div
@@ -237,10 +244,25 @@ export function Desktop() {
       {palette && <CommandPalette onClose={() => setPalette(false)} />}
 
       <ContextMenuHost />
+      <LiveToasts />
       <PinPicker />
 
       {/* Minimized windows live in a tray so nothing can be lost. */}
       <MinimizedTray />
+
+      {/* A phone forced into the desktop needs a way back that does not
+          depend on finding the setting inside a window. */}
+      {offerPhoneView(settings.phoneMode, vp) && (
+        <button
+          onClick={() => settings.set("phoneMode", vp.landscape ? "phone" : "auto")}
+          className="os-btn fixed z-[9500] !px-2 !py-1 text-[11px]"
+          style={{ right: "max(env(safe-area-inset-right, 0px), 10px)", bottom: "calc(max(env(safe-area-inset-bottom, 0px), 10px) + 80px)" /* clear of the dock */ }}
+          aria-label="Switch to phone view"
+          title="Switch to phone view"
+        >
+          <Icon name="home" size={12} className="mr-1" />Phone view
+        </button>
+      )}
     </div>
   );
 }

@@ -87,6 +87,11 @@ export interface Settings {
   confirmClose: boolean;
   startupApps: string[];
   keybinds: Record<string, string>;
+  /** Phone or full desktop on a small screen. "auto" gives a phone the phone
+   *  view upright and the full desktop on its side; see lib/shell-mode.ts. */
+  phoneMode: "auto" | "desktop" | "phone";
+  /** The one-time "turn your phone on its side" notice has been dismissed. */
+  phoneTipSeen: boolean;
 
   // ── AI ──────────────────────────────────────────────────────────────────
   ai: AISettings;
@@ -227,6 +232,8 @@ const DEFAULTS: Settings = {
   confirmClose: false,
   startupApps: [],
   keybinds: { ...DEFAULT_KEYBINDS },
+  phoneMode: "auto",
+  phoneTipSeen: false,
 
   ai: {
     provider: "openai",

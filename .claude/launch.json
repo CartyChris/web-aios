@@ -4,8 +4,23 @@
     {
       "name": "web-aios",
       "runtimeExecutable": "npx",
-      "runtimeArgs": ["next", "dev", "-p", "3131"],
+      "runtimeArgs": [
+        "next",
+        "dev",
+        "-p",
+        "3131"
+      ],
       "port": 3131
+    },
+    {
+      "name": "web-aios-prod",
+      "runtimeExecutable": "./node_modules/.bin/next",
+      "runtimeArgs": [
+        "start",
+        "-p",
+        "3190"
+      ],
+      "port": 3190
     }
   ]
 }
