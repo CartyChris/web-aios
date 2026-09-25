@@ -26,6 +26,10 @@ let recorderInstalled = false;
  *  vaguer row beside it, titled after whatever window happened to be focused. */
 const SELF_TRACKED = new Set(["aios-chat"]);
 
+/** Id prefix of the jobs this recorder creates, so it can tell its own
+ *  generic rows from the ones an app made for itself. */
+const MIRROR = "span-mirror-";
+
 /** Every model call already emits a span (lib/useAI.ts). Mirroring those as
  *  jobs means every AI generation in every app gets a spinner for free,
  *  pointed at the window that was focused when it started. */
@@ -41,7 +45,12 @@ export function installJobRecorder(): () => void {
     if (!known && !s.endedAt) {
       const wm = useWM.getState();
       const win = wm.windows.find((w) => w.id === wm.focused);
+      // An app that already shows its own job for this window (AI Studio's
+      // build, Agent Loop, Asset Studio...) says more than "Generating in X"
+      // can, so the generic mirror stays out of the way rather than doubling up.
+      if (win && jobs.jobs.some((j) => !j.id.startsWith(MIRROR) && j.kind !== "load" && isActive(j) && j.target?.appId === win.appId)) return;
       const id = jobs.start({
+        id: `${MIRROR}${s.id}`,
         kind: "ai",
         title: win ? `Generating in ${win.title}` : "AI generation",
         detail: s.name,

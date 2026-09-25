@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { useVFS } from "@/kernel/vfs";
 import { bus } from "@/kernel/bus";
 import { ask } from "@/lib/useAI";
@@ -50,17 +50,24 @@ export default function Profiler({}: AppProps) {
   const [running, setRunning] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [view, setView] = useState<string>("signals");
+  const abortRef = useRef<AbortController | null>(null);
 
-  const runAll = useCallback(async () => {
+  /** Run the stages from `from` onward. Earlier stages keep their results and
+   *  feed the first one run, so a weak brief can be redone without paying for
+   *  the signals again. */
+  const runFrom = useCallback(async (from = 0) => {
     if (!material.trim() || running) return;
     setError(null);
-    setResults({});
-    let carried = "";
-    for (const stage of STAGES) {
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
+    setResults((r) => Object.fromEntries(STAGES.slice(0, from).filter((st) => r[st.id]).map((st) => [st.id, r[st.id]])));
+    let carried = from > 0 ? results[STAGES[from - 1].id] ?? "" : "";
+    for (const stage of STAGES.slice(from)) {
       setRunning(stage.id);
       setView(stage.id);
       try {
         const res = await ask({
+          signal: ctrl.signal,
           messages: [{
             role: "user",
             content: `${context ? `Context provided by the user: ${context}\n\n` : ""}${carried ? `Previous stage output:\n${carried}\n\n---\n\n` : ""}Material:\n\n${material.slice(0, 60_000)}`,
@@ -72,12 +79,17 @@ export default function Profiler({}: AppProps) {
         setResults((r) => ({ ...r, [stage.id]: res.text }));
         carried = res.text;
       } catch (e) {
-        setError(e instanceof Error ? e.message : "Stage failed.");
+        setError((e as Error).name === "AbortError" ? `Stopped during ${stage.name}. Finished stages are kept.` : e instanceof Error ? e.message : "Stage failed.");
         break;
       }
     }
+    abortRef.current = null;
     setRunning(null);
-  }, [material, context, running]);
+  }, [material, context, running, results]);
+  const runAll = useCallback(() => runFrom(0), [runFrom]);
+
+  const words = material.split(/\s+/).filter(Boolean).length;
+  const lines = material ? material.split("\n").filter((l) => l.trim()).length : 0;
 
   const report = useCallback(
     () => [`# Profile analysis`, "", `> ${new Date().toISOString()}`, "", ...STAGES.flatMap((s) => [`## ${s.name}`, "", results[s.id] ?? "_(not run)_", ""])].join("\n"),
@@ -108,7 +120,9 @@ export default function Profiler({}: AppProps) {
             {running ? `Running ${running}…` : "Run analysis"}
           </button>
           {running && <Spinner />}
-          <span className="text-[10.5px] text-[var(--muted)]">{material.length.toLocaleString()} chars</span>
+          {running && <button className="os-btn !py-1 text-[11px]" onClick={() => abortRef.current?.abort()}><Icon name="stop" size={11} className="mr-1" />Stop</button>}
+          <span className="text-[10.5px] tabular-nums text-[var(--muted)]">{material.length.toLocaleString()} chars · {words.toLocaleString()} words · {lines.toLocaleString()} lines</span>
+          {words > 0 && words < 150 && <span className="os-chip !py-0 !text-[10px]" title="Under 150 words, any profile is mostly guesswork">thin sample</span>}
           <div className="flex-1" />
           {done > 0 && (
             <>
@@ -127,7 +141,7 @@ export default function Profiler({}: AppProps) {
             onClick={() => setView(s.id)}
             className={cn("os-btn !py-1 text-[11px]", view === s.id && "!border-[var(--accent)] !bg-[var(--accent)]/16")}
           >
-            {s.icon} {s.name}
+            <Icon name={s.icon} size={11} className="mr-1 inline-block align-[-1px]" />{s.name}
             {results[s.id] && <Icon name="check" size={10} className="ml-1 inline-block align-[-1px] text-[var(--ok)]" />}
             {running === s.id && <span className="ml-1">…</span>}
           </button>
@@ -136,7 +150,19 @@ export default function Profiler({}: AppProps) {
 
       <div className="min-h-0 flex-1 overflow-y-auto p-3">
         {results[view] ? (
-          <div className="mx-auto max-w-3xl"><Markdown text={results[view]} /></div>
+          <div className="mx-auto max-w-3xl">
+            <Markdown text={results[view]} />
+            {!running && (
+              <button
+                className="os-btn mt-3 !py-1 text-[11px]"
+                onClick={() => void runFrom(STAGES.findIndex((st) => st.id === view))}
+                disabled={STAGES.findIndex((st) => st.id === view) > 0 && !results[STAGES[STAGES.findIndex((st) => st.id === view) - 1].id]}
+                title="Run this stage again, and every stage after it, from the stages before it"
+              >
+                <Icon name="refresh" size={11} className="mr-1" />Re-run from {STAGES.find((st) => st.id === view)?.name}
+              </button>
+            )}
+          </div>
         ) : (
           <Empty
             icon="profiler"

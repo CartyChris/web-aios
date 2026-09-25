@@ -17,8 +17,168 @@ export type ContentPart =
   | { type: "image"; dataUrl: string };
 
 export interface ChatMessage {
-  role: "system" | "user" | "assistant";
+  role: "system" | "user" | "assistant" | "tool";
   content: string | ContentPart[];
+  /** Assistant turn only: the native tool calls the model made in this turn. */
+  toolCalls?: ToolCall[];
+  /** Tool turn only: which call this result answers, and that tool's name
+   *  (Google matches a result to its call by name, not by id). */
+  toolCallId?: string;
+  toolName?: string;
+}
+
+/* ── Native tool calling ──────────────────────────────────────────────────
+   Additive: a request with no `tools` and no tool-shaped messages is built
+   byte-for-byte as before, and a chunk with no tool payload parses as before.
+   Three dialects, three shapes:
+     OpenAI     tools[{type:"function",function}] -> streamed delta.tool_calls[{index,id?,function:{name?,arguments}}]
+     Anthropic  tools[{name,description,input_schema}] -> content_block_start{tool_use} + input_json_delta
+     Google     tools[{functionDeclarations}] -> whole functionCall parts, no ids */
+
+/** A tool the model may call. `parameters` is a JSON Schema object. */
+export interface ToolSpec {
+  name: string;
+  description: string;
+  parameters: Record<string, unknown>;
+}
+
+/** One complete tool call. `args` is the raw JSON text the model produced. */
+export interface ToolCall {
+  id: string;
+  name: string;
+  args: string;
+}
+
+/** A streamed fragment of a tool call. OpenAI and Anthropic send the name and
+ *  id once and the arguments in pieces keyed by `index`; Google sends each call
+ *  whole, which is marked `complete` so the accumulator appends it instead of
+ *  merging it into whatever shares its index. */
+export interface ToolCallDelta {
+  index: number;
+  id?: string;
+  name?: string;
+  argsDelta?: string;
+  complete?: boolean;
+}
+
+/** Fold tool-call deltas into complete calls. Pure; keep one per response. */
+export class ToolCallAccumulator {
+  private calls: Array<{ id: string; name: string; args: string }> = [];
+  private byIndex = new Map<number, number>();
+  add(deltas: ToolCallDelta[] | undefined): void {
+    for (const d of deltas ?? []) {
+      let slot = d.complete ? undefined : this.byIndex.get(d.index);
+      if (slot === undefined) {
+        slot = this.calls.length;
+        this.calls.push({ id: "", name: "", args: "" });
+        if (!d.complete) this.byIndex.set(d.index, slot);
+      }
+      const c = this.calls[slot];
+      if (d.id) c.id = d.id;
+      if (d.name) c.name = d.name;
+      if (d.argsDelta) c.args += d.argsDelta;
+    }
+  }
+  /** Complete calls in arrival order. A call the provider sent no id for gets
+   *  a positional one, so a result can still be matched back to it. */
+  result(): ToolCall[] {
+    return this.calls.filter((c) => c.name).map((c, i) => ({ id: c.id || `call_${i}`, name: c.name, args: c.args || "{}" }));
+  }
+}
+
+/** Parse a tool call's argument text; malformed JSON is an error the model
+ *  should see, not a crash. */
+export function parseToolArgs(args: string): { ok: true; value: Record<string, unknown> } | { ok: false; error: string } {
+  try {
+    const v = JSON.parse(args || "{}");
+    if (!v || typeof v !== "object" || Array.isArray(v)) return { ok: false, error: "arguments must be a JSON object" };
+    return { ok: true, value: v as Record<string, unknown> };
+  } catch (e) {
+    return { ok: false, error: `arguments are not valid JSON: ${(e as Error).message}` };
+  }
+}
+
+/** Gemini's function schema is an OpenAPI subset and rejects keys such as
+ *  `additionalProperties` and `$schema` outright, so only the portable subset
+ *  is forwarded. */
+export function toGoogleSchema(schema: unknown): unknown {
+  if (!schema || typeof schema !== "object") return schema;
+  if (Array.isArray(schema)) return schema.map(toGoogleSchema);
+  const src = schema as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+  for (const k of ["type", "description", "enum", "required", "format", "nullable"]) if (k in src) out[k] = src[k];
+  if (src.items) out.items = toGoogleSchema(src.items);
+  if (src.properties && typeof src.properties === "object") {
+    out.properties = Object.fromEntries(Object.entries(src.properties as Record<string, unknown>).map(([k, v]) => [k, toGoogleSchema(v)]));
+  }
+  return out;
+}
+
+const safeArgs = (args: string): unknown => {
+  const p = parseToolArgs(args);
+  return p.ok ? p.value : {};
+};
+const hasToolShape = (messages: ChatMessage[]) => messages.some((m) => m.role === "tool" || (m.toolCalls?.length ?? 0) > 0);
+
+function openAIMessage(m: ChatMessage): Record<string, unknown> {
+  if (m.role === "tool") return { role: "tool", tool_call_id: m.toolCallId ?? "", content: messageText(m) };
+  if (m.role === "assistant" && m.toolCalls?.length) {
+    return {
+      role: "assistant",
+      content: messageText(m) || null,
+      tool_calls: m.toolCalls.map((c) => ({ id: c.id, type: "function", function: { name: c.name, arguments: c.args || "{}" } })),
+    };
+  }
+  return { role: m.role, content: toOpenAIContent(m.content) };
+}
+
+/** Anthropic: tool results travel as a user turn of tool_result blocks, and
+ *  consecutive results must share one user turn. */
+function anthropicMessages(rest: ChatMessage[]): Array<Record<string, unknown>> {
+  const out: Array<{ role: string; content: unknown }> = [];
+  for (const m of rest) {
+    if (m.role === "tool") {
+      const block = { type: "tool_result", tool_use_id: m.toolCallId ?? "", content: messageText(m) };
+      const prev = out.at(-1);
+      if (prev && prev.role === "user" && Array.isArray(prev.content) && (prev.content as Array<{ type: string }>).every((b) => b.type === "tool_result")) {
+        (prev.content as unknown[]).push(block);
+      } else out.push({ role: "user", content: [block] });
+      continue;
+    }
+    if (m.role === "assistant" && m.toolCalls?.length) {
+      const text = messageText(m);
+      out.push({
+        role: "assistant",
+        content: [
+          ...(text ? [{ type: "text", text }] : []),
+          ...m.toolCalls.map((c) => ({ type: "tool_use", id: c.id, name: c.name, input: safeArgs(c.args) })),
+        ],
+      });
+      continue;
+    }
+    out.push({ role: m.role, content: toAnthropicContent(m.content) });
+  }
+  return out;
+}
+
+function googleContents(rest: ChatMessage[]): Array<Record<string, unknown>> {
+  const out: Array<{ role: string; parts: unknown[] }> = [];
+  for (const m of rest) {
+    if (m.role === "tool") {
+      const part = { functionResponse: { name: m.toolName ?? "", response: { content: messageText(m) } } };
+      const prev = out.at(-1);
+      if (prev && prev.role === "user" && prev.parts.every((p) => typeof p === "object" && p !== null && "functionResponse" in p)) prev.parts.push(part);
+      else out.push({ role: "user", parts: [part] });
+      continue;
+    }
+    if (m.role === "assistant" && m.toolCalls?.length) {
+      const text = messageText(m);
+      out.push({ role: "model", parts: [...(text ? [{ text }] : []), ...m.toolCalls.map((c) => ({ functionCall: { name: c.name, args: safeArgs(c.args) } }))] });
+      continue;
+    }
+    out.push({ role: m.role === "assistant" ? "model" : "user", parts: toGoogleParts(m.content) });
+  }
+  return out;
 }
 
 /** Flatten a message to plain text — for token estimates, logs and any
@@ -65,6 +225,8 @@ export interface ChatRequest {
   /** How hard a reasoning model should think. Sent as OpenRouter's
    *  `reasoning.effort` or OpenAI's `reasoning_effort`; ignored elsewhere. */
   reasoningEffort?: "low" | "medium" | "high";
+  /** Native tool calling. Omitted or empty = the request is unchanged. */
+  tools?: ToolSpec[];
 }
 
 export interface ChatChunk {
@@ -77,6 +239,8 @@ export interface ChatChunk {
   reasoning?: string;
   /** Normalised stop reason: "stop", or "length" when the token cap cut it off. */
   finish?: "stop" | "length";
+  /** Streamed native tool-call fragments; fold them with ToolCallAccumulator. */
+  toolCalls?: ToolCallDelta[];
 }
 
 /** Build the provider-specific HTTP request. Exported so the server route and
@@ -103,7 +267,8 @@ export function buildRequest(req: ChatRequest): { url: string; init: RequestInit
           max_tokens: req.maxTokens ?? 4096,
           temperature: req.temperature,
           ...(sys ? { system: sys } : {}),
-          messages: rest.map((m) => ({ role: m.role, content: toAnthropicContent(m.content) })),
+          messages: hasToolShape(rest) ? anthropicMessages(rest) : rest.map((m) => ({ role: m.role, content: toAnthropicContent(m.content) })),
+          ...(req.tools?.length ? { tools: req.tools.map((t) => ({ name: t.name, description: t.description, input_schema: t.parameters })) } : {}),
           stream: req.stream ?? true,
         }),
       },
@@ -119,7 +284,8 @@ export function buildRequest(req: ChatRequest): { url: string; init: RequestInit
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           ...(sys ? { systemInstruction: { parts: [{ text: sys }] } } : {}),
-          contents: rest.map((m) => ({ role: m.role === "assistant" ? "model" : "user", parts: toGoogleParts(m.content) })),
+          contents: hasToolShape(rest) ? googleContents(rest) : rest.map((m) => ({ role: m.role === "assistant" ? "model" : "user", parts: toGoogleParts(m.content) })),
+          ...(req.tools?.length ? { tools: [{ functionDeclarations: req.tools.map((t) => ({ name: t.name, description: t.description, parameters: toGoogleSchema(t.parameters) })) }] } : {}),
           generationConfig: { temperature: req.temperature, maxOutputTokens: req.maxTokens ?? 4096 },
         }),
       },
@@ -152,7 +318,8 @@ export function buildRequest(req: ChatRequest): { url: string; init: RequestInit
       },
       body: JSON.stringify({
         model: req.model,
-        messages: req.messages.map((m) => ({ role: m.role, content: toOpenAIContent(m.content) })),
+        messages: hasToolShape(req.messages) ? req.messages.map(openAIMessage) : req.messages.map((m) => ({ role: m.role, content: toOpenAIContent(m.content) })),
+        ...(req.tools?.length ? { tools: req.tools.map((t) => ({ type: "function", function: { name: t.name, description: t.description, parameters: t.parameters } })) } : {}),
         temperature: req.temperature,
         max_tokens: req.maxTokens ?? 4096,
         stream: req.stream ?? true,
@@ -215,8 +382,14 @@ export function parseChunk(dialect: ChatRequest["dialect"], raw: string): ChatCh
 
   if (dialect === "anthropic") {
     const type = json.type as string;
+    if (type === "content_block_start") {
+      const b = json.content_block as { type?: string; id?: string; name?: string } | undefined;
+      if (b?.type === "tool_use") return { delta: "", done: false, toolCalls: [{ index: Number(json.index ?? 0), id: b.id, name: b.name }] };
+      return null;
+    }
     if (type === "content_block_delta") {
-      const d = json.delta as { text?: string; thinking?: string } | undefined;
+      const d = json.delta as { type?: string; text?: string; thinking?: string; partial_json?: string } | undefined;
+      if (d?.type === "input_json_delta") return { delta: "", done: false, toolCalls: [{ index: Number(json.index ?? 0), argsDelta: d.partial_json ?? "" }] };
       return { delta: d?.text ?? "", done: false, ...(d?.thinking ? { reasoning: d.thinking } : {}) };
     }
     if (type === "message_delta") {
@@ -236,8 +409,11 @@ export function parseChunk(dialect: ChatRequest["dialect"], raw: string): ChatCh
   }
 
   if (dialect === "google") {
-    const cands = json.candidates as Array<{ content?: { parts?: Array<{ text?: string; thought?: boolean }> }; finishReason?: string }> | undefined;
+    const cands = json.candidates as Array<{ content?: { parts?: Array<{ text?: string; thought?: boolean; functionCall?: { name?: string; args?: unknown } }> }; finishReason?: string }> | undefined;
     const parts = cands?.[0]?.content?.parts ?? [];
+    const calls: ToolCallDelta[] = parts
+      .filter((p) => p.functionCall?.name)
+      .map((p, i) => ({ index: i, name: p.functionCall!.name, argsDelta: JSON.stringify(p.functionCall!.args ?? {}), complete: true }));
     const text = parts.filter((p) => !p.thought).map((p) => p.text ?? "").join("");
     const thought = parts.filter((p) => p.thought).map((p) => p.text ?? "").join("");
     const fr = cands?.[0]?.finishReason;
@@ -246,6 +422,7 @@ export function parseChunk(dialect: ChatRequest["dialect"], raw: string): ChatCh
       delta: text,
       done: false,
       ...(thought ? { reasoning: thought } : {}),
+      ...(calls.length ? { toolCalls: calls } : {}),
       ...(fr ? { finish: fr === "MAX_TOKENS" ? "length" as const : "stop" as const } : {}),
       ...(um ? { usage: { inputTokens: um.promptTokenCount ?? 0, outputTokens: um.candidatesTokenCount ?? 0 } } : {}),
     };
@@ -253,7 +430,8 @@ export function parseChunk(dialect: ChatRequest["dialect"], raw: string): ChatCh
 
   const err = json.error as { message?: string } | undefined;
   if (err) throw new Error(err.message ?? "Provider error");
-  type Msg = { content?: string | null; reasoning?: string | null; reasoning_content?: string | null };
+  type RawCall = { index?: number; id?: string; function?: { name?: string; arguments?: string } };
+  type Msg = { content?: string | null; reasoning?: string | null; reasoning_content?: string | null; tool_calls?: RawCall[] };
   const choices = json.choices as Array<{ delta?: Msg; message?: Msg; finish_reason?: string | null }> | undefined;
   const c0 = choices?.[0];
   const delta = c0?.delta?.content ?? c0?.message?.content ?? "";
@@ -262,10 +440,20 @@ export function parseChunk(dialect: ChatRequest["dialect"], raw: string): ChatCh
   const reasoning = c0?.delta?.reasoning ?? c0?.delta?.reasoning_content ?? c0?.message?.reasoning ?? c0?.message?.reasoning_content ?? "";
   const fr = c0?.finish_reason;
   const usage = json.usage as { prompt_tokens?: number; completion_tokens?: number } | undefined;
+  // Streamed calls arrive as delta.tool_calls; a non-streamed reply carries
+  // whole calls on message.tool_calls, which have no index of their own.
+  const rawCalls = c0?.delta?.tool_calls ?? c0?.message?.tool_calls;
+  const toolCalls: ToolCallDelta[] | undefined = rawCalls?.map((c, i) => ({
+    index: c.index ?? i,
+    ...(c.id ? { id: c.id } : {}),
+    ...(c.function?.name ? { name: c.function.name } : {}),
+    ...(c.function?.arguments ? { argsDelta: c.function.arguments } : {}),
+  }));
   return {
     delta,
     done: false,
     ...(reasoning ? { reasoning } : {}),
+    ...(toolCalls?.length ? { toolCalls } : {}),
     ...(fr ? { finish: fr === "length" ? "length" as const : "stop" as const } : {}),
     ...(usage ? { usage: { inputTokens: usage.prompt_tokens ?? 0, outputTokens: usage.completion_tokens ?? 0 } } : {}),
   };

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 import { bus } from "@/kernel/bus";
@@ -10,6 +10,7 @@ import { uid, relTime, download } from "@/lib/format";
 import { Tabs, Empty, ErrorNote, Spinner, Markdown, CopyButton } from "./_ui";
 import { cn } from "@/lib/cn";
 import { Icon } from "@/shell/icons";
+import { registerContextTarget, type TargetContext } from "@/kernel/ctxmenu";
 
 /* ────────────────────────────────────────────────────────────────────────────
    Memory Vault — ported from aurora-os.html.
@@ -138,6 +139,46 @@ Rules:
     } finally { setBusy(null); }
   }, [q, vault.memories]);
 
+  const streamRef = useRef<HTMLDivElement>(null);
+  // Removing a memory is permanent in the store, so the last one removed can be put back.
+  const [undo, setUndo] = useState<{ m: Memory; index: number } | null>(null);
+  const forget = useCallback((m: Memory) => {
+    const index = useVault.getState().memories.findIndex((x) => x.id === m.id);
+    vault.remove(m.id);
+    setUndo({ m, index });
+  }, [vault]);
+  const restoreLast = useCallback(() => {
+    if (!undo) return;
+    useVault.setState((st) => {
+      if (st.memories.some((x) => x.id === undo.m.id)) return st;
+      const next = [...st.memories];
+      next.splice(Math.min(Math.max(0, undo.index), next.length), 0, undo.m);
+      return { memories: next };
+    });
+    setUndo(null);
+  }, [undo]);
+
+  useEffect(() => {
+    const el = streamRef.current;
+    if (!el) return;
+    return registerContextTarget(el, ({ target }: TargetContext) => {
+      const id = (target.closest("[data-memory-id]") as HTMLElement | null)?.dataset.memoryId;
+      const m = id ? useVault.getState().memories.find((x) => x.id === id) : undefined;
+      if (!m) return null;
+      return {
+        id: "vault-memory",
+        entries: [
+          { id: "pin", label: m.pinned ? "Unpin" : "Pin", icon: "star", checked: Boolean(m.pinned), run: () => vault.patch(m.id, { pinned: !m.pinned }) },
+          { id: "kind", label: "Kind", icon: "tune", submenu: KINDS.filter((k) => k !== "reflection").map((k) => ({ id: k, label: k, checked: m.kind === k, run: () => vault.patch(m.id, { kind: k }) })) },
+          { id: "copy", label: "Copy text", icon: "copy", run: () => { void navigator.clipboard.writeText(m.text).then(() => bus.emit("notify", { title: "Memory copied", kind: "success" }), () => setError("The browser refused clipboard access.")); } },
+          { id: "ask", label: "Ask AI about this", icon: "spark", run: () => bus.emit("aios-chat:ask", { prompt: "What should I do with this memory, and does it conflict with anything else I have told you?", context: { label: `a ${m.kind} from my memory vault`, text: m.text } }) },
+          { separator: true },
+          { id: "forget", label: "Forget", icon: "close", danger: true, run: () => forget(m) },
+        ],
+      };
+    });
+  }, [vault, forget, tab]);
+
   const counts = useMemo(() => {
     const c: Record<string, number> = { all: vault.memories.length };
     for (const k of KINDS) c[k] = vault.memories.filter((m) => m.kind === k).length;
@@ -196,9 +237,16 @@ Rules:
           filtered.length === 0 ? (
             <Empty icon="vault" title="Nothing stored" body="Capture facts, preferences and events as you go. Reflect turns the raw stream into durable statements that recall searches first." />
           ) : (
-            <div className="space-y-1.5">
+            <div ref={streamRef} className="space-y-1.5">
+              {undo && (
+                <div className="flex items-center gap-2 rounded-[calc(var(--radius)*0.5)] border border-[var(--border)] px-2 py-1 text-[11px]">
+                  <span className="min-w-0 flex-1 truncate">Forgot &quot;{undo.m.text.slice(0, 60)}&quot;</span>
+                  <button className="os-btn !py-0.5 text-[11px]" onClick={restoreLast}>Undo</button>
+                  <button className="text-[10px] opacity-60 hover:opacity-100" aria-label="Dismiss" onClick={() => setUndo(null)}><Icon name="close" size={10} /></button>
+                </div>
+              )}
               {filtered.map((m) => (
-                <div key={m.id} className={cn("os-card !py-2", m.kind === "reflection" && "!border-[var(--accent2)]")}>
+                <div key={m.id} data-memory-id={m.id} className={cn("os-card !py-2", m.kind === "reflection" && "!border-[var(--accent2)]")}>
                   <div className="flex items-start gap-2">
                     <span className="os-chip mt-0.5 shrink-0 !px-1.5 !py-0 !text-[9.5px]">{m.kind}</span>
                     <div className="min-w-0 flex-1">
@@ -210,7 +258,7 @@ Rules:
                       </div>
                     </div>
                     <button className="shrink-0 text-[10px] opacity-60 hover:opacity-100" title="Pin" aria-label="Pin memory" onClick={() => vault.patch(m.id, { pinned: !m.pinned })}><Icon name="star" size={11} style={{ color: m.pinned ? "var(--accent)" : "inherit" }} /></button>
-                    <button className="shrink-0 text-[10px] opacity-60 hover:opacity-100" onClick={() => vault.remove(m.id)}><Icon name="close" size={11} /></button>
+                    <button className="shrink-0 text-[10px] opacity-60 hover:opacity-100" aria-label="Forget memory" title="Forget (can be undone)" onClick={() => forget(m)}><Icon name="close" size={11} /></button>
                   </div>
                 </div>
               ))}

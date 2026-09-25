@@ -112,7 +112,8 @@ function openApp(appId: string, args?: Record<string, unknown>): ToolResult {
   return { text: `Opened ${app.name} in window ${winId}.` };
 }
 
-async function execTool(tool: string, args: Record<string, unknown>): Promise<ToolResult> {
+/** Exported so DeepSeek Harness (src/lib/dsh/runtime.ts) runs OS actions through the same code. */
+export async function execTool(tool: string, args: Record<string, unknown>): Promise<ToolResult> {
   const wm = useWM.getState();
   const vfs = useVFS.getState();
   switch (tool) {

@@ -39,6 +39,13 @@ const EXAMPLES = [
   "A tally counter with plus, minus and reset",
 ];
 
+const SIZES = [
+  { id: "s", label: "Small", w: 180, h: 120 },
+  { id: "m", label: "Medium", w: 260, h: 170 },
+  { id: "l", label: "Large", w: 340, h: 240 },
+  { id: "wide", label: "Wide", w: 420, h: 170 },
+] as const;
+
 export function WidgetBuilder() {
   const settings = useSettings();
   const store = useCustomWidgets();
@@ -50,6 +57,10 @@ export function WidgetBuilder() {
   const [draft, setDraft] = useState<{ html: string; name: string } | null>(null);
   const [stream, setStream] = useState("");
   const [editing, setEditing] = useState<CustomWidget | null>(null);
+  const [size, setSize] = useState<{ w: number; h: number }>({ w: 260, h: 170 });
+  /** Earlier drafts of this widget, newest last: every model change can be
+   *  stepped back, because a refinement that makes it worse is common. */
+  const [prevDrafts, setPrevDrafts] = useState<string[]>([]);
   const importRef = useRef<HTMLInputElement>(null);
 
   const generate = useCallback(async (instruction?: string, base?: string) => {
@@ -57,7 +68,8 @@ export function WidgetBuilder() {
     if (!p || busy) return;
     setBusy(true); setError(null); setStream("");
     try {
-      const user = base ? `Current widget:\n\`\`\`html\n${base}\n\`\`\`\n\nChange it: ${p}` : p;
+      const sized = `${p}\n\nThe widget box is ${size.w}x${size.h} px.`;
+      const user = base ? `Current widget:\n\`\`\`html\n${base}\n\`\`\`\n\nChange it: ${sized}` : sized;
       const run = (content: string) => ask({
         messages: [{ role: "user", content }],
         system: WIDGET_SYSTEM,
@@ -79,30 +91,32 @@ export function WidgetBuilder() {
         code = extractCode(res.text);
       }
       if (!code) throw new Error(explainNoCode(res.text));
-      setDraft({ html: code, name: p.slice(0, 40) });
+      if (base) setPrevDrafts((d) => [...d, base].slice(-10));
+      setDraft((cur) => ({ html: code, name: cur?.name || p.slice(0, 40) }));
       setStream("");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Generation failed.");
     } finally { setBusy(false); }
-  }, [prompt, busy, choice]);
+  }, [prompt, busy, choice, size]);
 
   const save = useCallback(() => {
     if (!draft) return;
     if (editing) {
-      store.update(editing.id, { html: draft.html, prompt });
+      store.update(editing.id, { html: draft.html, prompt, w: size.w, h: size.h });
       bus.emit("notify", { title: `Updated "${editing.name}"`, kind: "success" });
       setEditing(null);
     } else {
-      const id = store.add({ name: draft.name || "Widget", prompt, html: draft.html, icon: "widgets", w: 260, h: 170 });
+      const id = store.add({ name: draft.name || "Widget", prompt, html: draft.html, icon: "widgets", w: size.w, h: size.h });
       // Placed with its definition attached in one write. The old way added a
       // bare "custom" widget, then patched whichever widget happened to be
       // last — which is the wrong one if anything else placed a widget between.
-      settings.addWidget("custom", { customId: id, w: 260, h: 170 });
+      settings.addWidget("custom", { customId: id, w: size.w, h: size.h });
       bus.emit("notify", { title: "Widget placed on the desktop", kind: "success" });
     }
     setDraft(null);
+    setPrevDrafts([]);
     setPrompt("");
-  }, [draft, editing, prompt, store, settings]);
+  }, [draft, editing, prompt, store, settings, size]);
 
   const exportWidget = useCallback((w: CustomWidget) => {
     const tokens = resolveTokens(settings);
@@ -167,8 +181,18 @@ was exported with baked into \`:root\` — override those to restyle it.
             {busy ? "Building…" : editing ? "Apply change" : "Build widget"}
           </button>
           <ModelOverride id="widget" value={choice} onChange={setChoice} />
+          <select
+            className="os-input !w-auto !py-0.5 text-[11px]"
+            value={SIZES.find((z) => z.w === size.w && z.h === size.h)?.id ?? "custom"}
+            onChange={(e) => { const z = SIZES.find((x) => x.id === e.target.value); if (z) setSize({ w: z.w, h: z.h }); }}
+            aria-label="Widget size"
+            title="The size the widget is built for, previewed at, and placed at"
+          >
+            {SIZES.map((z) => <option key={z.id} value={z.id}>{z.label} {z.w}x{z.h}</option>)}
+            {!SIZES.some((z) => z.w === size.w && z.h === size.h) && <option value="custom">{size.w}x{size.h}</option>}
+          </select>
           {busy && <Spinner label={`${stream.length.toLocaleString()} chars`} />}
-          {editing && <button className="os-btn !py-1 text-[11px]" onClick={() => { setEditing(null); setDraft(null); setPrompt(""); }}>Cancel</button>}
+          {editing && <button className="os-btn !py-1 text-[11px]" onClick={() => { setEditing(null); setDraft(null); setPrevDrafts([]); setPrompt(""); }}>Cancel</button>}
           <div className="flex-1" />
           <button className="os-btn !py-1 text-[11px]" onClick={() => importRef.current?.click()}>Import…</button>
           <input
@@ -207,12 +231,26 @@ was exported with baked into \`:root\` — override those to restyle it.
             />
             <div className="flex-1" />
             <CopyButton text={draft.html} label="Copy HTML" />
-            <button className="os-btn !py-1 text-[11px]" onClick={() => setDraft(null)}>Discard</button>
+            {prevDrafts.length > 0 && (
+              <button
+                className="os-btn !py-1 text-[11px]"
+                title="Go back to the draft before the last change"
+                onClick={() => { const prev = prevDrafts[prevDrafts.length - 1]; setPrevDrafts((d) => d.slice(0, -1)); setDraft({ ...draft, html: prev }); }}
+              >
+                Undo change ({prevDrafts.length})
+              </button>
+            )}
+            {!editing && draft && (
+              <button className="os-btn !py-1 text-[11px]" disabled={busy || !prompt.trim()} title="Apply the text above as a change to this draft" onClick={() => generate(undefined, draft.html)}>
+                Refine draft
+              </button>
+            )}
+            <button className="os-btn !py-1 text-[11px]" onClick={() => { setDraft(null); setPrevDrafts([]); }}>Discard</button>
             <button className="os-btn !py-1 text-[11px]" data-variant="primary" onClick={save}>
               {editing ? "Save changes" : "Place on desktop"}
             </button>
           </div>
-          <div className="mx-auto overflow-hidden rounded-[var(--radius)] border border-[var(--border)]" style={{ width: 264, height: 174, background: "var(--panel)" }}>
+          <div className="mx-auto max-w-full overflow-hidden rounded-[var(--radius)] border border-[var(--border)]" style={{ width: size.w + 4, height: size.h + 4, background: "var(--panel)" }}>
             <iframe srcDoc={preview} sandbox="allow-scripts" title="Widget preview" className="h-full w-full border-0" />
           </div>
           <details className="mt-2">
@@ -262,7 +300,7 @@ was exported with baked into \`:root\` — override those to restyle it.
                 >
                   Place
                 </button>
-                <button className="os-btn !px-2 !py-0.5 text-[10.5px]" onClick={() => { setEditing(w); setDraft({ html: w.html, name: w.name }); setPrompt(""); }}>Refine</button>
+                <button className="os-btn !px-2 !py-0.5 text-[10.5px]" onClick={() => { setEditing(w); setDraft({ html: w.html, name: w.name }); setSize({ w: w.w, h: w.h }); setPrevDrafts([]); setPrompt(""); }}>Refine</button>
                 <button className="os-btn !px-2 !py-0.5 text-[10.5px]" onClick={() => exportWidget(w)}>Export</button>
                 <button
                   className="os-btn !px-2 !py-0.5 text-[10.5px]"
@@ -277,6 +315,7 @@ was exported with baked into \`:root\` — override those to restyle it.
                     // Remove any placed instances too, or they render as tombstones.
                     useSettings.setState({ widgets: useSettings.getState().widgets.filter((x) => x.customId !== w.id) });
                   }}
+                  aria-label={`Delete ${w.name}`}
                 >
                   <Icon name="close" size={10} />
                 </button>

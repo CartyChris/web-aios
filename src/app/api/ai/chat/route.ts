@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { checkBaseUrl } from "@/lib/server-guard";
 import { getProvider } from "@/lib/providers";
-import { streamChat, type ChatMessage } from "@/lib/ai-transport";
+import { streamChat, type ChatMessage, type ToolSpec } from "@/lib/ai-transport";
 
 // Node runtime: Next 16 deprecates the edge runtime, and streaming works
 // identically here.
@@ -26,6 +26,7 @@ export async function POST(req: NextRequest) {
     baseUrl?: string;
     web?: boolean;
     reasoningEffort?: string;
+    tools?: ToolSpec[];
   };
   try {
     body = await req.json();
@@ -67,9 +68,12 @@ export async function POST(req: NextRequest) {
           maxTokens: body.maxTokens,
           web: body.web,
           reasoningEffort: body.reasoningEffort === "low" || body.reasoningEffort === "medium" || body.reasoningEffort === "high" ? body.reasoningEffort : undefined,
+          ...(Array.isArray(body.tools) && body.tools.length ? { tools: body.tools } : {}),
           signal: req.signal,
         })) {
           if (chunk.delta) send({ delta: chunk.delta });
+          // Native tool-call fragments are relayed raw; the client folds them.
+          if (chunk.toolCalls) send({ toolCalls: chunk.toolCalls });
           // Thinking and the stop reason travel too: a client that never sees
           // them cannot tell "said nothing" from "ran out of room thinking".
           if (chunk.reasoning) send({ reasoning: chunk.reasoning });

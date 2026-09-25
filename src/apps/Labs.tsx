@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { useVFS } from "@/kernel/vfs";
 import { bus } from "@/kernel/bus";
 import { ask } from "@/lib/useAI";
@@ -8,6 +8,8 @@ import type { AppProps } from "@/kernel/types";
 import { download } from "@/lib/format";
 import { Markdown, CopyButton, ErrorNote, Empty, Spinner } from "./_ui";
 import { cn } from "@/lib/cn";
+import { Icon } from "@/shell/icons";
+import { relTime } from "@/lib/format";
 
 /* ────────────────────────────────────────────────────────────────────────────
    Builder Labs — ported from Arcwright Beta 0.4.
@@ -148,25 +150,42 @@ What to draw on screen while tuning, and why each readout earns its place.`,
 export default function Labs({}: AppProps) {
   const vfs = useVFS();
   const [lab, setLab] = useState<Lab | null>(null);
-  const [input, setInput] = useState("");
+  // Each lab keeps its own brief, so hopping between labs loses nothing.
+  const [inputs, setInputs] = useState<Record<string, string>>({});
+  const input = lab ? inputs[lab.id] ?? "" : "";
+  const setInput = (v: string) => { if (lab) setInputs((m) => ({ ...m, [lab.id]: v })); };
   const [output, setOutput] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [savedPath, setSavedPath] = useState<string | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+
+  /** Earlier runs of this lab, straight from the filesystem: Save writes them
+   *  to /labs, so the list is whatever is really there. */
+  const past = useMemo(
+    () => (lab ? Object.values(vfs.nodes).filter((n) => n.kind === "file" && n.path.startsWith(`/labs/${lab.id}-`)).sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 12) : []),
+    [vfs.nodes, lab],
+  );
 
   const run = useCallback(async () => {
     if (!lab || !input.trim() || busy) return;
-    setBusy(true); setError(null); setOutput("");
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
+    setBusy(true); setError(null); setOutput(""); setSavedPath(null);
     try {
       const res = await ask({
         messages: [{ role: "user", content: input }],
         system: `${lab.prompt}\n\nWrite the document and nothing else. Be concrete and specific — a blueprint full of placeholders is worse than no blueprint. Where you genuinely do not know something, write what you would need to find out.`,
         maxTokens: 5000,
+        signal: ctrl.signal,
         onDelta: (_d, full) => setOutput(full),
       });
       setOutput(res.text);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Lab failed.");
-    } finally { setBusy(false); }
+      // A stop keeps whatever had streamed in; it is marked, not discarded.
+      if ((e as Error).name === "AbortError") setError("Stopped. The partial document is kept below.");
+      else setError(e instanceof Error ? e.message : "Lab failed.");
+    } finally { setBusy(false); abortRef.current = null; }
   }, [lab, input, busy]);
 
   return (
@@ -175,11 +194,11 @@ export default function Labs({}: AppProps) {
         {LABS.map((l) => (
           <button
             key={l.id}
-            onClick={() => { setLab(l); setOutput(""); }}
+            onClick={() => { setLab(l); setOutput(""); setSavedPath(null); }}
             className={cn("mb-1 block w-full rounded-[calc(var(--radius)*0.6)] px-2 py-2 text-left", lab?.id === l.id ? "bg-[var(--accent)]/16 ring-1 ring-[var(--accent)]/40" : "hover:bg-white/6")}
           >
             <div className="flex items-center gap-1.5 text-[12.5px] font-medium">
-              <span>{l.icon}</span>{l.name}
+              <Icon name={l.icon} size={13} style={{ color: "var(--accent)" }} />{l.name}
             </div>
             <div className="mt-0.5 text-[10px] leading-snug text-[var(--muted)]">{l.blurb}</div>
           </button>
@@ -205,15 +224,18 @@ export default function Labs({}: AppProps) {
                   {busy ? "Running…" : `Run ${lab.name}`}
                 </button>
                 {busy && <Spinner label={`${output.length.toLocaleString()} chars`} />}
+                {busy && <button className="os-btn !py-1 text-[11px]" onClick={() => abortRef.current?.abort()}><Icon name="stop" size={11} className="mr-1" />Stop</button>}
+                {!busy && output && <span className="text-[10.5px] tabular-nums text-[var(--muted)]">{output.split(/\s+/).filter(Boolean).length.toLocaleString()} words</span>}
                 <div className="flex-1" />
                 {output && (
                   <>
                     <CopyButton text={output} />
                     <button
                       className="os-btn !py-1 text-[11px]"
-                      onClick={() => { vfs.write(`/labs/${lab.id}-${Date.now()}.md`, output, { appId: "labs" }); bus.emit("notify", { title: "Saved to Files", kind: "success" }); }}
+                      onClick={() => { const p = `/labs/${lab.id}-${Date.now()}.md`; vfs.write(p, output, { appId: "labs" }); setSavedPath(p); bus.emit("notify", { title: "Saved to Files", body: p, kind: "success" }); }}
+                      disabled={busy}
                     >
-                      Save
+                      {savedPath ? "Saved" : "Save"}
                     </button>
                     <button className="os-btn !py-1 text-[11px]" onClick={() => download(`${lab.id}.md`, output, "text/markdown")}>Export</button>
                   </>
@@ -222,6 +244,24 @@ export default function Labs({}: AppProps) {
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto p-3">
               {output ? <Markdown text={output} /> : <div className="py-10 text-center text-[12px] text-[var(--muted)]">{lab.blurb}</div>}
+              {!busy && past.length > 0 && (
+                <div className="mt-6 border-t border-[var(--border)] pt-3">
+                  <div className="os-label mb-1.5">Saved runs of this lab ({past.length})</div>
+                  <div className="grid gap-1">
+                    {past.map((f) => (
+                      <button
+                        key={f.path}
+                        className={cn("flex items-center gap-2 rounded px-2 py-1 text-left text-[11.5px] hover:bg-white/6", savedPath === f.path && "bg-[var(--accent)]/12")}
+                        onClick={() => { setOutput(vfs.read(f.path)?.content ?? ""); setSavedPath(f.path); }}
+                      >
+                        <Icon name="file" size={12} />
+                        <span className="min-w-0 flex-1 truncate">{f.name}</span>
+                        <span className="shrink-0 text-[10px] text-[var(--muted)]">{relTime(f.updatedAt)}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           </>
         )}

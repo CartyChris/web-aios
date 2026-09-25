@@ -5,7 +5,7 @@ import { useSettings } from "@/kernel/settings";
 import { assistantSteeringLine } from "@/lib/petmind";
 import { bus } from "@/kernel/bus";
 import { getProvider, estimateCost, estimateTokens } from "./providers";
-import { streamChat, messageText, type ChatMessage } from "./ai-transport";
+import { streamChat, messageText, ToolCallAccumulator, type ChatMessage, type ToolCall, type ToolSpec } from "./ai-transport";
 
 export interface AskOptions {
   messages: ChatMessage[];
@@ -36,6 +36,11 @@ export interface AskOptions {
   /** Default true: an empty answer is retried once with more room and less
    *  thinking. Set false where an empty reply is itself the signal. */
   rescueEmpty?: boolean;
+  /** Native tool calling. When the model calls tools, `AskResult.toolCalls`
+   *  carries the complete calls; running them is the caller's job. */
+  tools?: ToolSpec[];
+  /** Fires once per complete tool call after the stream settles. */
+  onToolCall?: (call: ToolCall) => void;
 }
 
 export interface AskResult {
@@ -48,6 +53,8 @@ export interface AskResult {
   finish?: "stop" | "length";
   /** True when the first attempt came back empty and this is the retry. */
   rescued?: boolean;
+  /** Native tool calls the model made (only when `tools` was passed). */
+  toolCalls?: ToolCall[];
 }
 
 /* ────────────────────────────────────────────────────────────────────────────
@@ -105,7 +112,8 @@ async function askSized(opts: AskOptions): Promise<AskResult> {
 
 export async function ask(opts: AskOptions): Promise<AskResult> {
   const first = await askSized(opts);
-  if (first.text.trim() || opts.rescueEmpty === false || opts.signal?.aborted) return first;
+  // A reply that is only tool calls is not empty: the calls are the answer.
+  if (first.text.trim() || first.toolCalls?.length || opts.rescueEmpty === false || opts.signal?.aborted) return first;
   // Empty answer. With a reasoning model this is almost always the whole
   // max_tokens budget spent thinking, so the fix is room plus an instruction to
   // stop deliberating, not the same request again.
@@ -143,6 +151,7 @@ async function askOnce(opts: AskOptions): Promise<AskResult> {
   let reasoning = "";
   let finish: AskResult["finish"];
   let usage = { inputTokens: 0, outputTokens: 0 };
+  const calls = new ToolCallAccumulator();
 
   const spanId = nextSpanId();
   const spanParent = opts.trace?.parentId ?? ambientParent?.parentId ?? null;
@@ -170,9 +179,11 @@ async function askOnce(opts: AskOptions): Promise<AskResult> {
       maxTokens: opts.maxTokens ?? s.ai.maxTokens,
       web: opts.web ?? s.ai.webAccess,
       reasoningEffort: opts.reasoningEffort,
+      ...(opts.tools?.length ? { tools: opts.tools } : {}),
       signal: opts.signal,
     })) {
       if (chunk.delta) { text += chunk.delta; opts.onDelta?.(chunk.delta, text); }
+      if (chunk.toolCalls) calls.add(chunk.toolCalls);
       if (chunk.reasoning) { reasoning += chunk.reasoning; opts.onReasoning?.(chunk.reasoning, reasoning); }
       if (chunk.finish) finish = chunk.finish;
       if (chunk.usage) usage = chunk.usage;
@@ -190,6 +201,7 @@ async function askOnce(opts: AskOptions): Promise<AskResult> {
         baseUrl: s.ai.baseUrls[providerId] || undefined,
         web: opts.web ?? s.ai.webAccess,
         reasoningEffort: opts.reasoningEffort,
+        ...(opts.tools?.length ? { tools: opts.tools } : {}),
       }),
       signal: opts.signal,
     });
@@ -216,8 +228,9 @@ async function askOnce(opts: AskOptions): Promise<AskResult> {
       for (const frame of frames) {
         const line = frame.split("\n").find((l) => l.startsWith("data:"));
         if (!line) continue;
-        const evt = JSON.parse(line.slice(5).trim()) as { delta?: string; reasoning?: string; finish?: AskResult["finish"]; usage?: typeof usage; error?: string; done?: boolean };
+        const evt = JSON.parse(line.slice(5).trim()) as { delta?: string; reasoning?: string; finish?: AskResult["finish"]; usage?: typeof usage; error?: string; done?: boolean; toolCalls?: Parameters<ToolCallAccumulator["add"]>[0] };
         if (evt.error) throw new Error(evt.error);
+        if (evt.toolCalls) calls.add(evt.toolCalls);
         if (evt.delta) { text += evt.delta; opts.onDelta?.(evt.delta, text); }
         if (evt.reasoning) { reasoning += evt.reasoning; opts.onReasoning?.(evt.reasoning, reasoning); }
         if (evt.finish) finish = evt.finish;
@@ -242,7 +255,9 @@ async function askOnce(opts: AskOptions): Promise<AskResult> {
   // stores down with it.
   emitSpan({ endedAt: Date.now(), tokensIn: inTok, tokensOut: outTok, costUsd, text: text.slice(0, 4000) });
 
-  return { text, costUsd, ms, ...(reasoning ? { reasoning } : {}), ...(finish ? { finish } : {}) };
+  const toolCalls = calls.result();
+  for (const c of toolCalls) opts.onToolCall?.(c);
+  return { text, costUsd, ms, ...(reasoning ? { reasoning } : {}), ...(finish ? { finish } : {}), ...(toolCalls.length ? { toolCalls } : {}) };
 }
 
 /** Layer the user's chosen voice and their "about you" note over a task

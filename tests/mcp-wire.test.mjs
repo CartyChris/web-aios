@@ -51,11 +51,15 @@ test("isStateless is a date comparison, not an equality check", () => {
 
 /* ── the stateless core ──────────────────────────────────────────────────── */
 
-test("2026 carries protocol version and client identity in _meta on every request", () => {
+test("2026 carries protocol version, client identity and capabilities in _meta, under the spec's key names", () => {
   const r = buildRequest("tools/call", { name: "search", arguments: { q: "x" } }, ctx());
   const meta = parse(r).params._meta;
-  assert.equal(meta["io.modelcontextprotocol/protocol-version"], "2026-07-28");
-  assert.deepEqual(meta["io.modelcontextprotocol/client"], { name: "web-aios", version: "1.0.0" });
+  // The spec's names, verbatim. This test previously pinned "protocol-version"
+  // and "client", which encoded the bug instead of catching it.
+  assert.equal(meta["io.modelcontextprotocol/protocolVersion"], "2026-07-28");
+  assert.deepEqual(meta["io.modelcontextprotocol/clientInfo"], { name: "web-aios", version: "1.0.0" });
+  assert.ok("io.modelcontextprotocol/clientCapabilities" in meta, "clientCapabilities is REQUIRED on every request");
+  assert.equal(meta["io.modelcontextprotocol/protocol-version"], undefined);
 });
 
 test("_meta rides INSIDE params, and params is created when there were none", () => {

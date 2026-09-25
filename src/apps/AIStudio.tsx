@@ -19,6 +19,11 @@ import { MEDIA_MODELS, generateMedia, awaitMedia, getMediaModel } from "@/lib/me
 import { useMcp, connect as mcpConnect, callTool, toolCatalogue, type McpServer } from "@/lib/mcp";
 import { cn } from "@/lib/cn";
 import { Icon } from "@/shell/icons";
+import { trackJob } from "@/kernel/jobs";
+import {
+  TEMPLATES, injectBridge, readBridge, pushConsole, fixPrompt, lineDiff, diffStats, hunks,
+  pushBuildVersion, changedPath, type Template, type ConsoleEntry, type BuildVersion,
+} from "@/lib/studio-kit";
 
 /* ────────────────────────────────────────────────────────────────────────────
    AI Studio.
@@ -76,7 +81,7 @@ const IDEAS = [
 
 type Tab = "build" | "image" | "video" | "mcp" | "library";
 
-export default function AIStudio({ args }: AppProps) {
+export default function AIStudio({ args, win }: AppProps) {
   const [tab, setTab] = useState<Tab>((args?.tab as Tab) ?? "build");
   const apps = useUserApps((s) => s.apps);
   const [running, setRunning] = useState<UserApp | null>(null);
@@ -118,7 +123,7 @@ export default function AIStudio({ args }: AppProps) {
         active={tab}
         onChange={(t) => setTab(t as Tab)}
       />
-      {tab === "build" && <BuildTab initialPrompt={typeof args?.prompt === "string" ? args.prompt : ""} />}
+      {tab === "build" && <BuildTab initialPrompt={typeof args?.prompt === "string" ? args.prompt : ""} windowId={win?.id} />}
       {tab === "image" && <MediaTab kind="image" />}
       {tab === "video" && <MediaTab kind="video" />}
       {tab === "mcp" && <McpTab />}
@@ -132,7 +137,7 @@ export default function AIStudio({ args }: AppProps) {
    ══════════════════════════════════════════════════════════════════════════ */
 
 /** `initialPrompt` lets another app hand AI Studio an idea to build. */
-function BuildTab({ initialPrompt = "" }: { initialPrompt?: string }) {
+function BuildTab({ initialPrompt = "", windowId }: { initialPrompt?: string; windowId?: string }) {
   const vfs = useVFS();
   const userApps = useUserApps();
   const [group, setGroup] = useState<(typeof TARGET_GROUPS)[number]["id"]>("web");
@@ -151,117 +156,223 @@ function BuildTab({ initialPrompt = "" }: { initialPrompt?: string }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [stream, setStream] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const [view, setView] = useState<"preview" | "code">("preview");
+  const [view, setView] = useState<"preview" | "code" | "diff">("preview");
   const [previewKey, setPreviewKey] = useState(0);
   const [runtimeError, setRuntimeError] = useState<string | null>(null);
+  /* Every generate, pass, manual snapshot and rollback is a version. A
+     rollback APPENDS a version with the old content, so it is itself undoable. */
+  const [versions, setVersions] = useState<BuildVersion[]>([]);
+  const [diffFor, setDiffFor] = useState<string | null>(null);
+  /* The preview's console, forwarded by the injected bridge. The token is
+     minted per run in the handlers that re-run the preview, never in render. */
+  const [runToken, setRunToken] = useState("");
+  const [consoleLog, setConsoleLog] = useState<Array<ConsoleEntry & { count: number }>>([]);
+  const [consoleOpen, setConsoleOpen] = useState(false);
+  const [autoFix, setAutoFix] = useState<{ attempt: number; max: number } | null>(null);
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+  const filesRef = useRef<ProjectFile[] | null>(null);
+  const consoleRef = useRef<Array<ConsoleEntry & { count: number }>>([]);
+  const stopRef = useRef(false);
 
   const target = getTarget(targetId);
 
   // The preview is derived, never stored: editing a file re-links the project
   // on the next render, which is what makes the editor feel live.
   const preview = useMemo(() => (files ? buildPreview(files, targetId) : null), [files, targetId]);
+  // What the iframe actually runs: the preview plus the console bridge. The
+  // exported file never carries the bridge.
+  const previewDoc = useMemo(() => {
+    if (!preview?.html) return null;
+    const origin = typeof window === "undefined" ? "*" : window.location.origin;
+    return injectBridge(preview.html, runToken, origin);
+  }, [preview, runToken]);
 
-  // The preview iframe reports its own failures back up, so a project that
-  // compiles but throws on line one says so instead of showing a blank page.
+  /* Messages are accepted only from THIS preview's window, and bridge
+     messages only with this run's token. The app runs without
+     allow-same-origin, so postMessage is the only way it can speak at all. */
   useEffect(() => {
     const onMsg = (e: MessageEvent) => {
+      if (!iframeRef.current || e.source !== iframeRef.current.contentWindow) return;
       const d = e.data as { __preview?: string; message?: string };
-      if (d?.__preview === "error") setRuntimeError(d.message ?? "Unknown error");
-      if (d?.__preview === "ready") setRuntimeError(null);
+      if (d?.__preview === "error") {
+        setRuntimeError(d.message ?? "Unknown error");
+        consoleRef.current = pushConsole(consoleRef.current, { level: "error", text: d.message ?? "Unknown error" });
+        setConsoleLog(consoleRef.current);
+        return;
+      }
+      if (d?.__preview === "ready") { setRuntimeError(null); return; }
+      const entry = readBridge(e.data, runToken);
+      if (!entry) return;
+      consoleRef.current = pushConsole(consoleRef.current, entry);
+      setConsoleLog(consoleRef.current);
+      if (entry.level === "error") setRuntimeError((r) => r ?? entry.text);
     };
     window.addEventListener("message", onMsg);
     return () => window.removeEventListener("message", onMsg);
-  }, []);
+  }, [runToken]);
 
   const name = useMemo(
     () => (prompt.split(/[.\n]/)[0] || "project").replace(/[^\w -]/g, "").trim().slice(0, 40) || "project",
     [prompt],
   );
 
+  /** Re-run the preview from a clean console. */
+  const rerun = useCallback(() => {
+    consoleRef.current = [];
+    setConsoleLog([]);
+    setRuntimeError(null);
+    setRunToken(uid("run"));
+    setPreviewKey((k) => k + 1);
+  }, []);
+
+  /** The one way files change as a step: state, the ref the fix loop reads,
+   *  and a version. */
+  const commit = useCallback((next: ProjectFile[], label: string) => {
+    filesRef.current = next;
+    setFiles(next);
+    setVersions((v) => pushBuildVersion(v, { id: uid("bv"), at: Date.now(), label, files: next }));
+  }, []);
+
+  const jobTarget = useMemo(() => ({ appId: "studio", args: { tab: "build" }, windowId }), [windowId]);
+
   const generate = useCallback(async () => {
     if (!prompt.trim() || busy) return;
-    setBusy("Building"); setError(null); setStream(""); setRuntimeError(null);
+    setBusy("Building"); setError(null); setStream(""); setRuntimeError(null); setDiffFor(null);
     try {
-      if (target.id === "single-html") {
-        const res = await ask({
-          messages: [{ role: "user", content: prompt }],
-          system: SINGLE_HTML_BRIEF,
-          maxTokens: 16000,
-          onDelta: (_d, full) => setStream(full),
-        });
-        const code = extractCode(res.text);
-        if (!code) throw new Error(explainNoCode(res.text));
-        setFiles([{ path: "index.html", content: code }, ...target.base(name)]);
-        setOpenFile("index.html");
-      } else {
-        const base = target.base(name);
-        const res = await ask({
-          messages: [{ role: "user", content: `Build: ${prompt}` }],
-          system: `${target.brief}\n\n${FILE_FORMAT}\n\nThese files already exist and are correct — do NOT rewrite them: ${base.map((f) => f.path).join(", ")}.\nAt minimum write: ${target.expects.join(", ")}.`,
-          maxTokens: 24000,
-          onDelta: (_d, full) => setStream(full),
-        });
-        const written = parseProjectFiles(res.text);
-        if (!written.length) throw new Error("No files came back in the expected format. Try again, or pick a stronger model in Settings.");
-        const merged = mergeProject(base, written);
-        setFiles(merged);
-        setOpenFile(written[0]?.path ?? merged[0]?.path ?? null);
-      }
+      await trackJob({ kind: "ai", title: `AI Studio: building ${name}`, detail: target.name, target: jobTarget }, async (report) => {
+        let reported = 0;
+        const onDelta = (_d: string, full: string) => {
+          setStream(full);
+          // The count is real; a percentage would be a guess, so there is none.
+          if (full.length - reported >= 800) { reported = full.length; report(undefined, `${full.length.toLocaleString()} chars received`); }
+        };
+        if (target.id === "single-html") {
+          const res = await ask({ messages: [{ role: "user", content: prompt }], system: SINGLE_HTML_BRIEF, maxTokens: 16000, onDelta });
+          const code = extractCode(res.text);
+          if (!code) throw new Error(explainNoCode(res.text));
+          commit([{ path: "index.html", content: code }, ...target.base(name)], `Built: ${prompt.slice(0, 40)}`);
+          setOpenFile("index.html");
+        } else {
+          const base = target.base(name);
+          const res = await ask({
+            messages: [{ role: "user", content: `Build: ${prompt}` }],
+            system: `${target.brief}\n\n${FILE_FORMAT}\n\nThese files already exist and are correct — do NOT rewrite them: ${base.map((f) => f.path).join(", ")}.\nAt minimum write: ${target.expects.join(", ")}.`,
+            maxTokens: 24000,
+            onDelta,
+          });
+          const written = parseProjectFiles(res.text);
+          if (!written.length) throw new Error("No files came back in the expected format. Try again, or pick a stronger model in Settings.");
+          const merged = mergeProject(base, written);
+          commit(merged, `Built: ${prompt.slice(0, 40)}`);
+          setOpenFile(written[0]?.path ?? merged[0]?.path ?? null);
+        }
+      });
       setStream("");
-      setPreviewKey((k) => k + 1);
+      setView("preview");
+      rerun();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Build failed.");
     } finally { setBusy(null); }
-  }, [prompt, busy, target, name]);
+  }, [prompt, busy, target, name, commit, rerun, jobTarget]);
 
-  /** A refinement pass. Multi-file projects send the whole tree and get the
-   *  whole tree back — a patch format would be cheaper and is exactly where
-   *  models produce half-applied edits. */
+  /** One refinement pass over the CURRENT files (read from the ref, so the fix
+   *  loop's second attempt sees the first attempt's result). Throws on failure. */
+  const runPass = useCallback(async (kind: string, instruction: string, onChars?: (n: number) => void) => {
+    const current = filesRef.current;
+    if (!current) throw new Error("Nothing built yet.");
+    setStream("");
+    const onDelta = (_d: string, full: string) => { setStream(full); onChars?.(full.length); };
+    if (targetId === "single-html") {
+      const html = current.find((f) => f.path === "index.html")?.content ?? "";
+      const res = await ask({
+        messages: [{ role: "user", content: html }],
+        system: `${instruction}\n\nOutput only the complete updated HTML document in one fenced code block.`,
+        maxTokens: 16000,
+        onDelta,
+      });
+      const code = extractCode(res.text);
+      if (!code) throw new Error(explainNoCode(res.text));
+      commit(current.map((f) => (f.path === "index.html" ? { ...f, content: code } : f)), PASSES[kind]?.label ?? "Custom change");
+    } else {
+      const source = current
+        .filter((f) => !/^(README\.md|\.gitignore|package-lock\.json)$/.test(f.path))
+        .map((f) => `=== ${f.path} ===\n${f.content}`)
+        .join("\n");
+      const res = await ask({
+        messages: [{ role: "user", content: source }],
+        system: `${instruction}\n\n${FILE_FORMAT}\n\nReturn ONLY the files you actually changed. Write each one in full.`,
+        maxTokens: 24000,
+        onDelta,
+      });
+      const changed = parseProjectFiles(res.text);
+      if (!changed.length) throw new Error("That pass returned no files.");
+      commit(mergeProject(current, changed), PASSES[kind]?.label ?? "Custom change");
+    }
+    setStream("");
+  }, [targetId, commit]);
+
+  /** A refinement pass, tracked as a job. Multi-file projects send the whole
+   *  tree and get the changed files back — a patch format would be cheaper and
+   *  is exactly where models produce half-applied edits. */
   const pass = useCallback(async (kind: string, custom?: string) => {
-    if (!files || busy) return;
-    setBusy(kind); setError(null); setStream("");
+    if (!filesRef.current || busy) return;
+    setBusy(kind); setError(null); setDiffFor(null);
     try {
-      const instruction = custom ?? PASSES[kind].prompt;
-      if (targetId === "single-html") {
-        const html = files.find((f) => f.path === "index.html")?.content ?? "";
-        const res = await ask({
-          messages: [{ role: "user", content: html }],
-          system: `${instruction}\n\nOutput only the complete updated HTML document in one fenced code block.`,
-          maxTokens: 16000,
-          onDelta: (_d, full) => setStream(full),
+      const label = PASSES[kind]?.label ?? "Custom change";
+      await trackJob({ kind: "ai", title: `AI Studio: ${label}`, detail: name, target: jobTarget }, async (report) => {
+        let reported = 0;
+        await runPass(kind, custom ?? PASSES[kind].prompt, (n) => {
+          if (n - reported >= 800) { reported = n; report(undefined, `${n.toLocaleString()} chars received`); }
         });
-        const code = extractCode(res.text);
-        if (!code) throw new Error(explainNoCode(res.text));
-        setFiles(files.map((f) => (f.path === "index.html" ? { ...f, content: code } : f)));
-      } else {
-        const source = files
-          .filter((f) => !/^(README\.md|\.gitignore|package-lock\.json)$/.test(f.path))
-          .map((f) => `=== ${f.path} ===\n${f.content}`)
-          .join("\n");
-        const res = await ask({
-          messages: [{ role: "user", content: source }],
-          system: `${instruction}\n\n${FILE_FORMAT}\n\nReturn ONLY the files you actually changed. Write each one in full.`,
-          maxTokens: 24000,
-          onDelta: (_d, full) => setStream(full),
-        });
-        const changed = parseProjectFiles(res.text);
-        if (!changed.length) throw new Error("That pass returned no files.");
-        setFiles(mergeProject(files, changed));
-      }
-      setStream("");
-      setPreviewKey((k) => k + 1);
-      setRuntimeError(null);
+      });
+      rerun();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Pass failed.");
     } finally { setBusy(null); }
-  }, [files, busy, targetId]);
+  }, [busy, name, jobTarget, runPass, rerun]);
 
-  /** Hand the preview's own runtime error back to the model. This is the pass
-   *  that matters most: the failure text is far better evidence than "fix bugs". */
+  /** Hand the preview's own errors back to the model. The failure text is far
+   *  better evidence than "fix bugs". */
   const repair = useCallback(() => {
-    if (!runtimeError) return;
-    pass("bugfix", `The project throws this error when it runs:\n\n${runtimeError}\n\nFind the cause and fix it. Change nothing else.`);
+    const p = fixPrompt(consoleRef.current) || (runtimeError ? fixPrompt([{ level: "error", text: runtimeError }]) : "");
+    if (p) void pass("bugfix", p);
   }, [runtimeError, pass]);
+
+  /**
+   * The fix loop: send the console errors, re-run the preview, wait for it to
+   * report, and go again while errors remain — up to `max` attempts. Progress
+   * is attempts made out of attempts allowed, which is a real fraction.
+   */
+  const runAutoFix = useCallback(async (max = 3) => {
+    if (busy || !filesRef.current) return;
+    stopRef.current = false;
+    setBusy("autofix"); setError(null); setDiffFor(null);
+    let fixed = false;
+    try {
+      await trackJob({ kind: "ai", title: `AI Studio: fixing ${name}`, target: jobTarget }, async (report) => {
+        for (let attempt = 1; attempt <= max; attempt++) {
+          const p = fixPrompt(consoleRef.current);
+          if (!p) { fixed = true; return; }
+          if (stopRef.current) return;
+          setAutoFix({ attempt, max });
+          report((attempt - 1) / max, `Attempt ${attempt} of ${max}`);
+          await runPass("bugfix", p);
+          rerun();
+          // Give the new build time to load and report before judging it.
+          await new Promise((r) => setTimeout(r, 3500));
+        }
+        fixed = !fixPrompt(consoleRef.current);
+      });
+      bus.emit("notify", {
+        title: fixed ? "No errors left in the preview" : "Errors remain after the fix attempts",
+        body: fixed ? undefined : "Open the console to see what is still failing.",
+        kind: fixed ? "success" : "warn",
+        target: jobTarget,
+      });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "The fix loop failed.");
+    } finally { setBusy(null); setAutoFix(null); }
+  }, [busy, name, jobTarget, runPass, rerun]);
 
   const install = useCallback(() => {
     if (!files) return;
@@ -284,7 +395,30 @@ function BuildTab({ initialPrompt = "" }: { initialPrompt?: string }) {
     bus.emit("notify", { title: `Saved ${files.length} files to ${root}`, kind: "success" });
   }, [files, name, vfs]);
 
+  /** One self-contained document: the linked preview, without the bridge. */
+  const exportHtml = useCallback(() => {
+    if (!preview?.html) return;
+    download(`${name.replace(/\s+/g, "-") || "app"}.html`, preview.html, "text/html");
+  }, [preview, name]);
+
+  const restore = useCallback((v: BuildVersion) => {
+    commit(v.files.map((f) => ({ ...f })), `Rolled back to "${v.label}"`);
+    setDiffFor(null);
+    setView("preview");
+    rerun();
+  }, [commit, rerun]);
+
+  const pickTemplate = useCallback((t: Template) => {
+    const tg = getTarget(t.target);
+    setGroup(tg.group);
+    setTargetId(tg.id);
+    setPrompt(t.prompt);
+  }, []);
+
   const totalKb = files ? rawSize(files) / 1024 : 0;
+  const errors = consoleLog.filter((e) => e.level === "error").reduce((a, e) => a + e.count, 0);
+  const warns = consoleLog.filter((e) => e.level === "warn").reduce((a, e) => a + e.count, 0);
+  const diffVersion = versions.find((v) => v.id === diffFor) ?? null;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -300,7 +434,7 @@ function BuildTab({ initialPrompt = "" }: { initialPrompt?: string }) {
               onClick={() => {
                 setGroup(g.id);
                 const first = TARGETS.find((t) => t.group === g.id);
-                if (first) { setTargetId(first.id); setFiles(null); setRuntimeError(null); }
+                if (first) { setTargetId(first.id); setFiles(null); filesRef.current = null; setRuntimeError(null); setVersions([]); }
               }}
               title={g.hint}
               className={cn(
@@ -316,7 +450,7 @@ function BuildTab({ initialPrompt = "" }: { initialPrompt?: string }) {
           {TARGETS.filter((t) => t.group === group).map((t) => (
             <button
               key={t.id}
-              onClick={() => { setTargetId(t.id); setFiles(null); setRuntimeError(null); }}
+              onClick={() => { setTargetId(t.id); setFiles(null); filesRef.current = null; setRuntimeError(null); setVersions([]); }}
               title={t.blurb}
               className={cn("os-btn !py-1 text-[11px]", targetId === t.id && "!border-[var(--accent)] !bg-[var(--accent)]/16")}
             >
@@ -332,6 +466,7 @@ function BuildTab({ initialPrompt = "" }: { initialPrompt?: string }) {
             onChange={(e) => setPrompt(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && generate()}
             placeholder={`Describe the ${target.group === "engine" ? "game systems" : target.group === "service" ? "service" : "app"} to build…`}
+            aria-label="What to build"
             className="os-input min-w-0 flex-1 !py-1 text-[12px]"
           />
           <button className="os-btn shrink-0 !py-1 text-[11px]" data-variant="primary" onClick={generate} disabled={!!busy || !prompt.trim()}>
@@ -345,7 +480,7 @@ function BuildTab({ initialPrompt = "" }: { initialPrompt?: string }) {
             {IDEAS.slice(0, 4).map((i) => (
               <button key={i} className="os-chip hover:!border-[var(--accent)]" onClick={() => setPrompt(i)}>{i}</button>
             ))}
-            <button className="os-chip" title="Another four" onClick={() => setPrompt(IDEAS[Math.floor(Math.random() * IDEAS.length)])}>
+            <button className="os-chip" title="Another idea" aria-label="Another idea" onClick={() => setPrompt(IDEAS[Math.floor(Math.random() * IDEAS.length)])}>
               <Icon name="refresh" size={10} />
             </button>
           </div>
@@ -366,7 +501,10 @@ function BuildTab({ initialPrompt = "" }: { initialPrompt?: string }) {
               Custom…
             </button>
             <div className="flex-1" />
-            {busy && <Spinner label={`${stream.length.toLocaleString()} chars`} />}
+            {busy && <Spinner label={autoFix ? `Fix attempt ${autoFix.attempt} of ${autoFix.max} · ${stream.length.toLocaleString()} chars` : `${stream.length.toLocaleString()} chars`} />}
+            {busy === "autofix" && (
+              <button className="os-btn !py-0.5 text-[10.5px]" onClick={() => { stopRef.current = true; }} title="Stop after the current attempt">Stop</button>
+            )}
             <span className="os-chip">{files.length} files · {totalKb.toFixed(1)} KB</span>
           </div>
         )}
@@ -374,27 +512,48 @@ function BuildTab({ initialPrompt = "" }: { initialPrompt?: string }) {
 
       {/* ── Runtime error from the preview ── */}
       {runtimeError && (
-        <div className="flex shrink-0 items-center gap-2 border-b border-[var(--danger)] bg-[var(--danger)]/10 px-2.5 py-1.5 text-[11.5px]">
+        <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-[var(--danger)] bg-[var(--danger)]/10 px-2.5 py-1.5 text-[11.5px]">
           <Icon name="warning" size={12} />
           <span className="min-w-0 flex-1 truncate font-[family-name:var(--font-mono)]">{runtimeError}</span>
           <button className="os-btn !py-0.5 text-[10.5px]" data-variant="primary" onClick={repair} disabled={!!busy}>Fix it</button>
+          <button className="os-btn !py-0.5 text-[10.5px]" onClick={() => void runAutoFix(3)} disabled={!!busy} title="Fix, re-run, and repeat while errors remain (up to 3 attempts)">
+            <Icon name="loop" size={11} className="mr-1" />Fix until clean
+          </button>
         </div>
       )}
 
       {/* ── Editor + preview ── */}
       {!files ? (
-        <Empty
-          icon="aistudio"
-          title={busy ? "Building…" : "Nothing built yet"}
-          body={
-            busy
-              ? `${stream.length.toLocaleString()} characters so far.`
-              : "Pick what you are making, describe it, and build. Anything with a browser runtime previews live — React and TypeScript are transpiled and linked right here, so you see it run without npm install."
-          }
-        />
+        busy ? (
+          <Empty icon="aistudio" title="Building…" body={`${stream.length.toLocaleString()} characters so far.`} />
+        ) : (
+          <div className="min-h-0 flex-1 overflow-y-auto p-3">
+            <div className="os-label mb-1.5">Start from a template</div>
+            <div className="grid gap-2" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(min(100%, 190px), 1fr))" }}>
+              {TEMPLATES.map((t) => (
+                <button
+                  key={t.id}
+                  onClick={() => pickTemplate(t)}
+                  className={cn("os-card !p-2.5 text-left transition hover:-translate-y-0.5", prompt === t.prompt && "!border-[var(--accent)]")}
+                >
+                  <div className="mb-1 flex items-center gap-1.5">
+                    <Icon name={t.icon} size={14} style={{ color: "var(--accent)" }} />
+                    <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium">{t.title}</span>
+                  </div>
+                  <div className="text-[10.5px] leading-snug text-[var(--muted)]">{t.blurb}</div>
+                  <div className="mt-1.5"><span className="os-chip !px-1.5 !py-0 !text-[9px]">{getTarget(t.target).name}</span></div>
+                </button>
+              ))}
+            </div>
+            <p className="mt-3 text-[11px] leading-relaxed text-[var(--muted)]">
+              Picking a template fills in the target and the description; press Build when it says what you want. Anything with a browser
+              runtime previews live — React and TypeScript are transpiled and linked right here, so you see it run without npm install.
+            </p>
+          </div>
+        )
       ) : (
         <div className="app-split flex min-h-0 flex-1">
-          {/* files */}
+          {/* files + history */}
           <div className="app-sidebar w-48 shrink-0 overflow-y-auto border-r border-[var(--border)] p-1.5">
             <div className="os-label mb-1 px-1">Project</div>
             {files.map((f) => (
@@ -412,24 +571,63 @@ function BuildTab({ initialPrompt = "" }: { initialPrompt?: string }) {
               <button className="os-btn w-full !py-1 text-[11px]" onClick={() => downloadZip(name, files)}>
                 <Icon name="package" size={11} className="mr-1" />Export .zip
               </button>
+              <button className="os-btn w-full !py-1 text-[11px]" onClick={exportHtml} disabled={!preview?.html} title={preview?.html ? "One self-contained file that runs anywhere" : preview?.reason}>
+                <Icon name="download" size={11} className="mr-1" />Export .html
+              </button>
               <button className="os-btn w-full !py-1 text-[11px]" data-variant="primary" onClick={install}>
                 <Icon name="pin" size={11} className="mr-1" />Install as app
               </button>
+            </div>
+
+            <div className="mt-2 border-t border-[var(--border)] pt-2">
+              <div className="mb-1 flex items-center gap-1 px-1">
+                <span className="os-label !mb-0 flex-1">History ({versions.length})</span>
+                <button
+                  className="os-btn !px-1.5 !py-0 !text-[10px]"
+                  disabled={!!busy}
+                  title="Save the current files as a version"
+                  onClick={() => files && commit(files.map((f) => ({ ...f })), "Manual snapshot")}
+                >
+                  <Icon name="save" size={10} className="mr-0.5" />Snapshot
+                </button>
+              </div>
+              {versions.slice().reverse().map((v, i) => (
+                <div key={v.id} className={cn("mb-0.5 rounded px-1.5 py-1", diffFor === v.id && "bg-[var(--accent)]/12")}>
+                  <div className="flex items-center gap-1">
+                    <span className={cn("min-w-0 flex-1 truncate text-[10.5px]", i === 0 && "font-medium")} title={v.label}>{v.label}</span>
+                    {i === 0 && <span className="os-chip !px-1 !py-0 !text-[8.5px]">now</span>}
+                  </div>
+                  <div className="flex items-center gap-1 text-[9.5px] text-[var(--muted)]">
+                    <span className="flex-1">{relTime(v.at)}</span>
+                    {i > 0 && (
+                      <>
+                        <button className="underline-offset-2 hover:underline" onClick={() => { setDiffFor(v.id); setView("diff"); }} aria-label={`Compare "${v.label}" with the current files`}>Diff</button>
+                        <button className="underline-offset-2 hover:underline" disabled={!!busy} onClick={() => restore(v)} aria-label={`Roll back to "${v.label}"`}>Restore</button>
+                      </>
+                    )}
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
 
           {/* main pane */}
           <div className="flex min-w-0 flex-1 flex-col">
-            <div className="flex shrink-0 items-center gap-1 border-b border-[var(--border)] px-2 py-1">
+            <div className="flex shrink-0 flex-wrap items-center gap-1 border-b border-[var(--border)] px-2 py-1">
               <button onClick={() => setView("preview")} className={cn("os-btn !py-0.5 text-[11px]", view === "preview" && "!border-[var(--accent)] !bg-[var(--accent)]/16")}>
                 <Icon name="live" size={11} className="mr-1" />Preview
               </button>
               <button onClick={() => setView("code")} className={cn("os-btn !py-0.5 text-[11px]", view === "code" && "!border-[var(--accent)] !bg-[var(--accent)]/16")}>
                 <Icon name="ide" size={11} className="mr-1" />Code
               </button>
+              {diffVersion && (
+                <button onClick={() => setView("diff")} className={cn("os-btn !py-0.5 text-[11px]", view === "diff" && "!border-[var(--accent)] !bg-[var(--accent)]/16")}>
+                  <Icon name="layers" size={11} className="mr-1" />Diff
+                </button>
+              )}
               <div className="flex-1" />
               {view === "preview" && preview?.html && (
-                <button className="os-btn !py-0.5 text-[11px]" onClick={() => setPreviewKey((k) => k + 1)} title="Re-run the preview">
+                <button className="os-btn !py-0.5 text-[11px]" onClick={rerun} title="Re-run the preview" aria-label="Re-run the preview">
                   <Icon name="refresh" size={11} />
                 </button>
               )}
@@ -441,24 +639,40 @@ function BuildTab({ initialPrompt = "" }: { initialPrompt?: string }) {
               )}
             </div>
 
-            {view === "code" ? (
+            {view === "diff" && diffVersion ? (
+              <DiffPane from={diffVersion} to={files} onRestore={() => restore(diffVersion)} busy={!!busy} />
+            ) : view === "code" ? (
               <textarea
                 value={busy ? stream : files.find((f) => f.path === openFile)?.content ?? ""}
-                onChange={(e) => setFiles(files.map((f) => (f.path === openFile ? { ...f, content: e.target.value } : f)))}
+                onChange={(e) => { const next = files.map((f) => (f.path === openFile ? { ...f, content: e.target.value } : f)); filesRef.current = next; setFiles(next); }}
                 readOnly={!!busy}
                 spellCheck={false}
+                aria-label={openFile ? `Source of ${openFile}` : "Source"}
                 className="min-h-0 flex-1 resize-none bg-transparent p-2.5 font-[family-name:var(--font-mono)] text-[11px] leading-[1.5] outline-none"
               />
-            ) : preview?.html ? (
+            ) : previewDoc ? (
               <div className="flex min-h-0 flex-1 flex-col">
                 <iframe
+                  ref={iframeRef}
                   key={previewKey}
-                  srcDoc={preview.html}
+                  srcDoc={previewDoc}
+                  // Never allow-same-origin: the app stays an opaque origin.
                   sandbox="allow-scripts allow-forms allow-modals allow-popups"
                   className="min-h-0 flex-1 border-0 bg-white"
                   title="Live preview"
                 />
-                {preview.note && <div className="shrink-0 border-t border-[var(--border)] px-2.5 py-1 text-[10px] text-[var(--muted)]">{preview.note}</div>}
+                <ConsoleStrip
+                  entries={consoleLog}
+                  errors={errors}
+                  warns={warns}
+                  open={consoleOpen}
+                  setOpen={setConsoleOpen}
+                  busy={!!busy}
+                  onFix={repair}
+                  onAutoFix={() => void runAutoFix(3)}
+                  onClear={() => { consoleRef.current = []; setConsoleLog([]); }}
+                />
+                {preview?.note && <div className="shrink-0 border-t border-[var(--border)] px-2.5 py-1 text-[10px] text-[var(--muted)]">{preview.note}</div>}
               </div>
             ) : (
               <NoPreview reason={preview?.reason ?? "No preview."} target={targetId} />
@@ -466,6 +680,106 @@ function BuildTab({ initialPrompt = "" }: { initialPrompt?: string }) {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+/** The preview's console: counts always visible, entries on demand. */
+function ConsoleStrip({ entries, errors, warns, open, setOpen, busy, onFix, onAutoFix, onClear }: {
+  entries: Array<ConsoleEntry & { count: number }>;
+  errors: number;
+  warns: number;
+  open: boolean;
+  setOpen: (v: boolean) => void;
+  busy: boolean;
+  onFix: () => void;
+  onAutoFix: () => void;
+  onClear: () => void;
+}) {
+  return (
+    <div className="shrink-0 border-t border-[var(--border)]">
+      <div className="flex flex-wrap items-center gap-1.5 px-2 py-1 text-[10.5px]">
+        <button className="flex items-center gap-1" onClick={() => setOpen(!open)} aria-expanded={open}>
+          <Icon name={open ? "chevronDown" : "chevronRight"} size={10} />
+          <span className="font-medium">Console</span>
+        </button>
+        <span className={cn("os-chip !px-1.5 !py-0 !text-[9.5px] tabular-nums", errors > 0 && "!border-[var(--danger)] !text-[var(--danger)]")}>{errors} error{errors === 1 ? "" : "s"}</span>
+        <span className="os-chip !px-1.5 !py-0 !text-[9.5px] tabular-nums">{warns} warning{warns === 1 ? "" : "s"}</span>
+        <span className="text-[var(--muted)] tabular-nums">{entries.length} line{entries.length === 1 ? "" : "s"}</span>
+        <div className="flex-1" />
+        {errors > 0 && (
+          <>
+            <button className="os-btn !px-2 !py-0 !text-[10px]" data-variant="primary" disabled={busy} onClick={onFix}>Fix it</button>
+            <button className="os-btn !px-2 !py-0 !text-[10px]" disabled={busy} onClick={onAutoFix}>Fix until clean</button>
+          </>
+        )}
+        {entries.length > 0 && <button className="os-btn !px-2 !py-0 !text-[10px]" onClick={onClear}>Clear</button>}
+      </div>
+      {open && (
+        <div className="max-h-40 overflow-y-auto border-t border-[var(--border)] px-2 py-1 font-[family-name:var(--font-mono)] text-[10.5px]">
+          {entries.length === 0 && <div className="py-1 text-[var(--muted)]">Nothing logged by this run.</div>}
+          {entries.map((e, i) => (
+            <div key={i} className="flex gap-1.5 border-b border-[var(--border)]/40 py-0.5 last:border-0" style={{ color: e.level === "error" ? "var(--danger)" : e.level === "warn" ? "var(--warning, var(--accent2))" : undefined }}>
+              <span className="w-10 shrink-0 opacity-70">{e.level}</span>
+              <span className="min-w-0 flex-1 whitespace-pre-wrap break-words">{e.text}</span>
+              {e.count > 1 && <span className="shrink-0 opacity-70">x{e.count}</span>}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** A real line diff between a version and the current files, cut to the
+ *  changed hunks. */
+function DiffPane({ from, to, onRestore, busy }: { from: BuildVersion; to: ProjectFile[]; onRestore: () => void; busy: boolean }) {
+  const path = changedPath(from.files, to);
+  const [picked, setPicked] = useState<string | null>(null);
+  const file = picked ?? path;
+  const before = from.files.find((f) => f.path === file)?.content ?? "";
+  const after = to.find((f) => f.path === file)?.content ?? "";
+  const d = useMemo(() => (file ? lineDiff(before, after) : null), [file, before, after]);
+  const stats = d ? diffStats(d) : null;
+  const paths = [...new Set([...from.files.map((f) => f.path), ...to.map((f) => f.path)])]
+    .filter((p) => from.files.find((f) => f.path === p)?.content !== to.find((f) => f.path === p)?.content);
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex shrink-0 flex-wrap items-center gap-1.5 border-b border-[var(--border)] px-2.5 py-1.5 text-[11px]">
+        <span className="min-w-0 truncate">&ldquo;{from.label}&rdquo; <Icon name="chevronRight" size={9} /> now</span>
+        {paths.length > 1 && (
+          <select value={file ?? ""} onChange={(e) => setPicked(e.target.value)} className="os-input !w-auto !py-0.5 text-[10.5px]" aria-label="File to compare">
+            {paths.map((p) => <option key={p} value={p}>{p}</option>)}
+          </select>
+        )}
+        {stats && <span className="os-chip !py-0 !text-[10px] tabular-nums">+{stats.added} -{stats.removed}</span>}
+        <div className="flex-1" />
+        <button className="os-btn !py-0.5 text-[10.5px]" data-variant="primary" disabled={busy} onClick={onRestore}>Restore this version</button>
+      </div>
+      <div className="min-h-0 flex-1 overflow-auto p-2 font-[family-name:var(--font-mono)] text-[10.5px] leading-[1.45]">
+        {!file ? (
+          <div className="p-3 text-[var(--muted)]">No differences: this version matches the current files.</div>
+        ) : !d ? (
+          <div className="p-3 text-[var(--muted)]">This change is too large to diff line by line here ({before.split("\n").length.toLocaleString()} and {after.split("\n").length.toLocaleString()} lines).</div>
+        ) : (
+          hunks(d, 3).map((l, i) =>
+            l.op === "gap" ? (
+              <div key={i} className="my-0.5 text-[var(--muted)]">··· {l.skipped} unchanged line{l.skipped === 1 ? "" : "s"}</div>
+            ) : (
+              <div
+                key={i}
+                className="whitespace-pre-wrap break-all px-1"
+                style={{
+                  background: l.op === "add" ? "color-mix(in srgb, var(--ok, #22c55e) 16%, transparent)" : l.op === "del" ? "color-mix(in srgb, var(--danger) 16%, transparent)" : undefined,
+                }}
+              >
+                <span className="mr-1.5 select-none opacity-60">{l.op === "add" ? "+" : l.op === "del" ? "-" : " "}</span>{l.text || " "}
+              </div>
+            ),
+          )
+        )}
+      </div>
     </div>
   );
 }
@@ -874,28 +1188,7 @@ function LibraryTab({ running, setRunning, onBuild }: { running: UserApp | null;
   const settings = useSettings();
   const [panelFor, setPanelFor] = useState<string | null>(null);
 
-  if (running) {
-    return (
-      <div className="flex min-h-0 flex-1 flex-col">
-        <div className="flex shrink-0 items-center gap-1.5 border-b border-[var(--border)] px-2.5 py-1.5">
-          <button className="os-btn !py-1 text-[11px]" onClick={() => setRunning(null)}>‹ Library</button>
-          <Icon name={running.icon || "app"} size={13} style={{ color: "var(--accent)" }} />
-          <span className="min-w-0 flex-1 truncate text-[12px] font-medium">{running.name}</span>
-          {running.files && (
-            <button className="os-btn !py-1 text-[11px]" onClick={() => downloadZip(running.name, running.files!)}>
-              <Icon name="package" size={11} className="mr-1" />Export .zip
-            </button>
-          )}
-        </div>
-        <iframe
-          srcDoc={running.html}
-          sandbox="allow-scripts allow-forms allow-modals allow-popups"
-          className="min-h-0 flex-1 border-0 bg-white"
-          title={running.name}
-        />
-      </div>
-    );
-  }
+  if (running) return <RunningApp app={running} onBack={() => setRunning(null)} onUpdated={(a) => setRunning(a)} />;
 
   return (
     <div className="min-h-0 flex-1 overflow-y-auto p-3">
@@ -958,6 +1251,90 @@ function LibraryTab({ running, setRunning, onBuild }: { running: UserApp | null;
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+/** A library app running in its sandbox, with its console forwarded and a
+ *  one-click AI repair that commits as a new, revertible version. */
+function RunningApp({ app, onBack, onUpdated }: { app: UserApp; onBack: () => void; onUpdated: (a: UserApp) => void }) {
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+  const [runToken, setRunToken] = useState(`run_${app.id}_${app.updatedAt}`);
+  const [log, setLog] = useState<Array<ConsoleEntry & { count: number }>>([]);
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
+  const [runKey, setRunKey] = useState(0);
+  const doc = useMemo(
+    () => injectBridge(app.html, runToken, typeof window === "undefined" ? "*" : window.location.origin),
+    [app.html, runToken],
+  );
+
+  useEffect(() => {
+    const onMsg = (e: MessageEvent) => {
+      if (!iframeRef.current || e.source !== iframeRef.current.contentWindow) return;
+      const entry = readBridge(e.data, runToken);
+      if (entry) setLog((l) => pushConsole(l, entry));
+    };
+    window.addEventListener("message", onMsg);
+    return () => window.removeEventListener("message", onMsg);
+  }, [runToken]);
+
+  const rerun = () => { setLog([]); setRunToken(uid("run")); setRunKey((k) => k + 1); };
+
+  const fix = async () => {
+    const detail = fixPrompt(log);
+    if (!detail || busy) return;
+    setBusy(true); setNote(null);
+    try {
+      const r = await trackJob(
+        { kind: "ai", title: `Fixing ${app.name}`, target: { appId: "studio", args: { tab: "library", runUserApp: app.id } } },
+        async () => upgradeApp({ appId: app.id, intentId: "fix", detail }),
+      );
+      if (!r.ok) setNote(r.reason);
+      else {
+        setNote(`Saved as a new version (${r.changedFiles} file(s), $${r.costUsd.toFixed(4)}). The old one is under Versions.`);
+        const next = useUserApps.getState().get(app.id);
+        if (next) onUpdated(next);
+        rerun();
+      }
+    } catch (e) {
+      setNote(e instanceof Error ? e.message : "The fix failed.");
+    } finally { setBusy(false); }
+  };
+
+  const errors = log.filter((e) => e.level === "error").reduce((a, e) => a + e.count, 0);
+  const warns = log.filter((e) => e.level === "warn").reduce((a, e) => a + e.count, 0);
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex shrink-0 flex-wrap items-center gap-1.5 border-b border-[var(--border)] px-2.5 py-1.5">
+        <button className="os-btn !py-1 text-[11px]" onClick={onBack}>‹ Library</button>
+        <Icon name={app.icon || "app"} size={13} style={{ color: "var(--accent)" }} />
+        <span className="min-w-0 flex-1 truncate text-[12px] font-medium">{app.name}</span>
+        <button className="os-btn !py-1 text-[11px]" onClick={rerun} aria-label="Restart the app" title="Restart"><Icon name="refresh" size={11} /></button>
+        <button className="os-btn !py-1 text-[11px]" onClick={() => download(`${app.name.replace(/\s+/g, "-")}.html`, app.html, "text/html")}>
+          <Icon name="download" size={11} className="mr-1" />.html
+        </button>
+        {app.files && (
+          <button className="os-btn !py-1 text-[11px]" onClick={() => downloadZip(app.name, app.files!)}>
+            <Icon name="package" size={11} className="mr-1" />Export .zip
+          </button>
+        )}
+      </div>
+      {note && <p className="shrink-0 border-b border-[var(--border)] px-2.5 py-1 text-[10.5px] text-[var(--muted)]" role="status">{note}</p>}
+      <iframe
+        ref={iframeRef}
+        key={runKey}
+        srcDoc={doc}
+        sandbox="allow-scripts allow-forms allow-modals allow-popups"
+        className="min-h-0 flex-1 border-0 bg-white"
+        title={app.name}
+      />
+      <ConsoleStrip
+        entries={log} errors={errors} warns={warns} open={open} setOpen={setOpen} busy={busy}
+        onFix={() => void fix()} onAutoFix={() => void fix()} onClear={() => setLog([])}
+      />
     </div>
   );
 }

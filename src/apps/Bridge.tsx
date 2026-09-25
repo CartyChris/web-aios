@@ -40,6 +40,9 @@ export default function Bridge({}: AppProps) {
   const [cmd, setCmd] = useState("");
   const [out, setOut] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
+  // Shell-style recall: Up/Down walk the commands run this session.
+  const [cmdHistory, setCmdHistory] = useState<string[]>([]);
+  const [histAt, setHistAt] = useState(-1);
   const [insecureContext, setInsecureContext] = useState(false);
 
   useEffect(() => {
@@ -78,6 +81,8 @@ export default function Bridge({}: AppProps) {
     if (!base || !cmd.trim() || busy) return;
     setBusy(true);
     setOut((o) => [...o, `$ ${cmd}`]);
+    setCmdHistory((h) => [cmd, ...h.filter((x) => x !== cmd)].slice(0, 50));
+    setHistAt(-1);
     try {
       const res = await fetch(`${base}/exec`, {
         method: "POST",
@@ -181,7 +186,20 @@ export default function Bridge({}: AppProps) {
                 <input
                   value={cmd}
                   onChange={(e) => setCmd(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && run()}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") { void run(); return; }
+                    if (e.key === "ArrowUp" && cmdHistory.length) {
+                      e.preventDefault();
+                      const i = Math.min(histAt + 1, cmdHistory.length - 1);
+                      setHistAt(i); setCmd(cmdHistory[i]);
+                    } else if (e.key === "ArrowDown" && histAt >= 0) {
+                      e.preventDefault();
+                      const i = histAt - 1;
+                      setHistAt(i); setCmd(i >= 0 ? cmdHistory[i] : "");
+                    }
+                  }}
+                  aria-label="Bridge command"
+                  title="Up and Down recall earlier commands"
                   placeholder="Command (allowlisted only)…"
                   className="os-input flex-1 !py-1 font-[family-name:var(--font-mono)] text-[12px]"
                   spellCheck={false}

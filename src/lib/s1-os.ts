@@ -7,6 +7,7 @@
 import { ask } from "./useAI";
 import { runAgentLoop } from "./agent-loop";
 import { startRun } from "./harness-runtime";
+import { runPassed } from "./harness/passed";
 import { makeZip } from "./zip";
 import { useSettings } from "@/kernel/settings";
 import { useWM } from "@/kernel/wm";
@@ -140,7 +141,9 @@ async function runOne(id: HarnessId, task: string, d: RouterRunDeps): Promise<Ha
     const dod = useHarness.getState().dods[0];
     if (!dod) throw new Error("No definition of done is saved in the Harness app.");
     const r = await startRun({ objective: task, dod, signal: d.signal });
-    return { id, ok: r.status === "finished" && !!r.answer, text: r.answer || `(no answer; status ${r.status})` };
+    // Judged by the run's definition-of-done verdict, not by the model saying finish.
+    const judged = runPassed(r);
+    return { id, ok: judged.pass && !!r.answer, text: `${r.answer || "(no answer)"}\n\n(ReAct: ${judged.why})` };
   }
   if (id === "aios_chat") {
     if (aiosChatBusy()) throw new Error("AIOS Chat is already running a prompt.");

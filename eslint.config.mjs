@@ -6,7 +6,9 @@ const config = [
   ...coreWebVitals,
   ...typescript,
   {
-    ignores: [".next/**", "node_modules/**", "public/sw.js", "next-env.d.ts", ".test-build/**"],
+    ignores: [".next/**", "node_modules/**", "public/sw.js", "next-env.d.ts", ".test-build/**",
+      // Third-party code vendored verbatim from DeepSeek Harness (MIT); see src/vendor/dsh/NOTICE.md.
+      "src/vendor/**"],
   },
 ];
 

@@ -16,6 +16,9 @@ import type { SceneDoc, SceneEntity, ScenePart } from "@/lib/forge-scene";
 import type { Light, Emitter, Vec3 } from "@/lib/forge-render";
 import { cn } from "@/lib/cn";
 import { Icon } from "@/shell/icons";
+import { initHistory, record, undo as undoStep, redo as redoStep, canUndo, canRedo, type History } from "@/lib/undo-history";
+import { snapVec, dropToGround, duplicatePosition, alignTo, type V3, type AlignAxis } from "@/lib/forge-ops";
+import { exportMeshes, saveBlob, type MeshFormat } from "./_forgeExport";
 
 /* ────────────────────────────────────────────────────────────────────────────
    Forge 3D — build a world with a model, then let it look at what it built.
@@ -165,7 +168,26 @@ function loadScene(): Scene {
 export default function Forge3D({ args }: AppProps) {
   const assets = useAssets();
   const vfs = useVFS();
-  const [scene, setScene] = useState<Scene>(loadScene);
+  /* The scene lives inside an undo history. Children still receive a plain
+     setScene: their edits are recorded under one key, so a slider drag or a
+     number being typed folds into a single step. Discrete actions (duplicate,
+     align, delete, import) go through `commitScene`, which is always its own
+     step. */
+  const [hist, setHist] = useState<History<Scene>>(() => initHistory(loadScene()));
+  const scene = hist.present;
+  const setScene = useCallback<React.Dispatch<React.SetStateAction<Scene>>>((u) => {
+    const now = Date.now();
+    setHist((h) => record(h, typeof u === "function" ? (u as (s: Scene) => Scene)(h.present) : u, { now, key: "edit" }));
+  }, []);
+  const commitScene = useCallback((u: (s: Scene) => Scene) => {
+    const now = Date.now();
+    setHist((h) => record(h, u(h.present), { now }));
+  }, []);
+  const doUndo = useCallback(() => setHist((h) => undoStep(h)), []);
+  const doRedo = useCallback(() => setHist((h) => redoStep(h)), []);
+  /** Grid snap for moves (metres) and turns (degrees). 0 is off. */
+  const [snap, setSnap] = useState<{ move: number; turn: number }>({ move: 0, turn: 0 });
+  const [exporting, setExporting] = useState<MeshFormat | null>(null);
   const [sel, setSel] = useState<string | null>(null);
   const [panel, setPanel] = useState<"make" | "scene" | "look">("make");
   const [error, setError] = useState<string | null>(null);
@@ -203,20 +225,24 @@ export default function Forge3D({ args }: AppProps) {
   const spawn = useCallback((assetId: string) => {
     const a = assets.assets.find((x) => x.id === assetId);
     if (!a) return;
-    setScene((s) => {
+    // Id and heading are chosen out here: an updater may run twice, and must
+    // be pure. Spawning is its own undo step.
+    const id = uid("ent");
+    const heading = Math.round(Math.random() * 360);
+    commitScene((s) => {
       // Drop it somewhere free rather than on top of whatever is at the origin.
       const ring = s.entities.length;
       const angle = ring * 2.4;
       const e: Entity = {
-        id: uid("ent"), name: a.name, assetId: a.id,
+        id, name: a.name, assetId: a.id,
         position: [Math.round(Math.cos(angle) * (2 + ring * 1.4) * 10) / 10, 0, Math.round(Math.sin(angle) * (2 + ring * 1.4) * 10) / 10],
-        rotation: [0, Math.round(Math.random() * 360), 0], scale: [1, 1, 1],
+        rotation: [0, heading, 0], scale: [1, 1, 1],
         visible: true, parts: a.parts, physics: a.physics,
       };
-      setSel(e.id);
       return { ...s, entities: [...s.entities, e] };
     });
-  }, [assets.assets]);
+    setSel(id);
+  }, [assets.assets, commitScene]);
 
   const spawnArg = args?.spawnAsset as string | undefined;
   const [spawnedArg, setSpawnedArg] = useState<string | undefined>(undefined);
@@ -227,8 +253,66 @@ export default function Forge3D({ args }: AppProps) {
 
   const entity = scene.entities.find((e) => e.id === sel) ?? null;
   const patch = useCallback((id: string, p: Partial<Entity>) => {
-    setScene((s) => ({ ...s, entities: s.entities.map((e) => (e.id === id ? { ...e, ...p } : e)) }));
-  }, []);
+    const q = { ...p };
+    if (snap.move > 0 && q.position) q.position = snapVec(q.position as V3, snap.move);
+    if (snap.turn > 0 && q.rotation) q.rotation = snapVec(q.rotation as V3, snap.turn);
+    setScene((s) => ({ ...s, entities: s.entities.map((e) => (e.id === id ? { ...e, ...q } : e)) }));
+  }, [snap, setScene]);
+
+  /* ── discrete edits, each its own undo step ── */
+
+  const duplicate = useCallback((id: string) => {
+    // The id is minted out here: an updater may run twice, and must be pure.
+    const nid = uid("ent");
+    commitScene((s) => {
+      const src = s.entities.find((e) => e.id === id);
+      if (!src) return s;
+      const c: Entity = { ...src, id: nid, name: `${src.name} copy`, position: duplicatePosition(src.position as V3, s.entities.map((e) => e.position as V3)) };
+      return { ...s, entities: [...s.entities, c] };
+    });
+    setSel(nid);
+  }, [commitScene]);
+
+  const removeEntity = useCallback((id: string) => {
+    commitScene((s) => ({ ...s, entities: s.entities.filter((x) => x.id !== id) }));
+    setSel((cur) => (cur === id ? null : cur));
+  }, [commitScene]);
+
+  const ground = useCallback((id: string) => {
+    commitScene((s) => ({ ...s, entities: s.entities.map((e) => (e.id === id ? { ...e, position: dropToGround(e.position as V3, e.parts, e.scale as V3) } : e)) }));
+  }, [commitScene]);
+
+  const alignOthers = useCallback((id: string, axis: AlignAxis) => {
+    commitScene((s) => {
+      const ref = s.entities.find((e) => e.id === id);
+      if (!ref) return s;
+      return { ...s, entities: s.entities.map((e) => (e.id === id ? e : { ...e, position: alignTo([e.position as V3], ref.position as V3, axis)[0] })) };
+    });
+  }, [commitScene]);
+
+  const exportAs = useCallback(async (format: MeshFormat, only?: string[]) => {
+    setExporting(format);
+    setError(null);
+    try {
+      const out = await exportMeshes(scene, scene.name, format, only);
+      saveBlob(out.blob, out.filename);
+      bus.emit("notify", { title: `Exported ${out.filename}`, body: `${out.meshes} mesh${out.meshes === 1 ? "" : "es"}, ${(out.bytes / 1024).toFixed(1)} KB`, kind: "success" });
+    } catch (e) {
+      setError(e instanceof Error ? `Export failed: ${e.message}` : "Export failed.");
+    } finally { setExporting(null); }
+  }, [scene]);
+
+  const onKey = useCallback((e: React.KeyboardEvent) => {
+    const t = e.target as HTMLElement;
+    if (t.closest("input, textarea, select, [contenteditable]")) return;
+    const mod = e.metaKey || e.ctrlKey;
+    const k = e.key.toLowerCase();
+    if (mod && k === "z" && !e.shiftKey) { e.preventDefault(); doUndo(); }
+    else if (mod && ((k === "z" && e.shiftKey) || k === "y")) { e.preventDefault(); doRedo(); }
+    else if (mod && k === "d" && sel) { e.preventDefault(); duplicate(sel); }
+    else if ((e.key === "Delete" || e.key === "Backspace") && sel) { e.preventDefault(); removeEntity(sel); }
+    else if (k === "g" && sel && !mod) { e.preventDefault(); ground(sel); }
+  }, [doUndo, doRedo, duplicate, removeEntity, ground, sel]);
 
   const capture = useCallback((max?: number) => viewportRef.current?.capture(max) ?? null, []);
   const exportScene = useCallback(() => JSON.stringify({ __forge3d: 3, scene }, null, 2), [scene]);
@@ -246,14 +330,15 @@ export default function Forge3D({ args }: AppProps) {
     [scene.name, exportScene],
   );
   const clearScene = useCallback(() => {
-    setScene((s) => ({ ...BLANK, name: s.name, lights: DEFAULT_LIGHTS.map((l) => ({ ...l })) }));
+    // Undoable, which is what makes it safe to leave in a menu without a confirm.
+    commitScene((s) => ({ ...BLANK, name: s.name, lights: DEFAULT_LIGHTS.map((l) => ({ ...l })) }));
     setSel(null);
-  }, []);
+  }, [commitScene]);
 
   const partCount = useMemo(() => scene.entities.reduce((a, e) => a + e.parts.length, 0), [scene.entities]);
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full flex-col outline-none" tabIndex={-1} onKeyDown={onKey}>
       {/* ── Title bar: the name, the state of things, and one menu ── */}
       <div className="flex shrink-0 items-center gap-2 border-b border-[var(--border)] px-2.5 py-1.5">
         <input
@@ -263,6 +348,24 @@ export default function Forge3D({ args }: AppProps) {
           aria-label="Scene name"
         />
         <div className="flex-1" />
+        <button className="os-btn !px-1.5 !py-1 text-[11px]" onClick={doUndo} disabled={!canUndo(hist)} title={`Undo (Ctrl+Z) · ${hist.past.length} step${hist.past.length === 1 ? "" : "s"}`} aria-label="Undo">
+          <Icon name="refresh" size={12} style={{ transform: "scaleX(-1)" }} />
+        </button>
+        <button className="os-btn !px-1.5 !py-1 text-[11px]" onClick={doRedo} disabled={!canRedo(hist)} title={`Redo (Ctrl+Shift+Z) · ${hist.future.length} step${hist.future.length === 1 ? "" : "s"}`} aria-label="Redo">
+          <Icon name="refresh" size={12} />
+        </button>
+        <select
+          className="os-input !w-auto !py-0.5 text-[10.5px]"
+          value={`${snap.move}|${snap.turn}`}
+          onChange={(e) => { const [m, t] = e.target.value.split("|").map(Number); setSnap({ move: m, turn: t }); }}
+          aria-label="Snap"
+          title="Snap moves and turns to a grid"
+        >
+          <option value="0|0">snap off</option>
+          <option value="0.25|15">0.25 m · 15°</option>
+          <option value="0.5|15">0.5 m · 15°</option>
+          <option value="1|45">1 m · 45°</option>
+        </select>
         <span className="os-chip tabular-nums" title="Objects · parts · lights · effects">
           {scene.entities.length} · {partCount}p · {scene.lights.length}L · {scene.fx.length}fx
         </span>
@@ -277,6 +380,8 @@ export default function Forge3D({ args }: AppProps) {
               <div className="glass absolute right-0 top-full z-[50] mt-1 w-48 p-1.5 shadow-2xl" style={{ borderRadius: "var(--radius)" }}>
                 <MenuItem icon="save" label="Save to Files" onClick={() => { saveToFiles(); setMenu(false); }} />
                 <MenuItem icon="download" label="Export .json" onClick={() => { exportJson(); setMenu(false); }} />
+                <MenuItem icon="package" label={exporting === "glb" ? "Exporting .glb…" : "Export .glb (glTF)"} onClick={() => { setMenu(false); void exportAs("glb"); }} />
+                <MenuItem icon="package" label={exporting === "obj" ? "Exporting .obj…" : "Export .obj"} onClick={() => { setMenu(false); void exportAs("obj"); }} />
                 <MenuItem icon="grid" label={grid ? "Hide grid" : "Show grid"} onClick={() => { setGrid((g) => !g); setMenu(false); }} />
                 <MenuItem icon="eye" label="Frame scene" onClick={() => { frameScene(); setMenu(false); }} />
                 <MenuItem icon="trash" label="Clear scene" onClick={() => { clearScene(); setMenu(false); }} />
@@ -292,7 +397,7 @@ export default function Forge3D({ args }: AppProps) {
                         const parsed = JSON.parse(await f.text());
                         const sc = parsed.scene ?? parsed;
                         if (!Array.isArray(sc.entities)) throw new Error("No entities array found.");
-                        setScene({ ...BLANK, ...sc, lights: sc.lights?.length ? sc.lights : DEFAULT_LIGHTS, fx: sc.fx ?? [] });
+                        commitScene(() => ({ ...BLANK, ...sc, lights: sc.lights?.length ? sc.lights : DEFAULT_LIGHTS, fx: sc.fx ?? [] }));
                         setTimeout(frameScene, 60);
                       } catch (err) { setError(err instanceof Error ? err.message : "Import failed."); }
                       e.target.value = "";
@@ -323,8 +428,13 @@ export default function Forge3D({ args }: AppProps) {
             </div>
           )}
           <div className="pointer-events-none absolute bottom-2 left-2 rounded px-2 py-1 text-[10px] text-[var(--muted)]" style={{ background: "color-mix(in srgb, var(--bg) 62%, transparent)" }}>
-            drag orbit · right-drag pan · scroll zoom · click to select
+            drag orbit · right-drag pan · scroll zoom · click to select · Ctrl+Z undo
           </div>
+          {exporting && (
+            <div className="absolute right-2 top-2 rounded px-2 py-1 text-[10.5px]" style={{ background: "color-mix(in srgb, var(--bg) 75%, transparent)" }} role="status">
+              <Spinner label={`Exporting .${exporting}…`} />
+            </div>
+          )}
         </div>
 
         {/* ── Panel ── */}
@@ -344,7 +454,9 @@ export default function Forge3D({ args }: AppProps) {
             ))}
           </div>
 
-          <div className="min-h-0 flex-1 overflow-y-auto p-2.5">
+          {/* The bottom padding keeps the last row (rotation, scale) scrollable
+              clear of a phone's home indicator and the shell's own bar. */}
+          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-2.5 pb-[calc(env(safe-area-inset-bottom,0px)+3rem)]">
             {panel === "make" && (
               <MakePanel
                 scene={scene}
@@ -359,6 +471,7 @@ export default function Forge3D({ args }: AppProps) {
               <ScenePanel
                 scene={scene} setScene={setScene} sel={sel} setSel={setSel}
                 entity={entity} patch={patch} assets={assets} spawn={spawn}
+                ops={{ duplicate, remove: removeEntity, ground, alignOthers, exportOne: (id, f) => void exportAs(f, [id]), busy: !!exporting }}
               />
             )}
             {panel === "look" && <LookPanel scene={scene} setScene={setScene} />}
@@ -613,7 +726,16 @@ Say what is actually visible and what is wrong with it. Be specific and concrete
    SCENE — what is in it, and the selected object
    ══════════════════════════════════════════════════════════════════════════ */
 
-function ScenePanel({ scene, setScene, sel, setSel, entity, patch, assets, spawn }: {
+interface SceneOps {
+  duplicate: (id: string) => void;
+  remove: (id: string) => void;
+  ground: (id: string) => void;
+  alignOthers: (id: string, axis: AlignAxis) => void;
+  exportOne: (id: string, f: MeshFormat) => void;
+  busy: boolean;
+}
+
+function ScenePanel({ scene, sel, setSel, entity, patch, assets, spawn, ops }: {
   scene: Scene;
   setScene: React.Dispatch<React.SetStateAction<Scene>>;
   sel: string | null;
@@ -622,6 +744,7 @@ function ScenePanel({ scene, setScene, sel, setSel, entity, patch, assets, spawn
   patch: (id: string, p: Partial<Entity>) => void;
   assets: { assets: Asset[]; add: (a: Asset) => void };
   spawn: (id: string) => void;
+  ops: SceneOps;
 }) {
   return (
     <div>
@@ -634,15 +757,16 @@ function ScenePanel({ scene, setScene, sel, setSel, entity, patch, assets, spawn
       <div className="mb-3 space-y-0.5">
         {scene.entities.map((e) => (
           <div key={e.id} className={cn("flex items-center gap-1.5 rounded-md px-1.5 py-1", sel === e.id ? "bg-[var(--accent)]/16" : "hover:bg-white/6")}>
-            <button onClick={() => patch(e.id, { visible: !e.visible })} className="opacity-60 hover:opacity-100" title={e.visible ? "Hide" : "Show"}>
+            <button onClick={() => patch(e.id, { visible: !e.visible })} className="opacity-60 hover:opacity-100" title={e.visible ? "Hide" : "Show"} aria-label={`${e.visible ? "Hide" : "Show"} ${e.name}`}>
               <Icon name={e.visible ? "eye" : "eyeoff"} size={11} />
             </button>
             <button onClick={() => setSel(e.id)} className="min-w-0 flex-1 truncate text-left text-[11.5px]">{e.name}</button>
             <span className="shrink-0 text-[9px] text-[var(--muted)]" title={`${e.parts.length} parts`}>{e.parts.length}</span>
             <button
               className="opacity-40 hover:opacity-100"
-              onClick={() => { setScene((s) => ({ ...s, entities: s.entities.filter((x) => x.id !== e.id) })); if (sel === e.id) setSel(null); }}
+              onClick={() => ops.remove(e.id)}
               aria-label={`Delete ${e.name}`}
+              title="Delete (undo with Ctrl+Z)"
             >
               <Icon name="close" size={11} />
             </button>
@@ -674,15 +798,11 @@ function ScenePanel({ scene, setScene, sel, setSel, entity, patch, assets, spawn
             </div>
           ))}
           <div className="mt-2 flex flex-wrap gap-1">
-            <button
-              className="os-btn !px-2 !py-0.5 text-[10.5px]"
-              onClick={() => {
-                const c: Entity = { ...entity, id: uid("ent"), position: [entity.position[0] + 3, entity.position[1], entity.position[2]] };
-                setScene((s) => ({ ...s, entities: [...s.entities, c] }));
-                setSel(c.id);
-              }}
-            >
+            <button className="os-btn !px-2 !py-0.5 text-[10.5px]" title="Duplicate (Ctrl+D), placed clear of other objects" onClick={() => ops.duplicate(entity.id)}>
               Duplicate
+            </button>
+            <button className="os-btn !px-2 !py-0.5 text-[10.5px]" title="Rest the lowest part on the ground (G). Rotation is not accounted for." onClick={() => ops.ground(entity.id)}>
+              Drop to ground
             </button>
             <button
               className="os-btn !px-2 !py-0.5 text-[10.5px]"
@@ -698,6 +818,23 @@ function ScenePanel({ scene, setScene, sel, setSel, entity, patch, assets, spawn
             >
               Save as asset
             </button>
+          </div>
+          <div className="mt-2 flex flex-wrap items-center gap-1">
+            <span className="text-[10px] text-[var(--muted)]">Align others to this:</span>
+            {([0, 1, 2] as const).map((axis) => (
+              <button
+                key={axis}
+                className="os-btn !px-2 !py-0.5 text-[10.5px]"
+                disabled={scene.entities.length < 2}
+                aria-label={`Align every other object's ${"XYZ"[axis]} to this one`}
+                onClick={() => ops.alignOthers(entity.id, axis)}
+              >
+                {"XYZ"[axis]}
+              </button>
+            ))}
+            <span className="flex-1" />
+            <button className="os-btn !px-2 !py-0.5 text-[10.5px]" disabled={ops.busy} onClick={() => ops.exportOne(entity.id, "glb")}>.glb</button>
+            <button className="os-btn !px-2 !py-0.5 text-[10.5px]" disabled={ops.busy} onClick={() => ops.exportOne(entity.id, "obj")}>.obj</button>
           </div>
         </div>
       )}

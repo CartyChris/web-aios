@@ -6,6 +6,7 @@ import { useHarness } from "@/kernel/harness";
 import { useTriggers, attemptFrom } from "@/kernel/triggers";
 import { useSettings } from "@/kernel/settings";
 import { useJobs } from "@/kernel/jobs";
+import { runPassed } from "./harness/passed";
 import { registerAiosModule } from "./aios-api";
 import { uid } from "./format";
 import { startRun } from "./harness-runtime";
@@ -101,7 +102,9 @@ async function dispatch(kind: TriggerKind, signal: string, payload: unknown) {
         dod,
         trigger: { triggerId: spec.id, kind, payload, dedupeKey: decision.event.dedupeKey },
       });
-      useJobs.getState().finish(jobId, result.status === "finished" ? "done" : "error", `${result.status} · ${result.totals.steps} steps`);
+      // The verdict, not the status: "finished" is the model's own claim.
+      const judged = runPassed(result);
+      useJobs.getState().finish(jobId, judged.pass ? "done" : "error", `${judged.why} · ${result.totals.steps} steps`);
       store.recordAttempt({
         ...attempt,
         id: uid("att"),

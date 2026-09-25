@@ -14,6 +14,65 @@ import { bytes, download } from "@/lib/format";
 import { Tabs, Slider, Field, ErrorNote, Spinner } from "./_ui";
 import { cn } from "@/lib/cn";
 import { Icon } from "@/shell/icons";
+import { chordKeys, findConflicts, actionLabel, searchSettings, type SettingEntry } from "@/lib/keyhelp";
+
+const TAB_LABELS: Record<string, string> = {
+  providers: "Providers & Keys", ai: "AI", keys: "Keyboard", screen: "Phone & Screen", privacy: "Privacy", storage: "Storage", about: "About",
+};
+const E = (tab: string, label: string, keywords: string): SettingEntry => ({ tab, tabLabel: TAB_LABELS[tab], label, keywords });
+
+/** What the search box can find. Each entry names a real control on that tab. */
+const SETTINGS_INDEX: SettingEntry[] = [
+  E("providers", "API keys", "key token secret openai anthropic gemini openrouter groq provider"),
+  E("providers", "Active provider", "use switch provider vendor"),
+  E("providers", "Base URL", "endpoint server compatible url host"),
+  E("providers", "Refresh model list", "models catalogue catalog sync list"),
+  E("providers", "Local models", "ollama lm studio localhost offline"),
+  E("ai", "Model", "model id gpt claude llm"),
+  E("ai", "Temperature", "creativity randomness sampling"),
+  E("ai", "Max tokens per reply", "length output limit tokens"),
+  E("ai", "Budget cap", "budget spend cost limit usd dollars money"),
+  E("ai", "Estimated spend", "cost spent usage money"),
+  E("ai", "Default system prompt", "persona instructions system prompt"),
+  E("keys", "Keyboard shortcuts", "keybinds hotkeys shortcut bindings chord"),
+  E("keys", "Shortcut cheat sheet", "cheatsheet overview list help keys"),
+  E("keys", "Reset all shortcuts", "default restore keybinds"),
+  E("screen", "Phone layout", "mobile phone desktop auto layout screen"),
+  E("screen", "Phone tips", "tips hints onboarding"),
+  E("privacy", "What leaves this browser", "network data privacy telemetry"),
+  E("privacy", "App permissions", "permissions allow deny apps"),
+  E("privacy", "Erase everything", "reset wipe delete clear data"),
+  E("storage", "Filesystem usage", "storage files bytes quota vfs"),
+  E("storage", "Local storage keys", "localstorage persist keys size"),
+  E("storage", "Export and import", "backup export import json"),
+  E("about", "Version and runtime", "about version pwa runtime build"),
+];
+
+/** Shortcuts that are fixed rather than user-editable, so the cheat sheet is complete. */
+const FIXED_SHORTCUTS: Array<{ where: string; keys: string; what: string }> = [
+  { where: "Anywhere", keys: "shift+f10", what: "Open the context menu for the focused item (or the Menu key)" },
+  { where: "Menus", keys: "up / down / home / end", what: "Move through a context menu; type a letter to jump" },
+  { where: "Menus", keys: "escape", what: "Close a menu or dialog" },
+  { where: "Terminal", keys: "up / down", what: "Walk command history (kept across reloads)" },
+  { where: "Terminal", keys: "tab", what: "Complete a command or a file path" },
+  { where: "Terminal", keys: "ctrl+l", what: "Clear the screen" },
+  { where: "Calculator", keys: "enter / =", what: "Evaluate and add to history" },
+  { where: "Calculator", keys: "escape", what: "Clear the expression" },
+  { where: "Tasks", keys: "enter", what: "Quick add: \"tomorrow 3pm call Sam !high\"" },
+  { where: "Settings", keys: "?", what: "Open this cheat sheet" },
+];
+
+const isMacLike = () => typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
+
+function Keys({ chord, mac }: { chord: string; mac: boolean }) {
+  // Fixed shortcuts are written "up / down"; editable ones are "mod+shift+t".
+  if (chord.includes(" / ")) return <span className="flex flex-wrap gap-0.5">{chord.split(" / ").map((c, i) => <Keys key={i} chord={c} mac={mac} />)}</span>;
+  return (
+    <span className="flex gap-0.5">
+      {chordKeys(chord, mac).map((k, i) => <kbd key={i} className="rounded border border-[var(--border)] bg-white/8 px-1 font-[family-name:var(--font-mono)] text-[10.5px]">{k}</kbd>)}
+    </span>
+  );
+}
 
 /** Settings — providers and keys, AI tuning, keybindings, privacy and storage. */
 export default function Settings({}: AppProps) {
@@ -24,6 +83,12 @@ export default function Settings({}: AppProps) {
   const [error, setError] = useState<string | null>(null);
   const [reveal, setReveal] = useState<string | null>(null);
   const [capturing, setCapturing] = useState<string | null>(null);
+  const [find, setFind] = useState("");
+  const [sheet, setSheet] = useState(false);
+  const [mac] = useState(isMacLike);
+  const found = searchSettings(SETTINGS_INDEX, find);
+  const conflicts = findConflicts(s.keybinds);
+  const conflicted = new Set(conflicts.flatMap((c) => c.actions));
 
   const provider = getProvider(s.ai.provider);
 
@@ -59,7 +124,40 @@ export default function Settings({}: AppProps) {
   const usage = vfs.usage();
 
   return (
-    <div className="flex h-full flex-col">
+    <div
+      className="relative flex h-full flex-col"
+      onKeyDown={(e) => {
+        const t = e.target as HTMLElement;
+        if (e.key === "?" && !capturing && t.tagName !== "INPUT" && t.tagName !== "TEXTAREA" && t.tagName !== "SELECT") { e.preventDefault(); setSheet(true); }
+        if (e.key === "Escape" && sheet) setSheet(false);
+      }}
+    >
+      <div className="flex shrink-0 items-center gap-1.5 border-b border-[var(--border)] px-2.5 py-1.5">
+        <Icon name="search" size={12} className="text-[var(--muted)]" />
+        <input
+          value={find}
+          onChange={(e) => setFind(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter" && found[0]) { setTab(found[0].tab); setFind(""); } if (e.key === "Escape") setFind(""); }}
+          placeholder="Search settings (budget, keys, ollama...)"
+          aria-label="Search settings"
+          className="os-input min-w-0 flex-1 !py-1 text-[12px]"
+        />
+        <button className="os-btn !py-1 text-[11px]" onClick={() => setSheet(true)} aria-label="Keyboard shortcut cheat sheet" title="Keyboard shortcuts (?)">
+          <Icon name="keyboard" size={12} /> Shortcuts
+        </button>
+      </div>
+      {find.trim() && (
+        <div className="shrink-0 border-b border-[var(--border)] p-1.5" role="listbox" aria-label="Matching settings">
+          {found.length === 0 ? (
+            <div className="px-1.5 py-1 text-[11px] text-[var(--muted)]">No setting matches &quot;{find}&quot;.</div>
+          ) : found.slice(0, 8).map((e) => (
+            <button key={e.tab + e.label} role="option" aria-selected={false} className="flex w-full items-center gap-2 rounded px-1.5 py-1 text-left text-[12px] hover:bg-white/6" onClick={() => { setTab(e.tab); setFind(""); }}>
+              <span className="min-w-0 flex-1 truncate">{e.label}</span>
+              <span className="shrink-0 text-[10.5px] text-[var(--muted)]">{e.tabLabel}</span>
+            </button>
+          ))}
+        </div>
+      )}
       <Tabs
         tabs={[
           { id: "providers", label: "Providers & Keys", icon: "key" },
@@ -204,6 +302,7 @@ export default function Settings({}: AppProps) {
               {Object.entries(s.keybinds).map(([action, binding]) => (
                 <div key={action} className="flex items-center gap-2 rounded-[calc(var(--radius)*0.5)] border border-[var(--border)] px-2 py-1.5">
                   <span className="flex-1 text-[12px]">{action.replace(/\./g, " › ")}</span>
+                  {conflicted.has(action) && <span className="os-chip !text-[10px]" style={{ borderColor: "var(--danger)", color: "var(--danger)" }} title="Another action uses the same keys, so only one of them can run">conflict</span>}
                   <button
                     onClick={() => setCapturing(action)}
                     className={cn("os-btn !py-0.5 font-[family-name:var(--font-mono)] text-[11px]", capturing === action && "!border-[var(--accent)] !bg-[var(--accent)]/16")}
@@ -216,7 +315,15 @@ export default function Settings({}: AppProps) {
                 </div>
               ))}
             </div>
-            <button className="os-btn mt-3 !py-1 text-[11px]" onClick={() => s.set("keybinds", { ...DEFAULT_KEYBINDS })}>Reset all shortcuts</button>
+            <div className="mt-3 flex flex-wrap gap-1.5">
+              <button className="os-btn !py-1 text-[11px]" onClick={() => s.set("keybinds", { ...DEFAULT_KEYBINDS })}>Reset all shortcuts</button>
+              <button className="os-btn !py-1 text-[11px]" onClick={() => setSheet(true)}>Show cheat sheet</button>
+            </div>
+            {conflicts.length > 0 && (
+              <p className="mt-2 text-[11px]" style={{ color: "var(--danger)" }}>
+                {conflicts.length} conflict{conflicts.length === 1 ? "" : "s"}: {conflicts.map((c) => `${c.chord} is bound to ${c.actions.map(actionLabel).join(" and ")}`).join("; ")}.
+              </p>
+            )}
           </div>
         )}
 
@@ -365,6 +472,37 @@ export default function Settings({}: AppProps) {
           </div>
         )}
       </div>
+      {sheet && (
+        <div className="absolute inset-0 z-20 flex flex-col overflow-hidden" style={{ background: "color-mix(in srgb, var(--panel-solid) 96%, transparent)" }} role="dialog" aria-modal="true" aria-label="Keyboard shortcuts">
+          <div className="flex shrink-0 items-center gap-2 border-b border-[var(--border)] px-3 py-2">
+            <Icon name="keyboard" size={14} />
+            <span className="flex-1 text-[13px] font-medium">Keyboard shortcuts</span>
+            <span className="hidden text-[10.5px] text-[var(--muted)] sm:inline">{mac ? "Mac keys" : "Windows / Linux keys"}</span>
+            <button className="os-btn !px-2 !py-0.5 text-[11px]" aria-label="Close cheat sheet" autoFocus onClick={() => setSheet(false)}><Icon name="close" size={11} /></button>
+          </div>
+          <div className="min-h-0 flex-1 overflow-y-auto p-3" data-testid="shortcut-sheet">
+            <div className="os-label mb-1">Shell (editable on the Keyboard tab)</div>
+            <div className="mb-3 grid gap-x-4 gap-y-1" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))" }}>
+              {Object.entries(s.keybinds).map(([action, chord]) => (
+                <div key={action} className="flex items-center gap-2 text-[12px]">
+                  <span className="min-w-0 flex-1 truncate">{actionLabel(action)}</span>
+                  {conflicted.has(action) && <span className="text-[10px]" style={{ color: "var(--danger)" }}>conflict</span>}
+                  <Keys chord={chord} mac={mac} />
+                </div>
+              ))}
+            </div>
+            <div className="os-label mb-1">In apps</div>
+            <div className="grid gap-x-4 gap-y-1" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))" }}>
+              {FIXED_SHORTCUTS.map((f) => (
+                <div key={f.where + f.keys} className="flex items-center gap-2 text-[12px]">
+                  <span className="min-w-0 flex-1"><span className="text-[var(--muted)]">{f.where}:</span> {f.what}</span>
+                  <Keys chord={f.keys} mac={mac} />
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

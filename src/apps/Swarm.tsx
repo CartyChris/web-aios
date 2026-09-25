@@ -20,6 +20,7 @@ import {
   type AgentSpec, type UpstreamOutput,
 } from "@/lib/swarm-plan";
 import { useHarness } from "@/kernel/harness";
+import { buildAgentContext, type ContextMode, type PriorOutput } from "@/lib/swarm-context";
 import type { Award, DodVerdict } from "@/lib/harness/types";
 import { cn } from "@/lib/cn";
 import { Icon } from "@/shell/icons";
@@ -46,6 +47,9 @@ export interface Agent {
    *  the first wave, which is the old flat-swarm behaviour. */
   dependsOn: string[];
   enabled: boolean;
+  /** isolated = a fresh context; forked = inherits the supervisor's context.
+   *  Undefined follows the swarm's default. */
+  contextMode?: ContextMode;
 }
 
 export interface AgentRun {
@@ -55,6 +59,9 @@ export interface AgentRun {
   ms?: number;
   costUsd?: number;
   error?: string;
+  /** How the agent was started, and how many characters it inherited. */
+  contextMode?: ContextMode;
+  inheritedChars?: number;
 }
 
 interface Formation {
@@ -245,6 +252,8 @@ export default function Swarm({}: AppProps) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [concurrency, setConcurrency] = useState(3);
+  const [defaultContext, setDefaultContext] = useState<ContextMode>("isolated");
+  const [supervisorNotes, setSupervisorNotes] = useState("");
   const [doSynthesis, setDoSynthesis] = useState(true);
   const [maxTokensPerAgent, setMaxTokensPerAgent] = useState(DEFAULT_MAX_TOKENS);
   const [routing, setRouting] = useState(false);
@@ -355,6 +364,8 @@ export default function Swarm({}: AppProps) {
     };
     const byId = new Map(roster.map((a) => [a.id, a]));
     const upstream: UpstreamOutput[] = [];
+    // Every finished output, in completion order: what a forked agent inherits.
+    const prior: PriorOutput[] = [];
 
     const runOne = async (agent: Agent) => {
       if (ctrl.signal.aborted) return;
@@ -373,16 +384,22 @@ export default function Swarm({}: AppProps) {
       // every upstream output is expensive and converges the panel on one
       // voice, which is the thing a panel exists to avoid.
       const inherited = upstreamBlock(agent as unknown as AgentSpec, upstream);
+      // Isolated agents see only what they declared; forked agents inherit
+      // the supervisor's notes and everything the run has produced so far.
+      const mode: ContextMode = agent.contextMode ?? defaultContext;
+      const ctx = buildAgentContext({
+        mode, question, supervisor: supervisorNotes, declaredBlock: inherited,
+        allPrior: prior.slice(), declaredIds: agent.dependsOn,
+      });
+      setRuns((r) => ({ ...r, [agent.id]: { ...r[agent.id], agentId: agent.id, status: "running", output: "", contextMode: mode, inheritedChars: ctx.inheritedChars } }));
 
       try {
         const res = await ask({
-          messages: [{ role: "user", content: inherited ? `${question}\n\n${inherited}` : question }],
+          messages: [{ role: "user", content: ctx.user }],
           system:
             `You are "${agent.name}", one agent in a panel answering the same question.\n\n` +
             `Your brief: ${agent.role}\n\n` +
-            (inherited
-              ? "Agents before you have already worked on this and their output is in the message. Advance it."
-              : "Stay in your lane — another agent covers the other angles.") +
+            ctx.systemNote +
             " Be substantive; you have a real token budget, so use it if the question deserves it.",
           provider: resolved.provider,
           model: resolved.model,
@@ -394,7 +411,8 @@ export default function Swarm({}: AppProps) {
         });
         results.push({ agent, text: res.text });
         upstream.push({ agentId: agent.id, agentName: agent.name, role: agent.role, text: res.text });
-        setRuns((r) => ({ ...r, [agent.id]: { agentId: agent.id, status: "done", output: res.text, ms: res.ms, costUsd: res.costUsd } }));
+        prior.push({ agentId: agent.id, agentName: agent.name, role: agent.role, text: res.text });
+        setRuns((r) => ({ ...r, [agent.id]: { agentId: agent.id, status: "done", output: res.text, ms: res.ms, costUsd: res.costUsd, contextMode: mode, inheritedChars: ctx.inheritedChars } }));
         ledger.set(agent.id, { status: "done", output: res.text, costUsd: res.costUsd, ms: res.ms });
       } catch (e) {
         if ((e as Error).name === "AbortError") return;
@@ -482,7 +500,7 @@ export default function Swarm({}: AppProps) {
       setBusy(false);
       abortRef.current = null;
     }
-  }, [question, busy, active, concurrency, doSynthesis, maxTokensPerAgent, formationId, useBidding, settings.ai.provider, settings.ai.model, settings.ai.budgetUsd, settings.ai.spentUsd]);
+  }, [question, busy, active, concurrency, doSynthesis, maxTokensPerAgent, formationId, useBidding, defaultContext, supervisorNotes, settings.ai.provider, settings.ai.model, settings.ai.budgetUsd, settings.ai.spentUsd]);
 
   /**
    * Ask a small model to assign the roster: which model each agent runs on,
@@ -696,6 +714,7 @@ export default function Swarm({}: AppProps) {
                       <span className="font-medium text-[13px]">{agent.name}</span>
                       <StatusDot status={r?.status ?? "idle"} />
                       <div className="flex-1" />
+                      {r?.contextMode && <span className="os-chip !px-1 !py-0 !text-[9.5px]" title="How this agent was started, and the characters it inherited">{r.contextMode}{r.inheritedChars ? ` +${r.inheritedChars.toLocaleString()} ch` : ""}</span>}
                       {r?.ms !== undefined && <span className="text-[10px] text-[var(--muted)]">{(r.ms / 1000).toFixed(1)}s</span>}
                       {r?.output && <CopyButton text={r.output} label="Copy" className="!px-1.5 !py-0 !text-[10px]" />}
                     </div>
@@ -778,8 +797,19 @@ export default function Swarm({}: AppProps) {
                     ? { ...x, maxTokens: e.target.value ? clampTokens(Number(e.target.value)) : undefined }
                     : x)))}
                 />
+                <select
+                  className="os-input !w-auto !py-1 text-[11px]"
+                  value={agent.contextMode ?? ""}
+                  aria-label={`Context mode for ${agent.name}`}
+                  title="isolated: a fresh context with only declared inputs. forked: inherits the supervisor's notes and every output so far."
+                  onChange={(e) => setAgents((a) => a.map((x) => (x.id === agent.id ? { ...x, contextMode: (e.target.value || undefined) as ContextMode | undefined } : x)))}
+                >
+                  <option value="">context: default ({defaultContext})</option>
+                  <option value="isolated">context: isolated</option>
+                  <option value="forked">context: forked</option>
+                </select>
                 <div className="flex-1" />
-                <button className="os-btn !px-2 !py-0.5 text-[11px]" onClick={() => setAgents((a) => a.filter((x) => x.id !== agent.id))}><Icon name="close" size={11} /></button>
+                <button className="os-btn !px-2 !py-0.5 text-[11px]" onClick={() => setAgents((a) => a.filter((x) => x.id !== agent.id))} aria-label={`Remove ${agent.name}`}><Icon name="close" size={11} /></button>
               </div>
               <div className="mb-1.5 flex flex-wrap items-center gap-1">
                 <span className="os-label !mb-0 mr-1">Waits for</span>
@@ -817,6 +847,34 @@ export default function Swarm({}: AppProps) {
       {tab === "settings" && (
         <div className="min-h-0 flex-1 overflow-y-auto p-4">
           <div className="max-w-md">
+            <div className="mb-4">
+              <div className="os-label mb-1">Subagent context (default)</div>
+              <div className="flex gap-1" role="group" aria-label="Default subagent context mode">
+                {(["isolated", "forked"] as const).map((m) => (
+                  <button
+                    key={m}
+                    className={cn("os-btn !py-1 text-[11px]", defaultContext === m && "!border-[var(--accent)] !bg-[var(--accent)]/16")}
+                    aria-pressed={defaultContext === m}
+                    onClick={() => setDefaultContext(m)}
+                  >
+                    {m}
+                  </button>
+                ))}
+              </div>
+              <div className="mt-1 text-[11px] text-[var(--muted)]">
+                Isolated agents start fresh and see only the outputs they wait for, which keeps the panel independent.
+                Forked agents inherit the supervisor&apos;s notes below and every output finished so far (capped), which
+                converges faster and costs more input tokens. Each agent can override this in the Agents tab.
+              </div>
+              <textarea
+                value={supervisorNotes}
+                onChange={(e) => setSupervisorNotes(e.target.value)}
+                rows={3}
+                aria-label="Supervisor context"
+                placeholder="Supervisor context: constraints, what is already known, what to avoid. Only forked agents see it."
+                className="os-input mt-1.5 resize-y text-[12px]"
+              />
+            </div>
             <Slider label="Concurrent agents" value={concurrency} min={1} max={8} onChange={setConcurrency} />
             <div className="mb-4 text-[11px] text-[var(--muted)]">
               Higher is faster but more likely to hit provider rate limits. Three is a safe default for most keys.

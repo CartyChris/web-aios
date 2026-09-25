@@ -13,6 +13,7 @@ import { download } from "@/lib/format";
 import { Empty, ErrorNote, Spinner, CopyButton } from "./_ui";
 import { cn } from "@/lib/cn";
 import { Icon } from "@/shell/icons";
+import { toCsv } from "@/lib/run-resume";
 
 /* ────────────────────────────────────────────────────────────────────────────
    Open Data — every free service, no key required.
@@ -277,6 +278,25 @@ export default function OpenData({}: AppProps) {
                   className="os-btn"
                 >
                   <Icon name="download" className="h-3.5 w-3.5" /> JSON
+                </button>
+                <button
+                  onClick={() => download(`${selected.id}.csv`, toCsv(["title", "detail", "meta", "url"], (outcome.data?.rows ?? []).map((r) => [r.title, r.detail, r.meta, r.url])), "text/csv")}
+                  className="os-btn"
+                >
+                  <Icon name="download" className="h-3.5 w-3.5" /> CSV
+                </button>
+                <button
+                  onClick={() => bus.emit("aios-chat:ask", {
+                    prompt: `What stands out in this ${selected.name} result?`,
+                    context: {
+                      label: `${selected.name}: ${outcome.data?.rows.length ?? 0} rows`,
+                      text: `${outcome.data?.summary ?? ""}\n\n${toCsv(["title", "detail", "meta"], (outcome.data?.rows ?? []).slice(0, 200).map((r) => [r.title, r.detail, r.meta]))}`.slice(0, 16000),
+                    },
+                  })}
+                  className="os-btn"
+                  aria-label="Ask AI about these results"
+                >
+                  <Icon name="spark" className="h-3.5 w-3.5" /> Ask AI
                 </button>
               </>
             )}

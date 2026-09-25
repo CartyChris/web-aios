@@ -126,6 +126,28 @@ export const APPS: AppManifest[] = [
     permissions: ["ai", "network", "storage"],
     accent: "#a3e635",
   },
+  {
+    id: "deepseek-harness",
+    name: "DeepSeek Harness",
+    icon: "agents",
+    category: "ai",
+    description: "dsh-lite: DeepSeek Harness's plugin, session-log and turn/step design in the browser, with native tool calls, approvals, compaction, subagents, harness-judged goals and Ralph.",
+    component: lazy(() => import("@/apps/DeepSeekHarness")),
+    defaultSize: { w: 1120, h: 740 },
+    permissions: ["ai", "network", "storage", "files"],
+    accent: "#60a5fa",
+  },
+  {
+    id: "harness-hub",
+    name: "Harness Hub",
+    icon: "layers",
+    category: "ai",
+    description: "DeepSeek Harness, System One and the ReAct Harness as tabs in one window, each able to pop out on its own.",
+    component: lazy(() => import("@/apps/HarnessHub")),
+    defaultSize: { w: 1180, h: 780 },
+    permissions: ["ai", "network", "storage", "files"],
+    accent: "#38bdf8",
+  },
 
   // ── Build ───────────────────────────────────────────────────────────────
   {

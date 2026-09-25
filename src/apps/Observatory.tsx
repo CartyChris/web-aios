@@ -9,6 +9,7 @@ import { Tabs, Empty, CopyButton } from "./_ui";
 import { useSpans } from "@/kernel/spans";
 import { cn } from "@/lib/cn";
 import { Icon } from "@/shell/icons";
+import { filterSpans, costPerTask, type SpanFilter } from "@/lib/span-query";
 
 /* ────────────────────────────────────────────────────────────────────────────
    Observatory — ported from aurora-os.html.
@@ -85,6 +86,7 @@ export default function Observatory({}: AppProps) {
   const spans = spanStore.spans as unknown as Span[];
   const [tab, setTab] = useState("spans");
   const [sel, setSel] = useState<string | null>(null);
+  const [filter, setFilter] = useState<SpanFilter>({ query: "", kind: "all", status: "all" });
   // An unfinished span is measured to "now", which must not be read mid-render.
   const now = useNow(1_000);
 
@@ -102,6 +104,10 @@ export default function Observatory({}: AppProps) {
   }), [spans, now]);
 
   const roots = spans.filter((s) => !s.parentId);
+  const filtering = Boolean(filter.query.trim()) || filter.kind !== "all" || filter.status !== "all";
+  const matched = useMemo(() => (filtering ? filterSpans(spans, filter) : []), [spans, filter, filtering]);
+  const kinds = useMemo(() => Array.from(new Set(spans.map((s) => s.kind))).sort(), [spans]);
+  const tasks = useMemo(() => costPerTask(spans), [spans]);
   const selected = spans.find((s) => s.id === sel) ?? null;
 
   return (
@@ -130,16 +136,46 @@ export default function Observatory({}: AppProps) {
               body="Apps that emit tracing publish a `span` event on the OS bus and it appears here. Nothing is sent anywhere — the analysis below runs locally, with no extra model calls."
             />
           ) : (
-            <div className="flex gap-3">
+            <div className="flex flex-wrap gap-3">
               <div className="min-w-0 flex-1">
-                {roots.map((r) => <SpanNode key={r.id} span={r} all={spans} depth={0} sel={sel} onSelect={setSel} />)}
+                <div className="mb-2 flex flex-wrap items-center gap-1.5">
+                  <input
+                    value={filter.query}
+                    onChange={(e) => setFilter((f) => ({ ...f, query: e.target.value }))}
+                    placeholder="Search name, text, input, error, run id"
+                    aria-label="Search spans"
+                    className="os-input min-w-0 flex-1 !py-1 text-[11.5px]"
+                    style={{ fontSize: 16 }}
+                  />
+                  <select className="os-input !w-auto !py-1 text-[11px]" value={filter.kind} onChange={(e) => setFilter((f) => ({ ...f, kind: e.target.value }))} aria-label="Span kind">
+                    <option value="all">all kinds</option>
+                    {kinds.map((k) => <option key={k} value={k}>{k}</option>)}
+                  </select>
+                  <select className="os-input !w-auto !py-1 text-[11px]" value={filter.status} onChange={(e) => setFilter((f) => ({ ...f, status: e.target.value as SpanFilter["status"] }))} aria-label="Span status">
+                    <option value="all">any status</option>
+                    <option value="ok">finished</option>
+                    <option value="open">still open</option>
+                    <option value="error">errored</option>
+                  </select>
+                  {filtering && (
+                    <button className="os-btn !py-1 text-[11px]" onClick={() => setFilter({ query: "", kind: "all", status: "all" })}>Clear filter</button>
+                  )}
+                </div>
+                {filtering ? (
+                  <>
+                    <div className="mb-1 text-[10.5px] text-[var(--muted)]">{matched.length} of {spans.length} spans match</div>
+                    {matched.map((s) => <SpanNode key={s.id} span={s} all={[]} depth={0} sel={sel} onSelect={setSel} />)}
+                  </>
+                ) : (
+                  roots.map((r) => <SpanNode key={r.id} span={r} all={spans} depth={0} sel={sel} onSelect={setSel} />)
+                )}
               </div>
               {selected && (
-                <div className="w-72 shrink-0">
+                <div className="w-72 max-w-full shrink-0">
                   <div className="os-card">
                     <div className="mb-1.5 flex items-center gap-1.5">
                       <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium">{selected.name}</span>
-                      <button className="text-[10px] opacity-60" onClick={() => setSel(null)}><Icon name="close" size={11} /></button>
+                      <button className="text-[10px] opacity-60" onClick={() => setSel(null)} aria-label="Close span detail"><Icon name="close" size={11} /></button>
                     </div>
                     <div className="space-y-0.5 text-[11px] text-[var(--muted)]">
                       <div>kind: {selected.kind}</div>
@@ -194,6 +230,38 @@ export default function Observatory({}: AppProps) {
               ] as [string, string][]).map(([k, v]) => (
                 <div key={k} className="flex justify-between text-[12px]"><span className="text-[var(--muted)]">{k}</span><span className="tabular-nums">{v}</span></div>
               ))}
+            </div>
+            <div className="os-card mb-3">
+              <div className="os-label mb-2">Cost per completed task</div>
+              {([
+                ["Tasks (runs, or root spans without a run)", String(tasks.tasks.length)],
+                ["Completed", String(tasks.completed)],
+                ["Failed", String(tasks.failed)],
+                ["Still running", String(tasks.running)],
+                ["Spent on finished tasks", `$${tasks.spentUsd.toFixed(4)}`],
+                ["Cost per completed task", tasks.costPerCompletedUsd === null ? "no completed task yet" : `$${tasks.costPerCompletedUsd.toFixed(5)}`],
+                ["Success rate", tasks.successRate === null ? "—" : `${Math.round(tasks.successRate * 100)}%`],
+              ] as [string, string][]).map(([k, v]) => (
+                <div key={k} className="flex justify-between gap-2 text-[12px]"><span className="text-[var(--muted)]">{k}</span><span className="tabular-nums">{v}</span></div>
+              ))}
+              <div className="mt-2 text-[10.5px] text-[var(--muted)]">
+                Failed tasks&apos; spend is charged to the completed ones: a cheaper run that fails more often is not cheaper.
+                A task failed if any span errored or every model call in it returned nothing.
+              </div>
+              {tasks.tasks.length > 0 && (
+                <div className="mt-2 max-h-48 overflow-y-auto">
+                  {tasks.tasks.slice().sort((a, b) => b.costUsd - a.costUsd).slice(0, 30).map((t) => (
+                    <div key={t.key} className="flex items-center gap-2 text-[11px]">
+                      <span className="shrink-0" style={{ color: t.status === "failed" ? "var(--danger)" : t.status === "running" ? "var(--muted)" : "var(--ok)" }}>
+                        <Icon name={t.status === "failed" ? "close" : t.status === "running" ? "circle" : "check"} size={10} />
+                      </span>
+                      <span className="min-w-0 flex-1 truncate">{t.label}</span>
+                      <span className="shrink-0 text-[10px] text-[var(--muted)]">{t.spans} spans</span>
+                      <span className="shrink-0 tabular-nums">${t.costUsd.toFixed(4)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
             <div className="os-card">
               <div className="os-label mb-2">Session total</div>

@@ -1,6 +1,10 @@
 "use client";
 
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { create } from "zustand";
+import { persist, createJSONStorage } from "zustand/middleware";
+import { useJobs } from "@/kernel/jobs";
+import { parseUrlBatch } from "@/lib/run-resume";
 import { useVFS } from "@/kernel/vfs";
 import { bus } from "@/kernel/bus";
 import { ask } from "@/lib/useAI";
@@ -71,23 +75,57 @@ Rules:
 - Emit at most 25 claims. Prefer the load-bearing ones.
 - Output nothing but the JSON array.`;
 
+/** The open mission, persisted so closing the window or reloading does not
+ *  throw away fetched sources, claims and a half-written brief. Source text is
+ *  capped per source for storage; the cap is shown on the source. */
+const STORED_SOURCE_CHARS = 20_000;
+interface AtlasDraft {
+  question: string;
+  sources: Source[];
+  claims: Claim[];
+  brief: string;
+  savedAt: number;
+  save: (d: Pick<AtlasDraft, "question" | "sources" | "claims" | "brief">) => void;
+}
+const useAtlasDraft = create<AtlasDraft>()(
+  persist(
+    (set) => ({
+      question: "", sources: [], claims: [], brief: "", savedAt: 0,
+      save: (d) => set({
+        ...d,
+        sources: d.sources.map((s) => (s.text.length > STORED_SOURCE_CHARS ? { ...s, text: s.text.slice(0, STORED_SOURCE_CHARS) } : s)),
+        savedAt: Date.now(),
+      }),
+    }),
+    { name: "webaios.atlas.v1", storage: createJSONStorage(() => localStorage), partialize: (s) => ({ question: s.question, sources: s.sources, claims: s.claims, brief: s.brief, savedAt: s.savedAt }) },
+  ),
+);
+
 export default function Atlas({}: AppProps) {
   const vfs = useVFS();
   const [tab, setTab] = useState("mission");
-  const [question, setQuestion] = useState("");
+  const [question, setQuestion] = useState(() => useAtlasDraft.getState().question);
   const [urlInput, setUrlInput] = useState("");
-  const [sources, setSources] = useState<Source[]>([]);
-  const [claims, setClaims] = useState<Claim[]>([]);
-  const [brief, setBrief] = useState("");
+  const [batchInput, setBatchInput] = useState("");
+  const [sources, setSources] = useState<Source[]>(() => useAtlasDraft.getState().sources);
+  const [claims, setClaims] = useState<Claim[]>(() => useAtlasDraft.getState().claims);
+  const [brief, setBrief] = useState(() => useAtlasDraft.getState().brief);
+  const [restoredAt] = useState(() => useAtlasDraft.getState().savedAt);
+  const [restored] = useState(() => useAtlasDraft.getState().sources.length > 0 || Boolean(useAtlasDraft.getState().question));
+
+  // Every change is written through, which is what makes a mission resumable.
+  useEffect(() => {
+    useAtlasDraft.getState().save({ question, sources, claims, brief });
+  }, [question, sources, claims, brief]);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   const addSource = useCallback(
-    async (raw: string) => {
+    async (raw: string, fixedId?: string): Promise<boolean> => {
       const url = raw.trim();
-      if (!url) return;
-      const id = `S${sources.length + 1}`;
+      if (!url) return false;
+      const id = fixedId ?? `S${sources.length + 1}`;
       setBusy(`Fetching ${url}…`);
       setError(null);
       try {
@@ -103,16 +141,40 @@ export default function Atlas({}: AppProps) {
           },
         ]);
         setUrlInput("");
+        return true;
       } catch (e) {
         const msg = e instanceof Error ? e.message : "Fetch failed.";
         setError(`${url} — ${msg}`);
         setSources((s) => [...s, { id, url, title: url, text: "", host: safeHost(url), fetchedAt: Date.now(), trust: "unknown", bytes: 0, error: msg }]);
+        return false;
       } finally {
         setBusy(null);
       }
     },
     [sources.length],
   );
+
+  /** Fetch many sources as one live job with a real k/n progress bar. */
+  const addBatch = useCallback(async () => {
+    const urls = parseUrlBatch(batchInput, sources.map((s) => s.url));
+    if (!urls.length) { setError("No new http(s) URLs found in that text."); return; }
+    const base = sources.length;
+    const jobs = useJobs.getState();
+    const jobId = jobs.start({ title: `Atlas: fetching ${urls.length} sources`, detail: `0/${urls.length}`, kind: "task", progress: 0, target: { appId: "atlas" } });
+    let failed = 0;
+    for (const [i, u] of urls.entries()) {
+      jobs.update(jobId, { detail: `${i}/${urls.length} · ${u}` });
+      if (!(await addSource(u, `S${base + i + 1}`))) failed++;
+      jobs.update(jobId, { progress: (i + 1) / urls.length, detail: `${i + 1}/${urls.length}` });
+    }
+    setBatchInput("");
+    jobs.finish(jobId, failed === urls.length ? "error" : "done", `${urls.length - failed} fetched, ${failed} failed`);
+  }, [batchInput, sources, addSource]);
+
+  const newMission = useCallback(() => {
+    abortRef.current?.abort();
+    setQuestion(""); setSources([]); setClaims([]); setBrief(""); setError(null); setTab("mission");
+  }, []);
 
   const extractClaims = useCallback(async () => {
     const usable = sources.filter((s) => s.text && !s.error);
@@ -121,6 +183,8 @@ export default function Atlas({}: AppProps) {
     setError(null);
     const ctrl = new AbortController();
     abortRef.current = ctrl;
+    const jobId = useJobs.getState().start({ title: "Atlas: extracting claims", detail: `${usable.length} sources`, kind: "ai", target: { appId: "atlas" } });
+    let ok = false;
     try {
       // Each source is capped so a single long page cannot crowd out the rest
       // of the corpus in the context window.
@@ -158,10 +222,13 @@ export default function Atlas({}: AppProps) {
 
       setClaims(marked);
       setTab("claims");
+      ok = true;
+      useJobs.getState().finish(jobId, "done", `${marked.length} claims`);
     } catch (e) {
       if ((e as Error).name !== "AbortError") setError(e instanceof Error ? e.message : "Extraction failed.");
     } finally {
       setBusy(null);
+      if (!ok) useJobs.getState().finish(jobId, "error", "Extraction did not finish");
     }
   }, [sources, question]);
 
@@ -171,6 +238,8 @@ export default function Atlas({}: AppProps) {
     setError(null);
     const ctrl = new AbortController();
     abortRef.current = ctrl;
+    const jobId = useJobs.getState().start({ title: "Atlas: writing brief", detail: `${claims.length} claims`, kind: "ai", target: { appId: "atlas" } });
+    let ok = false;
     try {
       const table = claims
         .map((c) => `- [${c.confidence}] ${c.text} ${c.sourceIds.length ? `(${c.sourceIds.join(", ")})` : "(no source)"}`)
@@ -191,10 +260,13 @@ Requirements:
       });
       setBrief(res.text);
       setTab("brief");
+      ok = true;
+      useJobs.getState().finish(jobId, "done", `${res.text.length.toLocaleString()} characters`);
     } catch (e) {
       if ((e as Error).name !== "AbortError") setError(e instanceof Error ? e.message : "Brief failed.");
     } finally {
       setBusy(null);
+      if (!ok) useJobs.getState().finish(jobId, "error", "The brief did not finish; what streamed is kept");
     }
   }, [claims, sources, question]);
 
@@ -285,6 +357,26 @@ Requirements:
               />
               <button className="os-btn" onClick={() => addSource(urlInput)} disabled={!urlInput.trim() || !!busy}>Fetch</button>
             </div>
+            <div className="os-label mb-1">Or paste several (one job, up to 25)</div>
+            <div className="mb-3 flex flex-wrap gap-1.5">
+              <textarea
+                value={batchInput}
+                onChange={(e) => setBatchInput(e.target.value)}
+                rows={2}
+                placeholder="https://… https://… (any separators)"
+                aria-label="Several source URLs"
+                className="os-input min-w-0 flex-1 resize-y text-[12px]"
+              />
+              <button className="os-btn" onClick={() => void addBatch()} disabled={!batchInput.trim() || !!busy}>
+                Fetch {parseUrlBatch(batchInput, sources.map((s) => s.url)).length || ""}
+              </button>
+            </div>
+            {restored && restoredAt > 0 && (
+              <div className="mb-3 flex flex-wrap items-center gap-2 text-[11px] text-[var(--muted)]">
+                <Icon name="refresh" size={11} /> Resumed the mission saved {relTime(restoredAt)} ({sources.length} sources, {claims.length} claims{brief ? ", brief" : ""}). Stored source text is capped at {STORED_SOURCE_CHARS.toLocaleString()} characters each.
+                <button className="os-btn !px-1.5 !py-0 !text-[10px]" onClick={newMission}>New mission</button>
+              </div>
+            )}
             <div className="os-card text-[12px] leading-relaxed text-[var(--muted)]">
               <div className="mb-1.5 font-medium text-[var(--text)]">How Atlas works</div>
               <ol className="list-decimal space-y-1 pl-4">

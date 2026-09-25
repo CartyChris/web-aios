@@ -66,6 +66,9 @@ export interface RequestContext {
   token?: string;
   /** JSON-RPC id. A parameter so a request is reproducible in a test. */
   id: number;
+  /** What this client supports, declared per request on stateless servers.
+   *  Empty means "nothing optional": a server must not rely on anything else. */
+  capabilities?: Record<string, unknown>;
 }
 
 export interface WireRequest {
@@ -99,9 +102,15 @@ export function buildRequest(
 
   const meta = stateless
     ? {
+        // Key names are the spec's, verbatim (2026-07-28 basic/index, "Per-request
+        // protocol fields"). protocolVersion and clientCapabilities are REQUIRED:
+        // a request missing either is malformed and a server MUST answer -32602 /
+        // HTTP 400. An earlier version sent "protocol-version" and "client", which
+        // no key in the spec matches, so a strict server refused every call.
         _meta: {
-          "io.modelcontextprotocol/protocol-version": ctx.protocol,
-          "io.modelcontextprotocol/client": { name: ctx.client.name, version: ctx.client.version },
+          "io.modelcontextprotocol/protocolVersion": ctx.protocol,
+          "io.modelcontextprotocol/clientInfo": { name: ctx.client.name, version: ctx.client.version },
+          "io.modelcontextprotocol/clientCapabilities": ctx.capabilities ?? {},
         },
       }
     : {};

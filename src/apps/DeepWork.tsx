@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 import { useVFS } from "@/kernel/vfs";
@@ -11,6 +11,8 @@ import { uid, download } from "@/lib/format";
 import { Markdown, CopyButton, ErrorNote, Tabs, Empty, Spinner } from "./_ui";
 import { cn } from "@/lib/cn";
 import { Icon } from "@/shell/icons";
+import { useJobs } from "@/kernel/jobs";
+import { remainingSteps, stepProgress, markInterrupted } from "@/lib/run-resume";
 
 /* ────────────────────────────────────────────────────────────────────────────
    Deep Work — ported from DeepseekHarnessMobile and the Arcwright gate model.
@@ -65,6 +67,9 @@ interface DeepWorkState {
   patchGate: (planId: string, stageId: string, gateId: string, patch: Partial<Gate>) => void;
   removeGate: (planId: string, stageId: string, gateId: string) => void;
   invalidateFrom: (planId: string, stageId: string) => void;
+  /** Stages found "active" when the store loaded: interrupted by a reload. */
+  interrupted: number;
+  clearInterrupted: () => void;
 }
 
 export const useDeepWork = create<DeepWorkState>()(
@@ -72,6 +77,8 @@ export const useDeepWork = create<DeepWorkState>()(
     (set) => ({
       plans: [],
       activeId: null,
+      interrupted: 0,
+      clearInterrupted: () => set({ interrupted: 0 }),
 
       newPlan: (goal) => {
         const id = uid("plan");
@@ -160,7 +167,24 @@ export const useDeepWork = create<DeepWorkState>()(
           }),
         })),
     }),
-    { name: "webaios.deepwork.v1", storage: createJSONStorage(() => localStorage) },
+    {
+      name: "webaios.deepwork.v1",
+      storage: createJSONStorage(() => localStorage),
+      partialize: (s) => ({ plans: s.plans, activeId: s.activeId }),
+      // No request survives a reload, so a stage persisted mid-run is reset to
+      // pending (its partial output is kept for reading) and counted, which is
+      // what makes "Resume" honest about what it will redo.
+      merge: (persisted, current) => {
+        const p = (persisted ?? {}) as Partial<DeepWorkState>;
+        let interrupted = 0;
+        const plans = (p.plans ?? current.plans).map((plan) => {
+          const r = markInterrupted(plan.stages);
+          interrupted += r.interrupted;
+          return r.interrupted ? { ...plan, stages: r.steps } : plan;
+        });
+        return { ...current, ...p, plans, interrupted };
+      },
+    },
   ),
 );
 
@@ -185,6 +209,8 @@ export default function DeepWork({}: AppProps) {
   const [tab, setTab] = useState("plan");
 
   const plan = dw.plans.find((p) => p.id === dw.activeId) ?? null;
+  const abortRef = useRef<AbortController | null>(null);
+  const [runningAll, setRunningAll] = useState(false);
 
   const generate = useCallback(async () => {
     const g = goal.trim();
@@ -224,8 +250,12 @@ export default function DeepWork({}: AppProps) {
   }, [goal, dw]);
 
   const runStage = useCallback(
-    async (stage: Stage) => {
-      if (!plan) return;
+    async (stage: Stage, signal?: AbortSignal): Promise<boolean> => {
+      // Read the plan fresh: in a Run-all loop the closure's copy predates the
+      // stages that just finished, and their output is this stage's input.
+      const plan = useDeepWork.getState().plans.find((p) => p.id === useDeepWork.getState().activeId && p.stages.some((s) => s.id === stage.id))
+        ?? useDeepWork.getState().plans.find((p) => p.stages.some((s) => s.id === stage.id));
+      if (!plan) return false;
       setBusy(`Working ${stage.title}…`);
       setError(null);
       dw.patchStage(plan.id, stage.id, { status: "active" });
@@ -243,19 +273,64 @@ export default function DeepWork({}: AppProps) {
           }],
           system: "You execute one stage of a plan. Produce the actual artifact this stage calls for — not a description of it. At the end, state plainly for each gate whether the work satisfies it and what the observable evidence is. If a gate cannot be satisfied, say so rather than claiming success.",
           maxTokens: 2500,
+          signal,
           onDelta: (_d, full) => dw.patchStage(plan.id, stage.id, { output: full }),
         });
         dw.patchStage(plan.id, stage.id, { output: res.text, status: "ready" });
         dw.invalidateFrom(plan.id, stage.id);
+        return true;
       } catch (e) {
+        if ((e as Error).name === "AbortError") {
+          dw.patchStage(plan.id, stage.id, { status: "pending" });
+          return false;
+        }
         setError(e instanceof Error ? e.message : "Stage failed.");
         dw.patchStage(plan.id, stage.id, { status: "blocked" });
+        return false;
       } finally {
         setBusy(null);
       }
     },
-    [plan, dw],
+    [dw],
   );
+
+  /** Run every stage not yet ready or verified, in order, as one live job.
+   *  Resumable: the state is persisted per stage, so after a reload or a Stop
+   *  this picks up at the first stage still to do. */
+  const runAll = useCallback(async () => {
+    if (!plan || busy) return;
+    const todo = remainingSteps(plan.stages);
+    if (!todo.length) return;
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
+    setRunningAll(true);
+    dw.clearInterrupted();
+    const jobs = useJobs.getState();
+    const startP = stepProgress(plan.stages);
+    const jobId = jobs.start({
+      title: `Deep Work: ${plan.goal.slice(0, 60)}`,
+      detail: `${startP.done}/${startP.total} stages done`,
+      kind: "task",
+      progress: startP.fraction ?? undefined,
+      target: { appId: "deepwork" },
+      actions: [{ id: "stop", label: "Stop", run: () => ctrl.abort() }],
+    });
+    let failed: string | null = null;
+    for (const st of todo) {
+      if (ctrl.signal.aborted) break;
+      jobs.update(jobId, { detail: `Working ${st.title}` });
+      const ok = await runStage(st, ctrl.signal);
+      const now = useDeepWork.getState().plans.find((p) => p.id === plan.id);
+      const pr = stepProgress(now?.stages ?? []);
+      jobs.update(jobId, { progress: pr.fraction ?? undefined, detail: `${pr.done}/${pr.total} stages done` });
+      if (!ok) { failed = ctrl.signal.aborted ? null : st.title; break; }
+    }
+    abortRef.current = null;
+    setRunningAll(false);
+    if (ctrl.signal.aborted) jobs.finish(jobId, "error", "Stopped. Resume picks up at the next stage.");
+    else if (failed) jobs.finish(jobId, "error", `Blocked at ${failed}`);
+    else jobs.finish(jobId, "done", "All remaining stages produced output. Check their gates to verify.");
+  }, [plan, busy, dw, runStage]);
 
   const exportMd = useCallback(() => {
     if (!plan) return "";
@@ -338,10 +413,29 @@ export default function DeepWork({}: AppProps) {
                 <span className="min-w-0 flex-1 truncate text-[12px] font-medium">{plan.goal}</span>
                 {busy && <Spinner label={busy} />}
                 <span className="os-chip">{progress.verified}/{progress.total} verified</span>
+                {runningAll ? (
+                  <button className="os-btn !py-1 text-[11px]" onClick={() => abortRef.current?.abort()}><Icon name="stop" size={11} /> Stop</button>
+                ) : (
+                  <button
+                    className="os-btn !py-1 text-[11px]"
+                    onClick={() => void runAll()}
+                    disabled={!!busy || remainingSteps(plan.stages).length === 0}
+                    title="Run every stage that is not ready or verified yet, in order. Picks up where the last run stopped."
+                  >
+                    <Icon name="play" size={11} /> {plan.stages.some((s) => s.output) ? "Resume" : "Run all"} ({remainingSteps(plan.stages).length})
+                  </button>
+                )}
                 <button className="os-btn !py-1 text-[11px]" onClick={() => dw.addStage(plan.id)}>+ Stage</button>
                 <button className="os-btn !py-1 text-[11px]" onClick={() => { vfs.write(`/deepwork/${plan.id}.md`, exportMd(), { appId: "deepwork" }); bus.emit("notify", { title: "Plan saved to Files", kind: "success" }); }}>Save</button>
                 <button className="os-btn !py-1 text-[11px]" onClick={() => download(`plan-${plan.id}.md`, exportMd(), "text/markdown")}>Export</button>
               </div>
+              {dw.interrupted > 0 && (
+                <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[10.5px] text-[var(--warn)]">
+                  <Icon name="warning" size={11} />
+                  {dw.interrupted} stage{dw.interrupted === 1 ? " was" : "s were"} interrupted by a reload and reset to pending. Resume redoes {dw.interrupted === 1 ? "it" : "them"}.
+                  <button className="os-btn !px-1.5 !py-0 !text-[10px]" onClick={() => dw.clearInterrupted()}>Dismiss</button>
+                </div>
+              )}
               <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-white/10">
                 <div className="h-full rounded-full transition-all" style={{ width: `${progress.pct}%`, background: "var(--ok)" }} />
               </div>
@@ -359,7 +453,7 @@ export default function DeepWork({}: AppProps) {
                       stage={stage}
                       planId={plan.id}
                       busy={!!busy}
-                      onRun={() => runStage(stage)}
+                      onRun={() => void runStage(stage)}
                     />
                   ))
                 )

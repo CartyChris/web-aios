@@ -14,6 +14,8 @@ import { passesGates } from "@/lib/palette";
 import { ModelOverride, overrideOpts, type ModelChoice } from "@/shell/ModelOverride";
 import { Empty, ErrorNote, Spinner, Tabs } from "./_ui";
 import { Icon } from "@/shell/icons";
+import { TrialBar, useUpdateTrial } from "./_updateTrial";
+import { TRIAL_MS } from "@/lib/trial";
 
 /* An OS that can rewrite itself, without being able to break itself.
  *
@@ -43,6 +45,7 @@ export default function Updates({}: AppProps) {
         onChange={(t) => setTab(t as Tab)}
       />
       {tab === "propose" ? <ProposeTab /> : <HistoryTab />}
+      <TrialBar />
     </div>
   );
 }
@@ -170,6 +173,16 @@ function Preview({ proposal, setProposal, include, setInclude }: {
     setApplied(v ? v.title : null);
   };
 
+  /* Apply for real, then let the countdown decide: Keep, or it goes back.
+     The proposal stays on screen so a reverted trial can be tried again. */
+  const startTrial = useUpdateTrial((s) => s.start);
+  const trial = useUpdateTrial((s) => s.trial);
+  const lastTrial = useUpdateTrial((s) => s.last);
+  const doTry = () => {
+    const v = apply(proposal, include);
+    if (v) startTrial(v.id, v.title);
+  };
+
   if (applied !== null) {
     return (
       <div className="os-card !p-3">
@@ -236,10 +249,24 @@ function Preview({ proposal, setProposal, include, setInclude }: {
         <button className="os-btn" data-variant="primary" disabled={!plan.changes.length} onClick={doApply}>
           <Icon name="check" size={13} /> Apply {plan.changes.length ? `(${plan.changes.length})` : ""}
         </button>
+        <button
+          className="os-btn"
+          disabled={!plan.changes.length || !!trial}
+          onClick={doTry}
+          title="Apply it to the whole OS, then revert automatically unless you press Keep"
+        >
+          <Icon name="eye" size={13} /> {trial ? "Trying…" : `Try for ${TRIAL_MS / 1000}s`}
+        </button>
         <span className="text-[10.5px] text-[var(--muted)]">
           {plan.changes.length ? `${describe(proposal)} proposed, ${plan.changes.length} change(s) selected` : "Nothing selected"}
         </span>
       </div>
+      {lastTrial && !trial && (
+        <p className="mt-1.5 text-[10.5px] text-[var(--muted)]" role="status">
+          Trial of &ldquo;{lastTrial.title}&rdquo; {lastTrial.result === "kept" ? "kept. It is listed under History." : "reverted."}
+          {lastTrial.skipped ? ` ${lastTrial.skipped} setting(s) you changed during the trial were left as you set them.` : ""}
+        </p>
+      )}
     </div>
   );
 }

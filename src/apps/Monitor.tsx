@@ -22,6 +22,8 @@ export default function Monitor({}: AppProps) {
   const [events, setEvents] = useState<Ev[]>([]);
   const [mem, setMem] = useState<{ used: number; limit: number } | null>(null);
   const [fps, setFps] = useState(0);
+  // The last 60 one-second samples, so a stutter is visible after it happened.
+  const [fpsHist, setFpsHist] = useState<number[]>([]);
 
   useEffect(() => {
     // The "*" subscription is the bus's firehose — exactly what a monitor wants.
@@ -46,7 +48,12 @@ export default function Monitor({}: AppProps) {
     let raf = 0;
     const tick = (now: number) => {
       frames++;
-      if (now - last >= 1000) { setFps(Math.round((frames * 1000) / (now - last))); frames = 0; last = now; }
+      if (now - last >= 1000) {
+        const v = Math.round((frames * 1000) / (now - last));
+        setFps(v);
+        setFpsHist((h) => [...h, v].slice(-60));
+        frames = 0; last = now;
+      }
       raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
@@ -105,6 +112,27 @@ export default function Monitor({}: AppProps) {
         {tab === "resources" && (
           <div className="grid max-w-3xl gap-3 sm:grid-cols-2">
             <Stat label="Frame rate" value={`${fps} fps`} bar={Math.min(100, (fps / 60) * 100)} good={fps >= 50} />
+            {fpsHist.length > 1 && (
+              <div className="os-card sm:col-span-2" data-testid="monitor-fps-history">
+                <div className="mb-1 flex flex-wrap items-baseline justify-between gap-2">
+                  <span className="os-label">Frame rate, last {fpsHist.length} s</span>
+                  <span className="tabular-nums text-[11px] text-[var(--muted)]">
+                    min {Math.min(...fpsHist)} · avg {Math.round(fpsHist.reduce((a, b) => a + b, 0) / fpsHist.length)} · max {Math.max(...fpsHist)}
+                  </span>
+                </div>
+                <svg viewBox={`0 0 ${Math.max(1, fpsHist.length - 1)} 60`} preserveAspectRatio="none" className="h-12 w-full" role="img" aria-label="Frame rate over time">
+                  <line x1={0} x2={fpsHist.length - 1} y1={10} y2={10} stroke="var(--border)" strokeWidth={0.5} vectorEffect="non-scaling-stroke" />
+                  <polyline
+                    fill="none"
+                    stroke="var(--accent)"
+                    strokeWidth={1.5}
+                    vectorEffect="non-scaling-stroke"
+                    points={fpsHist.map((v, i) => `${i},${60 - Math.min(60, v)}`).join(" ")}
+                  />
+                </svg>
+                <div className="text-[10px] text-[var(--muted)]">The line near the top is 50 fps. Samples are taken only while this window is open.</div>
+              </div>
+            )}
             <Stat
               label="JS heap"
               value={mem ? `${bytes(mem.used)} / ${bytes(mem.limit)}` : "not exposed by this browser"}

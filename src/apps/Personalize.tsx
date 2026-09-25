@@ -20,6 +20,8 @@ import { cn } from "@/lib/cn";
 import { Icon } from "@/shell/icons";
 import { PetSprite } from "@/shell/pets";
 import { WidgetBuilder } from "./WidgetBuilder";
+import { exportTheme, importTheme } from "@/lib/theme-io";
+import type { Theme } from "@/kernel/themes";
 
 /* ────────────────────────────────────────────────────────────────────────────
    Personalize — the customization surface.
@@ -35,6 +37,10 @@ export default function Personalize({}: AppProps) {
   const [tab, setTab] = useState("profiles");
   const [error, setError] = useState<string | null>(null);
   const importRef = useRef<HTMLInputElement>(null);
+  const themeFileRef = useRef<HTMLInputElement>(null);
+  /** The theme under the pointer (or keyboard focus): the preview card below
+   *  renders in its tokens before anything is applied. */
+  const [previewTheme, setPreviewTheme] = useState<Theme | null>(null);
 
   // The catalogues grew past the point where scrolling is a way to find
   // anything: 50 palettes and 97 creatures.
@@ -73,6 +79,25 @@ export default function Personalize({}: AppProps) {
     },
     [s],
   );
+
+  /** The palette as it is right now, overrides included, as a theme file. */
+  const exportCurrentTheme = () => {
+    const base = allThemes(generatedThemes).find((t) => t.id === s.themeId);
+    const tokens = resolveTokens(s);
+    const tweaked = !!(s.accent || s.accent2 || Object.keys(s.customVars ?? {}).length);
+    const name = `${base?.name ?? "Theme"}${tweaked ? " (tuned)" : ""}`;
+    const text = exportTheme({ id: `${base?.id ?? "theme"}${tweaked ? "-tuned" : ""}`, name, dark: base?.dark ?? true, vars: tokens });
+    download(`${name.replace(/[^\w -]/g, "").trim().replace(/\s+/g, "-") || "theme"}.theme.json`, text, "application/json");
+  };
+
+  const importThemeFile = async (file: File | undefined) => {
+    if (!file) return;
+    const r = importTheme(await file.text(), allThemes(generatedThemes).map((t) => t.id));
+    if (!r.ok) { setError(`${file.name}: ${r.error}`); return; }
+    useCustomThemes.getState().add(r.theme);
+    s.applyTheme(r.theme.id);
+    bus.emit("notify", { title: `Theme "${r.theme.name}" imported and applied`, body: r.renamed ? `Saved as "${r.theme.id}" because that id was taken.` : undefined, kind: "success" });
+  };
 
   return (
     <div className="flex h-full flex-col">
@@ -131,6 +156,15 @@ export default function Personalize({}: AppProps) {
           <div className="grid gap-5 lg:grid-cols-2">
             <div>
               <div className="mb-3"><WallpaperThemeButton /></div>
+              <div className="mb-3 flex flex-wrap items-center gap-1.5">
+                <button className="os-btn !py-1 text-[11px]" onClick={exportCurrentTheme} title="Download the current palette, overrides included, as a .theme.json file">
+                  <Icon name="download" size={11} className="mr-1" />Export theme
+                </button>
+                <button className="os-btn !py-1 text-[11px]" onClick={() => themeFileRef.current?.click()} title="Checked for complete tokens and readable contrast before it is applied">
+                  <Icon name="folder" size={11} className="mr-1" />Import theme…
+                </button>
+                <input ref={themeFileRef} type="file" accept="application/json,.json" hidden onChange={(e) => { void importThemeFile(e.target.files?.[0]); e.target.value = ""; }} />
+              </div>
               <div className="mb-2 flex flex-wrap items-center gap-2">
                 <span className="os-label !mb-0">Palette</span>
                 <input
@@ -149,7 +183,7 @@ export default function Personalize({}: AppProps) {
                   </button>
                 ))}
               </div>
-              <div className="mb-5 grid gap-2" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(130px, 1fr))" }}>
+              <div className="mb-5 grid gap-2" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(130px, 1fr))" }} onMouseLeave={() => setPreviewTheme(null)}>
                 {visibleThemes.length === 0 && (
                   <p className="text-[11px] text-[var(--muted)]">Nothing matches that filter.</p>
                 )}
@@ -157,6 +191,9 @@ export default function Personalize({}: AppProps) {
                   <button
                     key={t.id}
                     onClick={() => s.applyTheme(t.id)}
+                    onMouseEnter={() => setPreviewTheme(t)}
+                    onFocus={() => setPreviewTheme(t)}
+                    onBlur={() => setPreviewTheme(null)}
                     className={cn("os-card !p-2 text-left", s.themeId === t.id && "!border-[var(--accent)]")}
                   >
                     <div className="mb-1.5 flex h-8 overflow-hidden rounded border border-[var(--border)]">
@@ -212,8 +249,15 @@ export default function Personalize({}: AppProps) {
                 <Toggle label="Animations" checked={s.motion} onChange={(v) => s.set("motion", v)} hint="Turning this off disables every transition and the animated wallpaper." />
               </div>
 
-              <div className="os-card mt-4">
-                <div className="os-label mb-2">Live preview</div>
+              <div
+                className="os-card mt-4"
+                // The hovered theme's own tokens, scoped to this card: every
+                // var() inside it resolves against them, so this is exactly
+                // what applying would paint.
+                style={previewTheme ? ({ ...previewTheme.vars, background: "var(--panel-solid)", color: "var(--text)", borderColor: "var(--border)" } as React.CSSProperties) : undefined}
+                aria-live="polite"
+              >
+                <div className="os-label mb-2">Live preview{previewTheme ? `: ${previewTheme.name}` : ""}</div>
                 <div className="flex flex-wrap items-center gap-2">
                   <button className="os-btn" data-variant="primary">Primary</button>
                   <button className="os-btn">Secondary</button>

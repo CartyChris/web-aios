@@ -10,6 +10,8 @@ import { EGGS, useEggs } from "@/lib/easter";
 import { Tabs, Empty } from "./_ui";
 import { cn } from "@/lib/cn";
 import { Icon } from "@/shell/icons";
+import { useWM } from "@/kernel/wm";
+import { insertScore, TABLE_SIZE, type ScoreEntry } from "@/lib/leaderboard";
 
 /* ────────────────────────────────────────────────────────────────────────────
    Arcade.
@@ -26,6 +28,9 @@ import { Icon } from "@/shell/icons";
 
 interface ScoreState {
   best: Record<string, number>;
+  /** Top scores per game, with when they were set. Added later than `best`,
+   *  so an older save simply starts with empty tables. */
+  tables: Record<string, ScoreEntry[]>;
   submit: (game: string, score: number) => boolean;
 }
 
@@ -33,8 +38,11 @@ const useScores = create<ScoreState>()(
   persist(
     (set, get) => ({
       best: {},
+      tables: {},
       /** True when it is a new record, so the caller can say so. */
       submit: (game, score) => {
+        const { list } = insertScore(get().tables?.[game] ?? [], { score, at: Date.now() });
+        set((s) => ({ tables: { ...(s.tables ?? {}), [game]: list } }));
         if (score <= (get().best[game] ?? 0)) return false;
         set((s) => ({ best: { ...s.best, [game]: score } }));
         return true;
@@ -51,9 +59,43 @@ const GAMES = [
   { id: "mines", name: "Minesweeper", icon: "warning", blurb: "Click to clear, right-click to flag." },
 ] as const;
 
-export default function Arcade({ args }: AppProps) {
+export default function Arcade({ args, win }: AppProps) {
   const [tab, setTab] = useState<string>((args?.game as string) ?? "snake");
   const scores = useScores();
+  /* Stable per game. These used to be inline arrows, so every re-render of
+     the arcade (a new best score is one) handed the games a new onScore, and
+     the real-time games' effects restarted the round underneath the player. */
+  const submit = useScores((s) => s.submit);
+  const onSnake = useCallback((n: number) => submit("snake", n), [submit]);
+  const onBreakout = useCallback((n: number) => submit("breakout", n), [submit]);
+  const onTiles = useCallback((n: number) => submit("tiles", n), [submit]);
+  const onMines = useCallback((n: number) => submit("mines", n), [submit]);
+
+  /* Pause when the player looks away: another OS window takes focus, the
+     browser window blurs, or the tab is hidden. Resuming is always a click or
+     a key, never automatic, so coming back is not an instant death. */
+  const focusedId = useWM((s) => s.focused);
+  const [manual, setManual] = useState(false);
+  const [away, setAway] = useState(false);
+  const osFocused = !win || focusedId === win.id;
+  const [wasFocused, setWasFocused] = useState(osFocused);
+  if (osFocused !== wasFocused) {
+    setWasFocused(osFocused);
+    if (!osFocused) setAway(true);
+  }
+  useEffect(() => {
+    const onBlur = () => setAway(true);
+    const onVis = () => { if (document.hidden) setAway(true); };
+    window.addEventListener("blur", onBlur);
+    document.addEventListener("visibilitychange", onVis);
+    return () => { window.removeEventListener("blur", onBlur); document.removeEventListener("visibilitychange", onVis); };
+  }, []);
+  const paused = manual || away;
+  const togglePause = useCallback(() => {
+    // Only the focused arcade window can resume; a P typed elsewhere must not.
+    if (paused) { if (!osFocused) return; setManual(false); setAway(false); } else setManual(true);
+  }, [paused, osFocused]);
+  const pause = { paused, onTogglePause: togglePause };
 
   return (
     <div className="flex h-full flex-col">
@@ -63,10 +105,10 @@ export default function Arcade({ args }: AppProps) {
         onChange={setTab}
       />
       <div className="min-h-0 flex-1 overflow-hidden">
-        {tab === "snake" && <Snake onScore={(n) => scores.submit("snake", n)} best={scores.best.snake ?? 0} />}
-        {tab === "breakout" && <Breakout onScore={(n) => scores.submit("breakout", n)} best={scores.best.breakout ?? 0} />}
-        {tab === "tiles" && <Tiles onScore={(n) => scores.submit("tiles", n)} best={scores.best.tiles ?? 0} />}
-        {tab === "mines" && <Mines onScore={(n) => scores.submit("mines", n)} best={scores.best.mines ?? 0} />}
+        {tab === "snake" && <Snake onScore={onSnake} best={scores.best.snake ?? 0} table={scores.tables?.snake} {...pause} />}
+        {tab === "breakout" && <Breakout onScore={onBreakout} best={scores.best.breakout ?? 0} table={scores.tables?.breakout} {...pause} />}
+        {tab === "tiles" && <Tiles onScore={onTiles} best={scores.best.tiles ?? 0} table={scores.tables?.tiles} />}
+        {tab === "mines" && <Mines onScore={onMines} best={scores.best.mines ?? 0} table={scores.tables?.mines} />}
         {tab === "secrets" && <Secrets />}
       </div>
     </div>
@@ -75,10 +117,15 @@ export default function Arcade({ args }: AppProps) {
 
 /* ── Shared chrome ────────────────────────────────────────────────────────── */
 
-function Board({ title, score, best, status, onRestart, children, footer }: {
+interface PauseProps { paused?: boolean; onTogglePause?: () => void }
+interface GameProps extends PauseProps { onScore: (n: number) => boolean; best: number; table?: ScoreEntry[] }
+
+function Board({ title, score, best, status, onRestart, children, footer, paused, onTogglePause, table }: {
   title: string; score: number; best: number; status?: string;
   onRestart: () => void; children: React.ReactNode; footer?: string;
-}) {
+  table?: ScoreEntry[];
+} & PauseProps) {
+  const [showTable, setShowTable] = useState(false);
   return (
     <div className="flex h-full flex-col">
       <div className="flex shrink-0 flex-wrap items-center gap-1.5 border-b border-[var(--border)] px-2.5 py-1.5">
@@ -87,11 +134,50 @@ function Board({ title, score, best, status, onRestart, children, footer }: {
         <span className="os-chip tabular-nums">best {best}</span>
         {status && <span className="os-chip !border-[var(--accent)] !text-[var(--accent)]">{status}</span>}
         <div className="flex-1" />
+        <button className="os-btn !py-1 text-[11px]" onClick={() => setShowTable((v) => !v)} aria-expanded={showTable} title={`Top ${TABLE_SIZE} scores on this device`}>
+          <Icon name="trophy" size={11} className="mr-1" />Top {TABLE_SIZE}
+        </button>
+        {onTogglePause && (
+          <button className="os-btn !py-1 text-[11px]" onClick={onTogglePause} title="Pause or resume (P)">
+            <Icon name={paused ? "play" : "pause"} size={11} className="mr-1" />{paused ? "Resume" : "Pause"}
+          </button>
+        )}
         <button className="os-btn !py-1 text-[11px]" onClick={onRestart}>
           <Icon name="refresh" size={11} className="mr-1" />New game
         </button>
       </div>
-      <div className="grid min-h-0 flex-1 place-items-center overflow-hidden p-2">{children}</div>
+      {showTable && (
+        <div className="shrink-0 border-b border-[var(--border)] px-2.5 py-1.5 text-[11px]">
+          {!table?.length ? (
+            <span className="text-[var(--muted)]">No finished games yet. A score is recorded when a round ends.</span>
+          ) : (
+            <ol className="grid gap-0.5">
+              {table.map((e, i) => (
+                <li key={`${e.at}-${i}`} className="flex items-center gap-2 tabular-nums">
+                  <span className="w-4 text-[var(--muted)]">{i + 1}.</span>
+                  <span className="w-16 font-medium">{e.score}</span>
+                  <span className="text-[var(--muted)]">{new Date(e.at).toLocaleDateString()} {new Date(e.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
+                </li>
+              ))}
+            </ol>
+          )}
+        </div>
+      )}
+      <div className="relative grid min-h-0 flex-1 place-items-center overflow-hidden p-2">
+        {children}
+        {paused && onTogglePause && (
+          <button
+            className="absolute inset-0 grid place-items-center"
+            style={{ background: "color-mix(in srgb, var(--bg) 55%, transparent)" }}
+            onClick={onTogglePause}
+            aria-label="Paused. Resume"
+          >
+            <span className="glass flex items-center gap-2 px-4 py-2 text-[13px] font-medium" style={{ borderRadius: "var(--radius)" }}>
+              <Icon name="play" size={14} />Paused. Click or press P to resume
+            </span>
+          </button>
+        )}
+      </div>
       {footer && <div className="shrink-0 border-t border-[var(--border)] px-2.5 py-1 text-[10.5px] text-[var(--muted)]">{footer}</div>}
     </div>
   );
@@ -127,7 +213,7 @@ function useSwipe(el: React.RefObject<HTMLElement | null>, onSwipe: (dir: "up" |
 
 /* ── Snake ────────────────────────────────────────────────────────────────── */
 
-function Snake({ onScore, best }: { onScore: (n: number) => boolean; best: number }) {
+function Snake({ onScore, best, table, paused = false, onTogglePause }: GameProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const [score, setScore] = useState(0);
@@ -135,6 +221,8 @@ function Snake({ onScore, best }: { onScore: (n: number) => boolean; best: numbe
   const [gen, setGen] = useState(0);
   const dirRef = useRef<[number, number]>([1, 0]);
   const queued = useRef<Array<[number, number]>>([]);
+  const pausedRef = useRef(paused);
+  useEffect(() => { pausedRef.current = paused; }, [paused]);
 
   const turn = useCallback((d: [number, number]) => {
     const last = queued.current[queued.current.length - 1] ?? dirRef.current;
@@ -151,12 +239,13 @@ function Snake({ onScore, best }: { onScore: (n: number) => boolean; best: numbe
         ArrowUp: [0, -1], ArrowDown: [0, 1], ArrowLeft: [-1, 0], ArrowRight: [1, 0],
         w: [0, -1], s: [0, 1], a: [-1, 0], d: [1, 0],
       };
+      if ((e.key === "p" || e.key === "P") && onTogglePause && !(e.target as HTMLElement | null)?.closest?.("input, textarea, [contenteditable]")) { onTogglePause(); return; }
       const d = map[e.key];
-      if (d) { e.preventDefault(); turn(d); }
+      if (d && !pausedRef.current) { e.preventDefault(); turn(d); }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [turn]);
+  }, [turn, onTogglePause]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -211,9 +300,10 @@ function Snake({ onScore, best }: { onScore: (n: number) => boolean; best: numbe
 
       // Speed ramps with length, which is the entire difficulty curve.
       const interval = Math.max(70, 165 - snake.length * 3);
-      acc += now - last;
+      // Paused: time does not accumulate, so resuming does not jump ahead.
+      if (!pausedRef.current) acc += now - last;
       last = now;
-      if (alive && acc > interval) { acc = 0; step(); }
+      if (alive && !pausedRef.current && acc > interval) { acc = 0; step(); }
 
       g.fillStyle = token("--bg2", "#132845");
       g.fillRect(0, 0, size, size);
@@ -251,6 +341,9 @@ function Snake({ onScore, best }: { onScore: (n: number) => boolean; best: numbe
       title="Snake"
       score={score}
       best={best}
+      table={table}
+      paused={paused}
+      onTogglePause={onTogglePause}
       status={dead ? "game over" : undefined}
       onRestart={() => { setScore(0); setDead(false); setGen((g) => g + 1); }}
       footer="Arrow keys, WASD, or swipe. The snake speeds up as it grows."
@@ -264,13 +357,15 @@ function Snake({ onScore, best }: { onScore: (n: number) => boolean; best: numbe
 
 /* ── Breakout ─────────────────────────────────────────────────────────────── */
 
-function Breakout({ onScore, best }: { onScore: (n: number) => boolean; best: number }) {
+function Breakout({ onScore, best, table, paused = false, onTogglePause }: GameProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [score, setScore] = useState(0);
   const [lives, setLives] = useState(3);
   const [status, setStatus] = useState<string | undefined>();
   const [gen, setGen] = useState(0);
   const paddleX = useRef(0.5);
+  const pausedRef = useRef(paused);
+  useEffect(() => { pausedRef.current = paused; }, [paused]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -293,6 +388,8 @@ function Breakout({ onScore, best }: { onScore: (n: number) => boolean; best: nu
       paddleX.current = Math.max(0.08, Math.min(0.92, (e.clientX - r.left) / r.width));
     };
     const onKey = (e: KeyboardEvent) => {
+      if ((e.key === "p" || e.key === "P") && onTogglePause && !(e.target as HTMLElement | null)?.closest?.("input, textarea, [contenteditable]")) { onTogglePause(); return; }
+      if (pausedRef.current) return;
       if (e.key === "ArrowLeft") paddleX.current = Math.max(0.08, paddleX.current - 0.06);
       if (e.key === "ArrowRight") paddleX.current = Math.min(0.92, paddleX.current + 0.06);
     };
@@ -307,7 +404,7 @@ function Breakout({ onScore, best }: { onScore: (n: number) => boolean; best: nu
       const accent = token("--accent", "#67e8f9");
       const accent2 = token("--accent2", "#8b5cf6");
 
-      if (running) {
+      if (running && !pausedRef.current) {
         ball.x += ball.vx * dt;
         ball.y += ball.vy * dt;
         if (ball.x < 0.015 || ball.x > 0.985) { ball.vx *= -1; ball.x = Math.max(0.015, Math.min(0.985, ball.x)); }
@@ -372,13 +469,16 @@ function Breakout({ onScore, best }: { onScore: (n: number) => boolean; best: nu
       canvas.removeEventListener("pointermove", onMove);
       window.removeEventListener("keydown", onKey);
     };
-  }, [gen, onScore]);
+  }, [gen, onScore, onTogglePause]);
 
   return (
     <Board
       title="Breakout"
       score={score}
       best={best}
+      table={table}
+      paused={paused}
+      onTogglePause={onTogglePause}
       status={status ?? `${lives} lives`}
       onRestart={() => { setScore(0); setLives(3); setStatus(undefined); setGen((g) => g + 1); }}
       footer="Move the pointer, or use the arrow keys. Where the ball hits the paddle decides where it goes."
@@ -431,7 +531,7 @@ function move(g: Grid, dir: "left" | "up" | "right" | "down"): { grid: Grid; gai
 
 const TILE_TINT: Record<number, number> = { 2: 8, 4: 16, 8: 26, 16: 36, 32: 48, 64: 60, 128: 70, 256: 80, 512: 88, 1024: 94, 2048: 100 };
 
-function Tiles({ onScore, best }: { onScore: (n: number) => boolean; best: number }) {
+function Tiles({ onScore, best, table }: GameProps) {
   const [grid, setGrid] = useState<Grid>(() => addTile(addTile(emptyGrid())));
   const [score, setScore] = useState(0);
   const [status, setStatus] = useState<string | undefined>();
@@ -479,6 +579,7 @@ function Tiles({ onScore, best }: { onScore: (n: number) => boolean; best: numbe
       title="2048"
       score={score}
       best={best}
+      table={table}
       status={status}
       onRestart={() => { setGrid(addTile(addTile(emptyGrid()))); setScore(0); setStatus(undefined); }}
       footer="Arrow keys, WASD, or swipe. Equal tiles merge; the board fills whether you merge or not."
@@ -530,7 +631,7 @@ function buildMines(w: number, h: number, mines: number): Cell[][] {
 
 const NUM_COLOR = ["", "#60a5fa", "#4ade80", "#fb7185", "#a78bfa", "#fbbf24", "#22d3ee", "#f472b6", "#94a3b8"];
 
-function Mines({ onScore, best }: { onScore: (n: number) => boolean; best: number }) {
+function Mines({ onScore, best, table }: GameProps) {
   const W = 12, H = 12, MINES = 20;
   const [grid, setGrid] = useState(() => buildMines(W, H, MINES));
   const [status, setStatus] = useState<string | undefined>();
@@ -595,6 +696,7 @@ function Mines({ onScore, best }: { onScore: (n: number) => boolean; best: numbe
       title="Minesweeper"
       score={score}
       best={best}
+      table={table}
       status={status ?? `${MINES - flags} left`}
       onRestart={() => { setGrid(buildMines(W, H, MINES)); setStatus(undefined); setStarted(null); setScore(0); }}
       footer="Click to clear, right-click or long-press to flag. Clearing faster scores higher."
@@ -611,6 +713,7 @@ function Mines({ onScore, best }: { onScore: (n: number) => boolean; best: numbe
             key={`${x}-${y}`}
             onClick={() => open(x, y)}
             onContextMenu={(e) => { e.preventDefault(); flag(x, y); }}
+            aria-label={`Square ${x + 1}, ${y + 1}${c.open ? (c.mine ? ", mine" : c.n ? `, ${c.n}` : ", clear") : c.flag ? ", flagged" : ""}`}
             className={cn("grid place-items-center rounded-[2px] text-[clamp(8px,1.8cqw,13px)] font-semibold tabular-nums")}
             style={{
               background: c.open

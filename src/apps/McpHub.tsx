@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import type { AppProps } from "@/kernel/types";
 import { useMcp, connect, callTool, type McpServer, type McpTool } from "@/lib/mcp";
 import {
@@ -9,6 +9,9 @@ import {
 import { Tabs, Empty, ErrorNote, Spinner, CopyButton } from "./_ui";
 import { cn } from "@/lib/cn";
 import { Icon } from "@/shell/icons";
+import { runMrtr, toolResultText } from "@/lib/mcp-mrtr";
+import { MCP_PROTOCOL } from "@/lib/mcp";
+import { MrtrPanel, MRTR_CAPS, rpcRaw, type PendingInput } from "./McpMrtr";
 
 /* ────────────────────────────────────────────────────────────────────────────
    MCP Hub.
@@ -40,7 +43,11 @@ export default function McpHub({}: AppProps) {
   const [activeServerId, setActiveServerId] = useState<string | null>(null);
   const [activeTool, setActiveTool] = useState<string | null>(null);
   const [toolArgs, setToolArgs] = useState<Record<string, string>>({});
-  const [outcome, setOutcome] = useState<{ ok: boolean; text: string; ms: number } | null>(null);
+  const [outcome, setOutcome] = useState<{ ok: boolean; text: string; ms: number; rounds?: number } | null>(null);
+  // MRTR: a server that answers input_required waits on the person here.
+  const [mrtrOn, setMrtrOn] = useState(true);
+  const [pendingInput, setPendingInput] = useState<PendingInput | null>(null);
+  const resolverRef = useRef<((r: Record<string, unknown> | null) => void) | null>(null);
 
   const visible = useMemo(
     () => MCP_DIRECTORY.filter((e) => hostFilter === "all" || e.host === hostFilter),
@@ -117,12 +124,47 @@ export default function McpHub({}: AppProps) {
       args[k] = prop?.type === "number" || prop?.type === "integer" ? Number(v) : v;
     }
     try {
-      const r = await callTool(serverFor(activeEntry), activeConn.sessionId, tool.name, args, undefined, activeConn.protocol);
-      setOutcome({ ok: r.ok, text: r.text, ms: Date.now() - started });
+      if (mrtrOn) {
+        // The 2026-07-28 path: the raw result is inspected, and an
+        // input_required answer is put to the user and retried with a new id.
+        const server = serverFor(activeEntry);
+        const protocol = activeConn.protocol ?? MCP_PROTOCOL;
+        const out = await runMrtr(
+          "tools/call",
+          { name: tool.name, arguments: args },
+          (params) => rpcRaw(server, "tools/call", params, activeConn.sessionId, protocol),
+          (requests, round) => new Promise((resolve) => {
+            resolverRef.current = resolve;
+            setPendingInput({ requests, round });
+          }),
+          { caps: MRTR_CAPS },
+        );
+        setPendingInput(null);
+        resolverRef.current = null;
+        const ms = Date.now() - started;
+        if (out.status === "complete") setOutcome({ ...toolResultText(out.result), ms, rounds: out.rounds });
+        else if (out.status === "cancelled") setOutcome({ ok: false, text: `Cancelled after ${out.rounds} round(s): the server's questions were not answered.`, ms, rounds: out.rounds });
+        else if (out.status === "exhausted") setOutcome({ ok: false, text: `Stopped after ${out.rounds} rounds: the server kept asking for more input.`, ms, rounds: out.rounds });
+        else setOutcome({ ok: false, text: `The server broke the MRTR rules: ${out.reason}`, ms, rounds: out.rounds });
+      } else {
+        const r = await callTool(serverFor(activeEntry), activeConn.sessionId, tool.name, args, undefined, activeConn.protocol);
+        setOutcome({ ok: r.ok, text: r.text, ms: Date.now() - started });
+      }
+    } catch (e) {
+      setPendingInput(null);
+      resolverRef.current = null;
+      setOutcome({ ok: false, text: e instanceof Error ? e.message : "Tool call failed.", ms: Date.now() - started });
     } finally {
       setBusy(null);
     }
-  }, [activeEntry, tool, activeConn, toolArgs, serverFor]);
+  }, [activeEntry, tool, activeConn, toolArgs, serverFor, mrtrOn]);
+
+  const answerInput = useCallback((r: Record<string, unknown> | null) => {
+    const resolve = resolverRef.current;
+    resolverRef.current = null;
+    setPendingInput(null);
+    resolve?.(r);
+  }, []);
 
   const connectedCount = Object.values(mcp.connections).filter((c) => !c.error && c.tools.length > 0).length;
 
@@ -293,11 +335,25 @@ export default function McpHub({}: AppProps) {
                         <p className="text-[11px] text-[var(--muted)]">This tool takes no arguments.</p>
                       )}
                     </div>
-                    <button className="os-btn" onClick={() => void runTool()} disabled={busy === "call"}>
-                      <Icon name="play" size={13} /> {busy === "call" ? "Calling…" : "Call"}
-                    </button>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button className="os-btn" onClick={() => void runTool()} disabled={busy === "call"}>
+                        <Icon name="play" size={13} /> {busy === "call" ? "Calling…" : "Call"}
+                      </button>
+                      <label className="flex items-center gap-1 text-[10.5px] text-[var(--muted)]" title="Answer the server's input_required results (elicitation, sampling, roots) and retry, per the 2026-07-28 spec">
+                        <input type="checkbox" checked={mrtrOn} onChange={(e) => setMrtrOn(e.target.checked)} disabled={busy === "call"} />
+                        Multi round-trip (MRTR){activeConn.protocol ? ` · ${activeConn.protocol}` : ""}
+                      </label>
+                    </div>
 
-                    {busy === "call" && <div className="mt-2"><Spinner label={`Calling ${tool.name}…`} /></div>}
+                    {busy === "call" && !pendingInput && <div className="mt-2"><Spinner label={`Calling ${tool.name}…`} /></div>}
+                    {pendingInput && (
+                      <MrtrPanel
+                        key={pendingInput.round}
+                        pending={pendingInput}
+                        serverName={activeEntry?.name ?? "The server"}
+                        onDone={answerInput}
+                      />
+                    )}
 
                     {outcome && (
                       <div
@@ -313,7 +369,7 @@ export default function McpHub({}: AppProps) {
                           <span className="text-[11.5px] font-medium">
                             {outcome.ok ? "Returned" : "The tool reported an error"}
                           </span>
-                          <span className="text-[10px] text-[var(--muted)]">{outcome.ms} ms</span>
+                          <span className="text-[10px] text-[var(--muted)]">{outcome.ms} ms{outcome.rounds && outcome.rounds > 1 ? ` · ${outcome.rounds} rounds` : ""}</span>
                           <div className="flex-1" />
                           <CopyButton text={outcome.text} label="Copy" className="!px-1.5 !py-0 !text-[10px]" />
                         </div>
