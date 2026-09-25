@@ -12,6 +12,7 @@ import type { AppProps } from "@/kernel/types";
 import { Icon } from "@/shell/icons";
 import { Empty, ErrorNote, Spinner, Markdown, CopyButton } from "./_ui";
 import { cn } from "@/lib/cn";
+import { mediaEmbedFor } from "@/lib/media-embed";
 import { relTime } from "@/lib/format";
 import { SANDBOX_TOKENS, encodeTarget } from "@/lib/webproxy";
 import {
@@ -171,6 +172,8 @@ export default function Browser({ args }: AppProps) {
 
   const tab = activeTab(tabsState);
   const current = currentEntry(tab);
+  // A video page's audible local form (lib/media-embed.ts): cloud live views carry no sound.
+  const media = current ? mediaEmbedFor(current.url) : null;
   const view = current?.view ?? null;
   const reader = readers[tab.id] ?? null;
   const template = engineTemplate(data);
@@ -558,9 +561,17 @@ export default function Browser({ args }: AppProps) {
         </div>
       </div>
 
-      {(autoNote || view === "web" || cloud) && (
+      {(autoNote || view === "web" || cloud || (media && current?.url !== media.url)) && (
         <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-[var(--border)] px-2.5 py-1 text-[10.5px] text-[var(--muted)]">
           {autoNote && <span className="os-chip !text-[10px]">{autoNote}</span>}
+          {media && current && current.url !== media.url && (
+            <span className="flex flex-wrap items-center gap-1" data-browser-sound>
+              {view === "cloud" ? "Cloud sessions stream the picture only, with no sound (Steel's live view has no audio track)." : "This page has a video or audio track."}
+              <button className="os-btn !px-1.5 !py-0 !text-[10px]" data-variant="primary" onClick={() => void go(tab.id, media.url, "frame")} aria-label={`Play with sound here using the ${media.label}`}>
+                <Icon name="speaker" size={10} className="mr-1" />Play with sound here
+              </button>
+            </span>
+          )}
           {view === "web" && (
             <span className="flex flex-wrap items-center gap-1">
               <Icon name="shield" />
@@ -664,8 +675,11 @@ export default function Browser({ args }: AppProps) {
                 key={`f${t.id}${n}`}
                 src={e.url}
                 className={cn("absolute inset-0 h-full w-full border-0 bg-white", hidden && "invisible")}
-                sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
-                referrerPolicy="no-referrer"
+                sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-presentation"
+                // Official video players refuse to play without a referrer, so
+                // they get the origin only (never the path); everything else none.
+                referrerPolicy={/^https:\/\/(www\.youtube-nocookie\.com|player\.vimeo\.com)\//.test(e.url) ? "strict-origin-when-cross-origin" : "no-referrer"}
+                allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
                 title={e.title || "Embedded page"}
               />
             );

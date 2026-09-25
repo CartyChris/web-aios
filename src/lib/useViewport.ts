@@ -74,6 +74,10 @@ function subscribe(onChange: () => void): () => void {
   window.visualViewport?.addEventListener("scroll", handler);
   const mq = window.matchMedia("(display-mode: standalone)");
   mq.addEventListener?.("change", handler);
+  // Touch vs mouse can change with no resize at all (a 2-in-1 docking its
+  // keyboard, a tablet gaining a trackpad), and the shell choice depends on it.
+  const pointer = window.matchMedia("(pointer: coarse)");
+  pointer.addEventListener?.("change", handler);
 
   // A ResizeObserver on the document element catches layout changes that never
   // raise a window resize event — notably devtools docking and the programmatic
@@ -87,6 +91,7 @@ function subscribe(onChange: () => void): () => void {
     window.visualViewport?.removeEventListener("resize", handler);
     window.visualViewport?.removeEventListener("scroll", handler);
     mq.removeEventListener?.("change", handler);
+    pointer.removeEventListener?.("change", handler);
     ro.disconnect();
   };
 }

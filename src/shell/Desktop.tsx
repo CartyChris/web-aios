@@ -11,7 +11,7 @@ import { LiveToasts } from "./LiveToasts";
 import { useGlobalContextMenu } from "./useGlobalContextMenu";
 import { LAYOUTS } from "@/lib/zones";
 import { WindowFrame } from "./Window";
-import { Dock } from "./Dock";
+import { Dock, NARROW_DOCK } from "./Dock";
 import { TopBar } from "./TopBar";
 import { Launcher } from "./Launcher";
 import { CommandPalette } from "./CommandPalette";
@@ -330,8 +330,10 @@ function runEgg(id: string, settings: ReturnType<typeof useSettings.getState>) {
 function MinimizedTray() {
   const wm = useWM();
   const dockPosition = useSettings((s) => s.dockPosition);
+  const vp = useViewport();
   const mins = wm.windows.filter((w) => w.state === "minimized" && (w.pinned || w.workspace === wm.activeWorkspace));
-  if (!mins.length) return null;
+  // On narrow screens the dock shows these itself (Dock.tsx, NARROW_DOCK).
+  if (!mins.length || vp.w < NARROW_DOCK) return null;
   return (
     <div
       className="glass fixed z-[8900] flex max-w-[70vw] gap-1.5 overflow-x-auto p-1.5"

@@ -6,6 +6,11 @@ import { useSettings } from "@/kernel/settings";
 import { getApp } from "@/kernel/registry";
 import { cn } from "@/lib/cn";
 import { Icon } from "@/shell/icons";
+import { useViewport } from "@/lib/useViewport";
+
+/** Below this width the minimized-windows tray is folded into the dock:
+ *  drawn separately above it, it read as a second, smaller dock on phones. */
+export const NARROW_DOCK = 768;
 
 /** The dock is data, not markup: it renders whatever ids are in
  *  `settings.dockApps`, in that order, and supports drag-to-reorder in place. */
@@ -15,8 +20,11 @@ export function Dock({ onLauncher }: { onLauncher: () => void }) {
   const [hovered, setHovered] = useState<number | null>(null);
   const [peek, setPeek] = useState(false);
   const dragIndex = useRef<number | null>(null);
+  const vp = useViewport();
+  const narrow = vp.w < NARROW_DOCK;
 
   if (dockPosition === "hidden") return null;
+  const minimized = narrow ? wm.windows.filter((w) => w.state === "minimized" && (w.pinned || w.workspace === wm.activeWorkspace)) : [];
 
   const vertical = dockPosition === "left" || dockPosition === "right";
   // "Running" means running HERE. Counting every workspace put a solid dot
@@ -55,8 +63,9 @@ export function Dock({ onLauncher }: { onLauncher: () => void }) {
       }}
     >
       <div
-        className={cn("glass no-select flex gap-1.5 p-1.5", vertical ? "flex-col" : "flex-row", "items-center")}
+        className={cn("glass no-select flex gap-1.5 p-1.5", vertical ? "flex-col" : "flex-row", "items-center", narrow && !vertical && "max-w-[calc(100vw-16px)] overflow-x-auto")}
         style={{ borderRadius: "calc(var(--radius) * 1.2)" }}
+        data-dock
       >
         <DockButton
           label="Launcher"
@@ -123,6 +132,25 @@ export function Dock({ onLauncher }: { onLauncher: () => void }) {
             />
           );
         })}
+        {minimized.length > 0 && (
+          <>
+            <div className={cn("bg-[var(--border)]", vertical ? "h-px w-6" : "h-6 w-px")} />
+            {minimized.map((w) => (
+              <DockButton
+                key={w.id}
+                label={`Restore ${w.title}`}
+                icon={w.icon}
+                running
+                active={false}
+                scale={1}
+                showLabel={dockLabels}
+                vertical={vertical}
+                onClick={() => wm.restore(w.id)}
+                data-dock-minimized={w.id}
+              />
+            ))}
+          </>
+        )}
       </div>
     </div>
   );

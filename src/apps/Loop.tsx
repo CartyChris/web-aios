@@ -248,7 +248,7 @@ export default function Loop({ win }: AppProps) {
             />
           </label>
           <button className={cn("os-btn !py-1 text-[11px]", prefs.judgeModel && "!border-[var(--accent)]")} onClick={() => setShowJudge((v) => !v)} aria-expanded={showJudge}>
-            Judge: {prefs.judgeModel ? prefs.judgeModel : "auto"}
+            Judges{prefs.jevJudge ? " + Jev" : ""}: {prefs.judgeModel ? prefs.judgeModel : "auto"} (set up judges, Jev)
           </button>
           {phase && <Spinner label={phase} />}
           <div className="flex-1" />

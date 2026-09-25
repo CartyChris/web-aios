@@ -114,6 +114,7 @@
     "src/lib/provenance.ts",
     "src/lib/mcp-apps.ts",
     "src/lib/harness/frozen-eval.ts",
-    "src/lib/timeline.ts"
+    "src/lib/timeline.ts",
+    "src/lib/media-embed.ts"
   ]
 }
