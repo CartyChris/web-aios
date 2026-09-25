@@ -138,6 +138,18 @@ export const APPS: AppManifest[] = [
     accent: "#60a5fa",
   },
   {
+    id: "desk",
+    name: "Desk",
+    icon: "report",
+    category: "ai",
+    description: "Claude Opus 5.5 at the front of the OS: what needs you, in order, from what is actually on this device, and what it cannot see.",
+    component: lazy(() => import("@/apps/Desk")),
+    defaultSize: { w: 560, h: 640 },
+    singleton: true,
+    permissions: ["storage", "files"],
+    accent: "#a78bfa",
+  },
+  {
     id: "harness-hub",
     name: "Harness Hub",
     icon: "layers",

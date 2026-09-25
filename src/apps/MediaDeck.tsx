@@ -8,6 +8,7 @@ import { uid } from "@/lib/format";
 import { Empty } from "./_ui";
 import { cn } from "@/lib/cn";
 import { Icon } from "@/shell/icons";
+import { shuffleNext, moveItem, keyAction, clampRate } from "@/lib/mediactl";
 
 /* ────────────────────────────────────────────────────────────────────────────
    Media Deck — ported from media-deck.html.
@@ -20,7 +21,7 @@ import { Icon } from "@/shell/icons";
    ──────────────────────────────────────────────────────────────────────────── */
 
 interface Track { id: string; name: string; type: string; size: number }
-interface Deck { id: string; name: string; trackIds: string[] }
+interface Deck { id: string; name: string; trackIds: string[]; shuffle?: boolean; repeat?: "off" | "one" | "all" }
 
 interface DeckState {
   decks: Deck[];
@@ -31,6 +32,9 @@ interface DeckState {
   setActive: (id: string) => void;
   addTracks: (deckId: string, tracks: Track[]) => void;
   removeTrack: (deckId: string, trackId: string) => void;
+  /** Shuffle and repeat belong to the deck, so they survive a reload. */
+  setDeckPrefs: (deckId: string, patch: Pick<Deck, "shuffle" | "repeat">) => void;
+  moveTrack: (deckId: string, index: number, delta: number) => void;
 }
 
 const useDecks = create<DeckState>()(
@@ -49,6 +53,8 @@ const useDecks = create<DeckState>()(
           tracks: [...s.tracks, ...tracks.filter((t) => !s.tracks.some((x) => x.id === t.id))],
           decks: s.decks.map((d) => (d.id === deckId ? { ...d, trackIds: [...d.trackIds, ...tracks.map((t) => t.id)] } : d)),
         })),
+      setDeckPrefs: (deckId, patch) => set((s) => ({ decks: s.decks.map((d) => (d.id === deckId ? { ...d, ...patch } : d)) })),
+      moveTrack: (deckId, index, delta) => set((s) => ({ decks: s.decks.map((d) => (d.id === deckId ? { ...d, trackIds: moveItem(d.trackIds, index, delta) } : d)) })),
       removeTrack: (deckId, trackId) =>
         set((s) => ({ decks: s.decks.map((d) => (d.id === deckId ? { ...d, trackIds: d.trackIds.filter((t) => t !== trackId) } : d)) })),
     }),
@@ -61,8 +67,8 @@ export default function MediaDeck({}: AppProps) {
   // Object URLs live only for this session — they are not persistable.
   const [urls, setUrls] = useState<Record<string, string>>({});
   const [playing, setPlaying] = useState<string | null>(null);
-  const [shuffle, setShuffle] = useState(false);
-  const [repeat, setRepeat] = useState<"off" | "one" | "all">("off");
+  const [played, setPlayed] = useState<string[]>([]);
+  const [rate, setRate] = useState(1);
   const [progress, setProgress] = useState(0);
   const mediaRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -75,6 +81,8 @@ export default function MediaDeck({}: AppProps) {
     [deck, store.tracks],
   );
   const current = playing ? store.tracks.find((t) => t.id === playing) : null;
+  const shuffle = deck?.shuffle ?? false;
+  const repeat = deck?.repeat ?? "off";
 
   useEffect(() => () => { Object.values(urls).forEach(URL.revokeObjectURL); }, [urls]);
 
@@ -96,18 +104,41 @@ export default function MediaDeck({}: AppProps) {
   const play = useCallback((id: string) => {
     if (!urls[id]) return;
     setPlaying(id);
-    requestAnimationFrame(() => mediaRef.current?.play().catch(() => undefined));
-  }, [urls]);
+    // A timeout, not requestAnimationFrame: rAF never fires in a hidden tab,
+    // so the next track in a background tab would never start.
+    setTimeout(() => { const el = mediaRef.current; if (el) { el.playbackRate = rate; el.play().catch(() => undefined); } }, 0);
+  }, [urls, rate]);
 
   const next = useCallback(() => {
     const available = deckTracks.filter((t) => urls[t.id]);
     if (!available.length) return;
     if (repeat === "one" && playing) return play(playing);
+    if (shuffle) {
+      // A bag, not a dice roll: every track once before any repeats, and never
+      // the same track twice in a row (lib/mediactl.ts, tested).
+      const pick = shuffleNext(available.map((t) => t.id), played, playing, Math.random(), repeat === "all");
+      if (!pick) { setPlaying(null); setPlayed([]); return; }
+      setPlayed(pick.played);
+      return play(pick.id);
+    }
     const i = available.findIndex((t) => t.id === playing);
-    const n = shuffle ? Math.floor(Math.random() * available.length) : i + 1;
+    const n = i + 1;
     if (n >= available.length) { if (repeat === "all") play(available[0].id); else setPlaying(null); return; }
     play(available[n].id);
-  }, [deckTracks, urls, playing, shuffle, repeat, play]);
+  }, [deckTracks, urls, playing, shuffle, repeat, play, played]);
+
+  const onKey = (e: React.KeyboardEvent) => {
+    if ((e.target as HTMLElement).closest("input,textarea,select")) return;
+    const a = keyAction(e.key, e.shiftKey);
+    const el = mediaRef.current;
+    if (!a || !el) return;
+    e.preventDefault();
+    if (a.kind === "toggle") void (el.paused ? el.play() : el.pause());
+    else if (a.kind === "seek") el.currentTime = Math.max(0, Math.min(el.duration || 0, el.currentTime + a.by));
+    else if (a.kind === "mute") el.muted = !el.muted;
+    else if (a.kind === "rate") { const v = clampRate(rate + a.by); setRate(v); el.playbackRate = v; }
+    else if (a.kind === "next") next();
+  };
 
   const attachAnalyser = useCallback(() => {
     const el = mediaRef.current;
@@ -154,7 +185,7 @@ export default function MediaDeck({}: AppProps) {
   const isVideo = current?.type.startsWith("video");
 
   return (
-    <div className="app-split flex h-full" onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); attach(e.dataTransfer.files); }}>
+    <div className="app-split flex h-full outline-none" tabIndex={0} onKeyDown={onKey} aria-label="Media Deck. Space plays, arrows seek, N skips, less-than and greater-than change speed." onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); attach(e.dataTransfer.files); }}>
       <div className="app-sidebar flex w-48 shrink-0 flex-col overflow-y-auto border-r border-[var(--border)]">
         <div className="p-2">
           <button
@@ -192,10 +223,14 @@ export default function MediaDeck({}: AppProps) {
                 Attach files
                 <input type="file" accept="audio/*,video/*" multiple hidden onChange={(e) => { attach(e.target.files); e.target.value = ""; }} />
               </label>
-              <button className={cn("os-btn !py-1 text-[11px]", shuffle && "!border-[var(--accent)] !bg-[var(--accent)]/16")} onClick={() => setShuffle((v) => !v)}>⤨ Shuffle</button>
+              <button className={cn("os-btn !py-1 text-[11px]", shuffle && "!border-[var(--accent)] !bg-[var(--accent)]/16")} aria-pressed={shuffle} onClick={() => { store.setDeckPrefs(deck.id, { shuffle: !shuffle }); setPlayed([]); }}>⤨ Shuffle</button>
+              <select className="os-input !w-auto !py-0.5 text-[11px]" value={rate} aria-label="Playback speed" onChange={(e) => { const v = clampRate(Number(e.target.value)); setRate(v); if (mediaRef.current) mediaRef.current.playbackRate = v; }}>
+                {[0.5, 0.75, 1, 1.25, 1.5, 2].map((r) => <option key={r} value={r}>{r}x</option>)}
+              </select>
               <button
                 className={cn("os-btn !py-1 text-[11px]", repeat !== "off" && "!border-[var(--accent)] !bg-[var(--accent)]/16")}
-                onClick={() => setRepeat((r) => (r === "off" ? "all" : r === "all" ? "one" : "off"))}
+                aria-label={`Repeat: ${repeat}`}
+                onClick={() => store.setDeckPrefs(deck.id, { repeat: repeat === "off" ? "all" : repeat === "all" ? "one" : "off" })}
               >
                 ⟳ {repeat}
               </button>
@@ -211,7 +246,7 @@ export default function MediaDeck({}: AppProps) {
               {deckTracks.length === 0 ? (
                 <Empty icon="media" title="Empty deck" body="Attach audio or video files, or drag them into this window." />
               ) : (
-                deckTracks.map((t) => {
+                deckTracks.map((t, idx) => {
                   const ready = Boolean(urls[t.id]);
                   return (
                     <div
@@ -226,7 +261,10 @@ export default function MediaDeck({}: AppProps) {
                       <span className="min-w-0 flex-1 truncate text-[12px]">{t.name}</span>
                       {!ready && <span className="shrink-0 text-[10px]">not attached</span>}
                       <span className="shrink-0 text-[10px] text-[var(--muted)]">{(t.size / 1048576).toFixed(1)} MB</span>
-                      <button className="shrink-0 text-[10px] opacity-0 group-hover:opacity-60 hover:!opacity-100" onClick={() => store.removeTrack(deck.id, t.id)}><Icon name="close" size={11} /></button>
+                      {/* Visible at rest, not only on hover: a phone has no hover, and these were unreachable there. */}
+                      <button className="shrink-0 text-[10px] opacity-50 hover:!opacity-100 disabled:opacity-20" disabled={idx === 0} onClick={() => store.moveTrack(deck.id, idx, -1)} aria-label={`Move ${t.name} up`}><Icon name="arrowUp" size={11} /></button>
+                      <button className="shrink-0 text-[10px] opacity-50 hover:!opacity-100 disabled:opacity-20" disabled={idx === deckTracks.length - 1} onClick={() => store.moveTrack(deck.id, idx, 1)} aria-label={`Move ${t.name} down`}><Icon name="arrowDown" size={11} /></button>
+                      <button className="shrink-0 text-[10px] opacity-50 hover:!opacity-100" onClick={() => store.removeTrack(deck.id, t.id)} aria-label={`Remove ${t.name} from the deck`}><Icon name="close" size={11} /></button>
                     </div>
                   );
                 })

@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { checkBaseUrl } from "@/lib/server-guard";
+import { checkBaseUrl, deploymentKeyAllowed } from "@/lib/server-guard";
 import { getProvider, PROVIDERS } from "@/lib/providers";
 import { parseAnthropicModels, parseGoogleModels } from "@/lib/model-lists";
 
@@ -18,7 +18,8 @@ export async function GET(req: NextRequest) {
   const provider = getProvider(id);
   if (!provider) return Response.json({ error: "Unknown provider" }, { status: 400 });
 
-  const apiKey = req.headers.get("x-api-key") || (provider.envKey ? process.env[provider.envKey] : "") || "";
+  const envKey = provider.envKey && deploymentKeyAllowed(req.nextUrl.searchParams.get("baseUrl"), provider.baseUrl) ? process.env[provider.envKey] : "";
+  const apiKey = req.headers.get("x-api-key") || envKey || "";
   const baseUrl = req.nextUrl.searchParams.get("baseUrl") || provider.baseUrl;
 
   // Every fallback says why, so the UI can tell the user plainly instead of

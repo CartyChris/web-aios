@@ -33,3 +33,29 @@ test("keys and rate bounds", () => {
   assert.equal(clampRate(5), 3);
   assert.equal(clampRate(0.1), 0.25);
 });
+
+import { shuffleNext, moveItem } from "../.test-build/mediactl.js";
+
+test("shuffle is a bag: each track once, never the current one twice in a row", () => {
+  const ids = ["a", "b", "c", "d"];
+  let played = [], cur = "a", seen = new Set(["a"]);
+  // r alternates 0 and 0.99: r=0 is exactly where a bag that forgot to exclude
+  // the current track would pick it again (the first mutation this caught).
+  for (let i = 0; i < 3; i++) {
+    const n = shuffleNext(ids, played, cur, i % 2 ? 0.99 : 0, false);
+    assert.notEqual(n.id, cur);
+    assert.ok(!seen.has(n.id), `repeated ${n.id} before the bag emptied`);
+    seen.add(n.id); played = n.played; cur = n.id;
+  }
+  assert.equal(seen.size, 4);
+  assert.equal(shuffleNext(ids, played, cur, 0.5, false), null, "bag empty and repeat off: stop");
+  const again = shuffleNext(ids, played, cur, 0, true);
+  assert.notEqual(again.id, cur, "a new round does not start with the track that just ended");
+});
+
+test("shuffle with one track and repeat plays it again; moveItem clamps", () => {
+  assert.equal(shuffleNext(["x"], ["x"], "x", 0.3, true).id, "x");
+  assert.deepEqual(moveItem(["a", "b", "c"], 0, 1), ["b", "a", "c"]);
+  assert.deepEqual(moveItem(["a", "b", "c"], 2, 5), ["a", "b", "c"].slice(0, 2).concat("c"));
+  assert.deepEqual(moveItem(["a", "b", "c"], 2, -2), ["c", "a", "b"]);
+});

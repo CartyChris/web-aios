@@ -105,6 +105,10 @@
     "src/lib/dsh/context.ts",
     "src/lib/dsh/session.ts",
     "src/lib/dsh/loop.ts",
-    "src/lib/dsh/policy.ts"
+    "src/lib/dsh/policy.ts",
+    "src/lib/foryou.ts",
+    "src/lib/intel-watch.ts",
+    "src/lib/desk.ts",
+    "src/lib/rewind.ts"
   ]
 }

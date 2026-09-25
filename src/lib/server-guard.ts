@@ -22,3 +22,12 @@ export async function checkBaseUrl(candidate: string | undefined | null, builtin
   }
   return null;
 }
+
+/** The deployment's own key may only travel to the provider's built-in URL.
+ *  A caller who picks the base URL must bring their own key: otherwise one
+ *  anonymous request with baseUrl=https://attacker.example sends the env key
+ *  there (confirmed by the review, reproduced against the real route). */
+export function deploymentKeyAllowed(candidate: string | undefined | null, builtin: string): boolean {
+  const raw = candidate?.trim();
+  return !raw || raw.replace(/\/+$/, "") === builtin.replace(/\/+$/, "");
+}

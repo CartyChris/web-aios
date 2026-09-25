@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { checkBaseUrl } from "@/lib/server-guard";
+import { checkBaseUrl, deploymentKeyAllowed } from "@/lib/server-guard";
 import { getProvider } from "@/lib/providers";
 import { streamChat, type ChatMessage, type ToolSpec } from "@/lib/ai-transport";
 
@@ -40,7 +40,8 @@ export async function POST(req: NextRequest) {
   if (!Array.isArray(body.messages) || body.messages.length === 0) return json({ error: "messages[] is required." }, 400);
 
   // The caller's own key wins; the deployment key is the fallback.
-  const apiKey = body.apiKey?.trim() || (provider.envKey ? process.env[provider.envKey] : "") || "";
+  const envKey = provider.envKey && deploymentKeyAllowed(body.baseUrl, provider.baseUrl) ? process.env[provider.envKey] : "";
+  const apiKey = body.apiKey?.trim() || envKey || "";
   if (!apiKey) {
     return json(
       { error: `No API key for ${provider.name}. Add one in Settings → Providers, or set ${provider.envKey} on the deployment.` },

@@ -25,6 +25,7 @@
    ──────────────────────────────────────────────────────────────────────────── */
 
 import { passesGates, DERIVED_VARS } from "./palette";
+import { SHADER_RECIPES } from "./wallpaper-shaders";
 
 /* ── what a model is allowed to touch ────────────────────────────────────── */
 
@@ -39,7 +40,70 @@ export interface Tunable {
   max?: number;
   step?: number;
   options?: readonly string[];
+  /** Display name per option, shown to the model beside the id. An id like
+   *  "borealis" does not say it is the aurora wallpaper; its name does. */
+  optionNames?: Readonly<Record<string, string>>;
 }
+
+/* ── the registries a proposal must stay inside ──────────────────────────────
+   A model is shown these ids and a reply naming anything else is dropped, so
+   an id listed here that the OS does not have is a proposal that validates and
+   then paints nothing. The real registries live in kernel/themes.ts, which this
+   pure module cannot import (it reaches @/lib/contrast). The lists are copied
+   here instead, and tests/sysupdate.test.mjs parses kernel/themes.ts and
+   kernel/settings.ts and FAILS when a copy and its source disagree -- so adding
+   a wallpaper or theme without updating this file breaks the build, not the
+   feature. The shader half is imported rather than copied, because it can be. */
+
+export interface WallpaperChoice {
+  id: string;
+  name: string;
+}
+
+/** Wallpapers painted on the 2D canvas by shell/Wallpaper.tsx, in registry
+ *  order. Mirrors the non-shader entries of WALLPAPERS in kernel/themes.ts. */
+export const CANVAS_WALLPAPERS: readonly WallpaperChoice[] = [
+  { id: "mesh", name: "Aurora Mesh" },
+  { id: "stars", name: "Star Field" },
+  { id: "grid", name: "Cyber Grid" },
+  { id: "waves", name: "Slow Waves" },
+  { id: "rings", name: "Concentric" },
+  { id: "noise", name: "Soft Noise" },
+  { id: "topo", name: "Topographic" },
+  { id: "particles", name: "Particles" },
+  { id: "flat", name: "Flat Gradient" },
+  { id: "solid", name: "Solid" },
+];
+
+/** Registry ids a model may never propose, and why. "image" shows the user's
+ *  own uploaded picture: a model cannot supply one, and with none set the
+ *  canvas is skipped and the desktop paints as an empty background. */
+export const UNPROPOSABLE_WALLPAPERS: Readonly<Record<string, string>> = {
+  image: "needs an uploaded image, which an update cannot provide",
+};
+
+/** Every wallpaper an update may switch to: the canvas set plus every WebGL
+ *  shader recipe, derived from lib/wallpaper-shaders.ts so a new recipe is
+ *  offered the moment it exists. */
+export const PROPOSABLE_WALLPAPERS: readonly WallpaperChoice[] = [
+  ...CANVAS_WALLPAPERS,
+  ...SHADER_RECIPES.map((r) => ({ id: r.id, name: r.name })),
+];
+
+/** Ids of the built-in themes, THEMES in kernel/themes.ts, in order. A proposed
+ *  theme may not reuse one: useCustomThemes.add silently refuses a built-in id,
+ *  so apply would then select the BUILT-IN theme of that id -- the user would
+ *  get a palette they never previewed while history says "Added theme". */
+export const BUILTIN_THEME_IDS: readonly string[] = [
+  "aurora", "midnight", "sunset", "forest", "graphite", "ocean", "cyber", "candy",
+  "ember", "vaporwave", "matrix", "nord", "sakura", "paper", "daylight", "linen",
+  "obsidian", "abyss", "moss", "wine", "dune", "cobalt", "plum", "rust",
+  "slate", "teal", "ink", "amber", "crimson", "aurora2", "void", "synthwave",
+  "terminal", "mono", "copper", "indigo", "jade", "noir",
+  "porcelain", "meadow", "apricot", "lavender", "mint", "sandstone", "cloud", "blossom",
+  "seafoam", "parchment", "slateday", "citrus",
+  "borealis", "chrome", "nebula", "biolume", "dusk", "silk", "survey", "sumi",
+];
 
 /** The allowlist. A key absent from here can never be written by an update,
  *  however the model phrases it. Deliberately excludes anything that could
@@ -51,7 +115,10 @@ export const TUNABLE: readonly Tunable[] = [
   { key: "glass", kind: "number", label: "Glass blur", min: 0, max: 40, step: 1 },
   { key: "uiScale", kind: "number", label: "UI scale", min: 0.75, max: 1.6, step: 0.05 },
   { key: "density", kind: "number", label: "Density", min: 0.8, max: 1.3, step: 0.05 },
-  { key: "windowOpacity", kind: "number", label: "Window opacity", min: 0.6, max: 1, step: 0.02 },
+  // Only unfocused windows fade (shell/Window.tsx); focused ones stay opaque.
+  // The label says so, or a model asked for "see-through windows" would reach
+  // for a setting that does nothing to the window being looked at.
+  { key: "windowOpacity", kind: "number", label: "Unfocused window opacity", min: 0.6, max: 1, step: 0.02 },
   { key: "wallpaperBlur", kind: "number", label: "Wallpaper blur", min: 0, max: 40, step: 1 },
   { key: "wallpaperDim", kind: "number", label: "Wallpaper dim", min: 0, max: 0.8, step: 0.05 },
   { key: "iconSize", kind: "number", label: "Desktop icon size", min: 0.7, max: 1.6, step: 0.05 },
@@ -63,10 +130,18 @@ export const TUNABLE: readonly Tunable[] = [
   { key: "showWidgets", kind: "boolean", label: "Show widgets" },
   { key: "showDesktopIcons", kind: "boolean", label: "Show desktop icons" },
   { key: "snapIconsToGrid", kind: "boolean", label: "Snap icons to grid" },
-  { key: "dockPosition", kind: "enum", label: "Dock position", options: ["bottom", "left", "right"] },
-  { key: "titlebarStyle", kind: "enum", label: "Titlebar style", options: ["mac", "win", "minimal"] },
-  { key: "windowChrome", kind: "enum", label: "Window chrome", options: ["glass", "solid", "flat"] },
-  { key: "wallpaper", kind: "enum", label: "Wallpaper", options: ["mesh", "aurora", "grid", "waves", "noise", "solid"] },
+  // Every enum option below is a value the Settings type in kernel/settings.ts
+  // accepts; the test fails on one that is not. "win", "flat" and "aurora" were
+  // offered here once and none of them existed. dockPosition deliberately
+  // leaves out "hidden": a model must not be able to take the dock away.
+  { key: "dockPosition", kind: "enum", label: "Dock position", options: ["bottom", "left", "right", "top"] },
+  { key: "titlebarStyle", kind: "enum", label: "Titlebar style", options: ["mac", "windows", "minimal"] },
+  { key: "windowChrome", kind: "enum", label: "Window chrome", options: ["glass", "solid", "outline"] },
+  {
+    key: "wallpaper", kind: "enum", label: "Wallpaper",
+    options: PROPOSABLE_WALLPAPERS.map((w) => w.id),
+    optionNames: Object.fromEntries(PROPOSABLE_WALLPAPERS.map((w) => [w.id, w.name])),
+  },
 ] as const;
 
 const TUNABLE_BY_KEY = new Map(TUNABLE.map((t) => [t.key, t]));
