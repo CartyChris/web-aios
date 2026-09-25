@@ -209,7 +209,10 @@ export async function handleMcpMessage(raw: unknown, opts: McpServerOptions): Pr
 
     case "tools/list": {
       if (isNotification) return null;
-      const tools = opts.registry.list().filter(expose).map(toolDescriptor);
+      const tools = opts.registry.list().filter(expose).map(toolDescriptor)
+        // MCP Apps: calc links an interactive view, so a host that speaks the
+        // extension can show it (and one that does not ignores _meta).
+        .map((t) => (t.name === CALC_APP.tool ? { ...t, _meta: { ui: { resourceUri: CALC_APP.uri } } } : t));
       return ok(id, { tools });
     }
 
@@ -273,6 +276,7 @@ export async function handleMcpMessage(raw: unknown, opts: McpServerOptions): Pr
       if (isNotification) return null;
       const uri = typeof msg.params?.uri === "string" ? msg.params.uri : "";
       if (!uri) return err(id, RPC.INVALID_PARAMS, "resources/read requires params.uri (a string).");
+      if (uri === CALC_APP.uri) return ok(id, { contents: [{ uri, mimeType: "text/html;profile=mcp-app", text: CALC_APP.html }] });
       const doc = (opts.fixtures?.docs ?? []).find((d) => docUri(d.id) === uri);
       if (!doc) {
         const available = (opts.fixtures?.docs ?? []).map((d) => docUri(d.id));
@@ -341,3 +345,26 @@ export async function handleMcpPayload(
   }
   return handleMcpMessage(raw, opts);
 }
+
+/* ── MCP Apps demo view ───────────────────────────────────────────────────
+   A small, self-contained view for the calc tool: it initializes, shows the
+   expression and result the host sends, and can call calc again through the
+   host (tools/call over postMessage). No network: the default CSP forbids it. */
+export const CALC_APP = {
+  tool: "calc",
+  uri: "ui://web-aios/calc-view",
+  html: `<!doctype html><html><head><style>body{font:14px system-ui;margin:12px;color:#111}input{font:inherit;padding:4px 6px;width:60%}button{font:inherit;padding:4px 10px}#r{font-size:22px;margin:8px 0}</style></head><body>
+<div id="e">Waiting for the host...</div><div id="r"></div>
+<input id="x" placeholder="Try another expression" aria-label="Expression"> <button id="go">Calculate</button>
+<script>
+let n=1;const pending={};
+function send(m){parent.postMessage(m,"*")}
+function call(method,params){const id=n++;send({jsonrpc:"2.0",id,method,params});return new Promise(r=>pending[id]=r)}
+function text(res){return ((res&&res.content)||[]).map(c=>c.text||"").join(" ")}
+addEventListener("message",e=>{const m=e.data||{};if(m.id&&pending[m.id]){pending[m.id](m.result||m.error);delete pending[m.id];return}
+if(m.method==="ui/notifications/tool-input"){document.getElementById("e").textContent="Expression: "+((m.params&&m.params.arguments&&m.params.arguments.expression)||"")}
+if(m.method==="ui/notifications/tool-result"){document.getElementById("r").textContent=text(m.params)}});
+document.getElementById("go").onclick=async()=>{const ex=document.getElementById("x").value;const res=await call("tools/call",{name:"calc",arguments:{expression:ex}});document.getElementById("e").textContent="Expression: "+ex;document.getElementById("r").textContent=text(res)||JSON.stringify(res)};
+call("ui/initialize",{appCapabilities:{},clientInfo:{name:"calc-view",version:"1"}}).then(()=>send({jsonrpc:"2.0",method:"ui/notifications/initialized"}));
+</script></body></html>`,
+};

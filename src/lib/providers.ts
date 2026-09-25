@@ -143,6 +143,17 @@ export const PROVIDERS: ProviderDef[] = [
     docs: "https://ollama.com",
   },
   {
+    // Chrome's built-in Prompt API (Gemini Nano): runs on this device, no key,
+    // offline once downloaded. Feature-detected in lib/ondevice.ts.
+    id: "browser",
+    name: "On-device (Chrome built-in)",
+    dialect: "openai",
+    baseUrl: "",
+    models: ["gemini-nano"],
+    local: true,
+    docs: "https://developer.chrome.com/docs/ai/prompt-api",
+  },
+  {
     id: "lmstudio",
     name: "LM Studio (local)",
     dialect: "openai",
@@ -212,6 +223,8 @@ export const PRICE_PER_MTOK: Record<string, { in: number; out: number }> = {
   "x-ai/grok-4.7": { in: 1.6, out: 4.8 },
   "moonshotai/kimi-k3": { in: 3, out: 15 },
   "z-ai/glm-5.3": { in: 0.84, out: 2.64 },
+  // Runs on this device: it costs nothing, so the budget meter must say nothing.
+  "gemini-nano": { in: 0, out: 0 },
   default: { in: 1, out: 5 },
 };
 

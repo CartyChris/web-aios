@@ -6,6 +6,7 @@ import { assistantSteeringLine } from "@/lib/petmind";
 import { bus } from "@/kernel/bus";
 import { getProvider, estimateCost, estimateTokens } from "./providers";
 import { streamChat, messageText, ToolCallAccumulator, type ChatMessage, type ToolCall, type ToolSpec } from "./ai-transport";
+import { promptOnDevice } from "./ondevice";
 
 export interface AskOptions {
   messages: ChatMessage[];
@@ -172,7 +173,13 @@ async function askOnce(opts: AskOptions): Promise<AskResult> {
   const baseUrl = s.ai.baseUrls[providerId] || provider.baseUrl;
   const apiKey = s.ai.keys[providerId] ?? "";
 
-  if (provider.local) {
+  if (providerId === "browser") {
+    // The on-device model. Usage is estimated below from text length; it costs nothing.
+    for await (const delta of promptOnDevice(system ?? "", messages, opts.signal)) {
+      text += delta;
+      opts.onDelta?.(delta, text);
+    }
+  } else if (provider.local) {
     for await (const chunk of streamChat({
       dialect: provider.dialect, baseUrl, apiKey, model, messages,
       temperature: opts.temperature ?? s.ai.temperature,

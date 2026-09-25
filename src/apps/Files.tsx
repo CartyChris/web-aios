@@ -15,6 +15,7 @@ import {
 } from "@/lib/vfsops";
 import { Empty, ErrorNote, CopyButton, Markdown } from "./_ui";
 import { cn } from "@/lib/cn";
+import { provenanceLabel } from "@/lib/provenance";
 import { Icon } from "@/shell/icons";
 
 const DRAG_TYPE = "application/x-aios-paths";
@@ -474,7 +475,7 @@ function Preview({ node }: { node: VNode }) {
     <div className="flex min-h-0 flex-1 flex-col">
       {kind !== "text" && (
         <div className="flex shrink-0 items-center gap-1 px-2 pt-1.5 text-[10.5px] text-[var(--muted)]">
-          <span className="flex-1">Preview: {kind}</span>
+          <span className="flex-1">Preview: {kind}{node.provenance ? ` · ${provenanceLabel(node.provenance)}` : ""}</span>
           <button className="os-btn !px-1.5 !py-0 text-[10.5px]" aria-pressed={raw} onClick={() => setRaw((r) => !r)}>{raw ? "Rendered" : "Source"}</button>
         </div>
       )}
@@ -504,6 +505,7 @@ function EntryRow({ entry: e, grid, picked, active, renaming, dropping, onClick,
   drop?: { onDragOver: (e: React.DragEvent) => void; onDragLeave: () => void; onDrop: (e: React.DragEvent) => void };
 }) {
   const icon = e.kind === "dir" ? "folder" : iconForName(e.name);
+  const prov = useVFS((st) => (e.kind === "file" ? st.nodes[e.path]?.provenance : undefined));
   const name = renaming ? (
     <input
       autoFocus
@@ -538,6 +540,11 @@ function EntryRow({ entry: e, grid, picked, active, renaming, dropping, onClick,
     >
       <Icon name={icon} size={grid ? 26 : 14} className={e.kind === "dir" ? "text-[var(--accent)]" : "text-[var(--muted)]"} />
       {name}
+      {prov && (
+        <span className="os-chip shrink-0 !px-1 !py-0 !text-[9px]" title={`${provenanceLabel(prov)}. A local record, not a signature.`} data-provenance={prov.by}>
+          AI{prov.editedAt ? "+edit" : ""}
+        </span>
+      )}
       {!grid && <span className="shrink-0 text-[10px] text-[var(--muted)]">{e.kind === "dir" ? `${e.count} file${e.count === 1 ? "" : "s"}` : bytes(e.size)}</span>}
       {!grid && <span className="hidden shrink-0 text-[10px] text-[var(--muted)] sm:inline">{e.updatedAt ? relTime(e.updatedAt) : ""}</span>}
     </div>
@@ -560,6 +567,11 @@ function FileList({ nodes, sel, onSelect, onOpen }: { nodes: VNode[]; sel: strin
           <Icon name={iconFor(n)} size={14} className="text-[var(--muted)]" />
           <span className="min-w-0 flex-1 truncate text-[12px]">{n.name}</span>
           {n.starred && <Icon name="star" size={10} className="text-[var(--accent)]" />}
+          {n.provenance && (
+            <span className="os-chip shrink-0 !px-1 !py-0 !text-[9px]" title={`${provenanceLabel(n.provenance)}. A local record, not a signature.`} data-provenance={n.provenance.by}>
+              AI{n.provenance.editedAt ? "+edit" : ""}
+            </span>
+          )}
           <span className="shrink-0 text-[10px] text-[var(--muted)]">{bytes(n.size)}</span>
           <span className="hidden shrink-0 text-[10px] text-[var(--muted)] sm:inline">{relTime(n.updatedAt)}</span>
         </div>

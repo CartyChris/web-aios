@@ -234,6 +234,9 @@ export interface ChatRequest {
   /** Refuse redirects. Set by server relays for caller-chosen base URLs, so a
    *  public host cannot 307 the server into an internal address. */
   noRedirects?: boolean;
+  /** Replaces global fetch. Server relays pass a connect-time pinned fetch
+   *  for caller-chosen base URLs (lib/server-guard.ts). */
+  fetchImpl?: (input: string, init: RequestInit) => Promise<Response>;
   dialect: "openai" | "anthropic" | "google";
   baseUrl: string;
   apiKey: string;
@@ -487,7 +490,7 @@ export function parseChunk(dialect: ChatRequest["dialect"], raw: string): ChatCh
 /** Consume an SSE body and yield deltas. Works in both runtimes. */
 export async function* streamChat(req: ChatRequest): AsyncGenerator<ChatChunk> {
   const { url, init } = buildRequest({ ...req, stream: true });
-  const res = await fetch(url, { ...init, signal: req.signal, ...(req.noRedirects ? { redirect: "manual" as const } : {}) });
+  const res = await (req.fetchImpl ?? fetch)(url, { ...init, signal: req.signal, ...(req.noRedirects ? { redirect: "manual" as const } : {}) });
 
   if (req.noRedirects && (res.type === "opaqueredirect" || (res.status >= 300 && res.status < 400))) {
     throw new Error("The custom base URL answered with a redirect, which is refused for relayed requests.");

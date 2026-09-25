@@ -2,7 +2,9 @@
 
 import { useCallback, useMemo, useRef, useState } from "react";
 import type { AppProps } from "@/kernel/types";
-import { useMcp, connect, callTool, type McpServer, type McpTool } from "@/lib/mcp";
+import { useMcp, connect, callTool, readResource, type McpServer, type McpTool } from "@/lib/mcp";
+import { uiResourceUri, isAppResource } from "@/lib/mcp-apps";
+import { McpAppView } from "./McpAppView";
 import {
   MCP_DIRECTORY, MCP_HOSTS, HOST_LABEL, shouldRelay, type McpDirectoryEntry,
 } from "@/lib/mcp-directory";
@@ -44,6 +46,8 @@ export default function McpHub({}: AppProps) {
   const [activeTool, setActiveTool] = useState<string | null>(null);
   const [toolArgs, setToolArgs] = useState<Record<string, string>>({});
   const [outcome, setOutcome] = useState<{ ok: boolean; text: string; ms: number; rounds?: number } | null>(null);
+  // MCP Apps: a tool that links a ui:// view shows it after a successful call.
+  const [appView, setAppView] = useState<{ html: string; csp?: string; args: Record<string, unknown>; result: unknown; tool: string } | null>(null);
   // MRTR: a server that answers input_required waits on the person here.
   const [mrtrOn, setMrtrOn] = useState(true);
   const [pendingInput, setPendingInput] = useState<PendingInput | null>(null);
@@ -114,6 +118,15 @@ export default function McpHub({}: AppProps) {
     if (!activeEntry || !tool || !activeConn) return;
     setBusy("call");
     setOutcome(null);
+    setAppView(null);
+    const showApp = async (raw: unknown, callArgs: Record<string, unknown>) => {
+      const uri = uiResourceUri(tool);
+      if (!uri) return;
+      try {
+        const res = await readResource(serverFor(activeEntry), activeConn.sessionId, uri, activeConn.protocol);
+        if (res.text && isAppResource(res.mimeType)) setAppView({ html: res.text, csp: res.csp, args: callArgs, result: raw, tool: tool.name });
+      } catch { /* the text result above still stands */ }
+    };
     const started = Date.now();
     const args: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(toolArgs)) {
@@ -142,13 +155,14 @@ export default function McpHub({}: AppProps) {
         setPendingInput(null);
         resolverRef.current = null;
         const ms = Date.now() - started;
-        if (out.status === "complete") setOutcome({ ...toolResultText(out.result), ms, rounds: out.rounds });
+        if (out.status === "complete") { setOutcome({ ...toolResultText(out.result), ms, rounds: out.rounds }); void showApp(out.result, args); }
         else if (out.status === "cancelled") setOutcome({ ok: false, text: `Cancelled after ${out.rounds} round(s): the server's questions were not answered.`, ms, rounds: out.rounds });
         else if (out.status === "exhausted") setOutcome({ ok: false, text: `Stopped after ${out.rounds} rounds: the server kept asking for more input.`, ms, rounds: out.rounds });
         else setOutcome({ ok: false, text: `The server broke the MRTR rules: ${out.reason}`, ms, rounds: out.rounds });
       } else {
         const r = await callTool(serverFor(activeEntry), activeConn.sessionId, tool.name, args, undefined, activeConn.protocol);
         setOutcome({ ok: r.ok, text: r.text, ms: Date.now() - started });
+        if (r.ok) void showApp(r.raw, args);
       }
     } catch (e) {
       setPendingInput(null);
@@ -355,6 +369,17 @@ export default function McpHub({}: AppProps) {
                       />
                     )}
 
+                    {appView && activeEntry && activeConn && (
+                      <McpAppView
+                        key={appView.tool + JSON.stringify(appView.args)}
+                        html={appView.html}
+                        csp={appView.csp}
+                        args={appView.args}
+                        result={appView.result}
+                        allowedTools={activeConn.tools.filter((t) => !t._meta?.ui?.visibility || t._meta.ui.visibility.includes("app")).map((t) => t.name)}
+                        onCallTool={async (name, a) => (await callTool(serverFor(activeEntry), activeConn.sessionId, name, a, undefined, activeConn.protocol)).raw}
+                      />
+                    )}
                     {outcome && (
                       <div
                         className="os-card mt-2.5 !p-2.5"

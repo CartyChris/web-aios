@@ -31,6 +31,8 @@ import { installTriggers, startTriggerRuntime, instrumentVfs } from "@/lib/harne
 import { installSpanRecorder } from "@/kernel/spans";
 import { installActivityRecorder } from "@/kernel/activity";
 import { receiveHandoff } from "@/kernel/scenes";
+import { installRewind } from "@/kernel/rewind";
+import { installWebMcp } from "./webmcp";
 
 export function Desktop() {
   const hydrated = useHydrated();
@@ -66,19 +68,25 @@ export function Desktop() {
     const stopSpans = installSpanRecorder(bus);
     // What the user deliberately does, kept in this browser, feeding For You.
     const stopActivity = installActivityRecorder();
+    // Web-AIOS as tools for the browser's own agent, where WebMCP exists.
+    const stopWebMcp = installWebMcp();
     // The VFS does not publish its writes, so a file trigger would otherwise
     // never receive a signal. Wrapping the store once at boot is what puts
     // them on the bus.
     instrumentVfs();
     const stopTriggers = startTriggerRuntime();
-    return () => { stopSpans(); stopActivity(); stopTriggers(); };
+    return () => { stopSpans(); stopActivity(); stopTriggers(); stopWebMcp(); };
   }, []);
 
   // ── Handoff ───────────────────────────────────────────────────────────────
   // Opened from a "hand off this desktop" link? Offer what it carries. Waits
   // for hydration so the offer is not raced by the persisted window list.
   useEffect(() => {
-    if (hydrated) receiveHandoff();
+    if (!hydrated) return;
+    receiveHandoff();
+    // Snapshots start only after hydration, so the first one is the user's
+    // real state and not the empty defaults.
+    return installRewind();
   }, [hydrated]);
 
   // ── Startup apps ──────────────────────────────────────────────────────────

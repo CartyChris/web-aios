@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { checkBaseUrl, deploymentKeyAllowed } from "@/lib/server-guard";
+import { checkBaseUrl, deploymentKeyAllowed, pinnedFetch } from "@/lib/server-guard";
 import { getProvider, PROVIDERS } from "@/lib/providers";
 import { parseAnthropicModels, parseGoogleModels } from "@/lib/model-lists";
 
@@ -39,12 +39,14 @@ export async function GET(req: NextRequest) {
   if (!apiKey && !keyless) return catalog(`no API key for ${provider.name}`);
 
   const root = baseUrl.replace(/\/+$/, "");
+  // Caller-chosen base URLs are fetched pinned at connect time (DNS rebinding).
+  const get = deploymentKeyAllowed(req.nextUrl.searchParams.get("baseUrl"), provider.baseUrl) ? fetch : pinnedFetch;
 
   // Anthropic: GET /v1/models with its own auth headers. Pages of up to 1000,
   // which is every Claude model there is.
   if (provider.dialect === "anthropic") {
     try {
-      const res = await fetch(`${root}/models?limit=1000`, {
+      const res = await get(`${root}/models?limit=1000`, {
         redirect: "manual",
         headers: { "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
         signal: AbortSignal.timeout(12000),
@@ -61,7 +63,7 @@ export async function GET(req: NextRequest) {
   // ones that can generateContent are chat models.
   if (provider.dialect === "google") {
     try {
-      const res = await fetch(`${root}/models?pageSize=1000&key=${encodeURIComponent(apiKey)}`, {
+      const res = await get(`${root}/models?pageSize=1000&key=${encodeURIComponent(apiKey)}`, {
         redirect: "manual",
         signal: AbortSignal.timeout(12000),
       });
@@ -74,7 +76,7 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const res = await fetch(`${baseUrl.replace(/\/+$/, "")}/models`, {
+    const res = await get(`${baseUrl.replace(/\/+$/, "")}/models`, {
         redirect: "manual",
       headers: apiKey ? { authorization: `Bearer ${apiKey}` } : {},
       signal: AbortSignal.timeout(12000),

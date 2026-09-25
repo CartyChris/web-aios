@@ -140,3 +140,22 @@ test("slug and clip", () => {
   assert.equal(clip("abc", 10), "abc");
   assert.match(clip("x".repeat(20), 5), /^x{5}\n\[truncated 15 chars\]$/);
 });
+
+import { parsePanel } from "../.test-build/aios-agent.js";
+
+test("panels: a final answer can carry an allowlisted, text-only panel", () => {
+  const r = parseAgentReply('{"final":"Here is your week","panel":{"type":"table","columns":["Day","Plan"],"rows":[["Mon","Gym",9],["Tue"]]}}');
+  assert.equal(r.kind, "final");
+  assert.deepEqual(r.panel, { type: "table", columns: ["Day", "Plan"], rows: [["Mon", "Gym"], ["Tue", ""]] });
+});
+
+test("panels: unknown types, HTML-ish objects and oversize panels are refused, the answer survives", () => {
+  const bad = parseAgentReply('{"final":"ok","panel":{"type":"script","src":"x"}}');
+  assert.equal(bad.kind, "final");
+  assert.equal(bad.panel, undefined);
+  assert.match(bad.panelError, /unknown panel type/);
+  assert.equal(parsePanel({ type: "table", columns: ["a"], rows: Array.from({ length: 51 }, () => ["x"]) }).ok, false);
+  assert.equal(parsePanel({ type: "choices", options: [{ label: { html: "<b>" } }] }).ok, false);
+  const form = parsePanel({ type: "form", fields: [{ name: "d", label: "Day", kind: "datetime-local" }] });
+  assert.equal(form.panel.fields[0].kind, "text", "an unknown input kind falls back to text");
+});

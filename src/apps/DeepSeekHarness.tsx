@@ -153,7 +153,7 @@ function ChatPane() {
         {!events.length && !ui.running && (
           <Empty icon="agents" title="DeepSeek Harness" body="Ask for something that needs tools: read or write files, grep, run JavaScript in a sandbox, fetch a page, open an app. Type /verify to use the bundled skill. Set a goal below and the harness, not the model, decides when it is met." />
         )}
-        <Transcript events={events} />
+        <Transcript events={events} running={ui.running} onResume={(t) => void rt.send(t)} />
         {ui.approvals.map((a) => (
           <div key={a.callId} className="rounded-lg border border-amber-400/60 p-2" role="alert">
             <div className="mb-1 font-semibold">Approve {a.name}? <span className="text-[var(--muted)]">({a.risk})</span></div>
@@ -201,7 +201,7 @@ function ChatPane() {
   );
 }
 
-function Transcript({ events }: { events: readonly DshEvent[] }) {
+function Transcript({ events, running, onResume }: { events: readonly DshEvent[]; running?: boolean; onResume?: (text: string) => void }) {
   const results = new Map<string, Extract<DshEvent, { type: "tool/result" }>>();
   for (const e of events) if (e.type === "tool/result") results.set(e.data.callId, e);
   return (
@@ -237,7 +237,24 @@ function Transcript({ events }: { events: readonly DshEvent[] }) {
           case "assistant/attempt":
             return <div key={e.seq} className="text-[11px] text-amber-300">Attempt {e.data.reason}{e.data.error ? `: ${e.data.error}` : ""} (not in model history)</div>;
           case "turn/end":
-            return e.data.reason === "done" ? null : <div key={e.seq} className="text-[11px] text-[var(--muted)]">Turn ended: {e.data.reason}{e.data.error ? ` - ${e.data.error}` : ""}</div>;
+            if (e.data.reason === "done") return null;
+            {
+              // Resumable: the log already holds every finished step and tool
+              // result, so continuing from it does not redo work. Only the
+              // LAST interrupted turn offers it.
+              const isLast = events.filter((x) => x.type === "turn/end").at(-1)?.seq === e.seq;
+              const canResume = isLast && !running && !!onResume && (e.data.reason === "cancelled" || e.data.reason === "error");
+              return (
+                <div key={e.seq} className="flex flex-wrap items-center gap-2 text-[11px] text-[var(--muted)]" data-dsh-turn-end={e.data.reason}>
+                  Turn ended: {e.data.reason}{e.data.error ? ` - ${e.data.error}` : ""}
+                  {canResume && (
+                    <button className="os-btn !px-2 !py-0.5 text-[10.5px]" onClick={() => onResume?.(`Continue the task from where it stopped (it ended: ${e.data.reason}${e.data.error ? `, ${e.data.error}` : ""}). The steps and tool results above already happened: do not redo them.`)}>
+                      Resume
+                    </button>
+                  )}
+                </div>
+              );
+            }
           case "goal/verdict":
             return <div key={e.seq} className={cn("rounded border p-1.5 text-[11px]", e.data.met ? "border-emerald-400/60" : "border-amber-400/60")}>Judge ({e.data.judge}) round {e.data.round + 1}: {e.data.met ? "MET" : "not met"} - {e.data.note}</div>;
           case "compaction/summary":

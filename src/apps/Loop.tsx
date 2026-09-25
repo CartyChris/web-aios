@@ -3,7 +3,7 @@
 import { useCallback, useRef, useState } from "react";
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
-import { useVFS } from "@/kernel/vfs";
+import { useVFS, aiMark } from "@/kernel/vfs";
 import { bus } from "@/kernel/bus";
 import { useSettings } from "@/kernel/settings";
 import { useJobs } from "@/kernel/jobs";
@@ -180,8 +180,8 @@ export default function Loop({ win }: AppProps) {
   const saveFiles = useCallback(() => {
     if (!result) return;
     const dir = `/loops/${slug(objective)}-${uid("r").slice(-5)}`;
-    vfs.write(`${dir}/RESULT.md`, result.final.text, { appId: "loop" });
-    for (const f of result.final.files) vfs.write(`${dir}/${f.path}`, f.content, { appId: "loop" });
+    vfs.write(`${dir}/RESULT.md`, result.final.text, { appId: "loop", ...aiMark("Agent Loop", result.final.by) });
+    for (const f of result.final.files) vfs.write(`${dir}/${f.path}`, f.content, { appId: "loop", ...aiMark("Agent Loop", result.final.by) });
     bus.emit("notify", { title: `Saved ${result.final.files.length + 1} file${result.final.files.length ? "s" : ""} to ${dir}`, kind: "success", target: { appId: "files", args: { path: dir } } });
   }, [result, objective, vfs]);
 

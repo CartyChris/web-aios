@@ -109,6 +109,11 @@
     "src/lib/foryou.ts",
     "src/lib/intel-watch.ts",
     "src/lib/desk.ts",
-    "src/lib/rewind.ts"
+    "src/lib/rewind.ts",
+    "src/lib/server-guard.ts",
+    "src/lib/provenance.ts",
+    "src/lib/mcp-apps.ts",
+    "src/lib/harness/frozen-eval.ts",
+    "src/lib/timeline.ts"
   ]
 }

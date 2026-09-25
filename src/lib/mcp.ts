@@ -45,6 +45,8 @@ export interface McpTool {
   name: string;
   description?: string;
   inputSchema?: { type?: string; properties?: Record<string, unknown>; required?: string[] };
+  /** MCP Apps: _meta.ui.resourceUri links a ui:// view (lib/mcp-apps.ts). */
+  _meta?: { ui?: { resourceUri?: string; visibility?: string[] } };
 }
 
 export interface McpServer {
@@ -211,6 +213,13 @@ export async function callTool(
   } catch (e) {
     return { ok: false, text: e instanceof Error ? e.message : "Tool call failed.", raw: null };
   }
+}
+
+/** resources/read: the first content item (MCP Apps views are one HTML document). */
+export async function readResource(server: McpServer, sessionId: string | undefined, uri: string, protocol: ProtocolVersion = MCP_PROTOCOL, signal?: AbortSignal): Promise<{ mimeType?: string; text?: string; csp?: string }> {
+  const out = await rpc(server, "resources/read", { uri }, sessionId, signal, protocol);
+  const c = (out.result as { contents?: Array<{ mimeType?: string; text?: string; _meta?: { ui?: { csp?: string } } }> })?.contents?.[0];
+  return { mimeType: c?.mimeType, text: c?.text, csp: typeof c?._meta?.ui?.csp === "string" ? c._meta.ui.csp : undefined };
 }
 
 /** A compact description of the available tools for a model's system prompt. */

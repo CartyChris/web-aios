@@ -13,6 +13,7 @@ import { SEED_TASKS } from "@/lib/harness/tasks";
 import type { DefinitionOfDone, RunResult, ToolDef } from "@/lib/harness/types";
 import { Tabs, Empty, ErrorNote, Spinner, Markdown, CopyButton } from "./_ui";
 import { useTriggers } from "@/kernel/triggers";
+import { gateProposal, scoresFrom, sealEval } from "@/lib/harness/frozen-eval";
 import { runGoldenSet, allTasks, invalidTasks, baselineFrom, compare, currentFingerprint, installEvals, DEFAULT_EVAL_CONCURRENCY } from "@/lib/harness-evals";
 import { suiteToMarkdown } from "@/lib/harness/evals";
 import { minePatterns, proposeTask } from "@/lib/harness/patterns";
@@ -299,6 +300,18 @@ function GoldenPanel() {
   })();
 
   const deltas = result ? compare(result, baseline) : [];
+  // The self-improvement gate (lib/harness/frozen-eval.ts): would this run count
+  // as a real improvement over the pinned baseline, under rules a tampering
+  // harness cannot game? Sealed eval, held-out split, no per-task regressions.
+  const gate = result && baseline ? gateProposal(
+    {
+      touches: [],
+      baseline: scoresFrom(Object.fromEntries(Object.entries(baseline.perTask).map(([id, t]) => [id, t.pass]))),
+      candidate: scoresFrom(Object.fromEntries(result.results.map((r) => [r.taskId, r.pass]))),
+    },
+    (baseline as EvalBaseline & { seal?: string }).seal ?? sealEval(tasks),
+    tasks,
+  ) : null;
 
   const launch = async () => {
     const ctrl = new AbortController();
@@ -325,7 +338,7 @@ function GoldenPanel() {
     if (!result) return;
     const b = baselineFrom(result);
     if (!b.ok) { setNote(b.reason); return; }
-    vfs.write(BASELINE_PATH, JSON.stringify(b.baseline, null, 2), { appId: "harness" });
+    vfs.write(BASELINE_PATH, JSON.stringify({ ...b.baseline, seal: sealEval(tasks) }, null, 2), { appId: "harness" });
     setNote("Baseline pinned. The next suite is compared against this one.");
   };
 
@@ -443,6 +456,15 @@ function GoldenPanel() {
             ))}
           </div>
 
+          {gate && (
+            <div className="os-card mb-2 !p-2 text-[11px]" style={{ borderColor: gate.accept ? "var(--ok)" : "var(--warn)" }} data-harness-gate={gate.accept ? "accept" : "refuse"}>
+              <div className="font-medium" style={{ color: gate.accept ? "var(--ok)" : "var(--warn)" }}>
+                Self-improvement gate: {gate.accept ? "this run is a genuine improvement over the baseline" : "this run would not be accepted as an improvement"}
+              </div>
+              {gate.reasons.map((r) => <div key={r} className="text-[var(--muted)]">- {r}</div>)}
+              <div className="mt-0.5 text-[10px] text-[var(--muted)]">Sealed eval, a fixed held-out third of tasks, and no task that passed may fail. A harness cannot pass this by editing its own test.</div>
+            </div>
+          )}
           {deltas.length > 0 && (
             <div className="mt-2 border-t border-[var(--border)] pt-2">
               <div className="os-label mb-1">Against the baseline</div>

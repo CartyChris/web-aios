@@ -157,7 +157,7 @@ export function buildBrief(input: DeskInput): Brief {
 
   // 0: pick up where you left off.
   const recent = input.files
-    .filter((f) => f.kind === "file" && now - f.updatedAt < DAY && !f.path.startsWith("/.trash") && !f.path.startsWith("/dsh/sessions") && !f.path.startsWith("/harness"))
+    .filter((f) => f.kind === "file" && now - f.updatedAt < DAY && !f.path.startsWith("/.trash") && !f.path.startsWith("/Mail/Drafts/") && !f.path.startsWith("/dsh/sessions") && !f.path.startsWith("/harness"))
     .sort((a, b) => b.updatedAt - a.updatedAt)
     .slice(0, 3);
   for (const f of recent) {

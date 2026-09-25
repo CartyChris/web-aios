@@ -9,6 +9,8 @@ import { bus } from "@/kernel/bus";
 import { useNow } from "@/lib/useNow";
 import { focusStats } from "@/lib/focusstats";
 import { buildBrief, briefText, type DeskAction, type DeskTask } from "@/lib/desk";
+import { buildTimeline, queryTimeline, type TimelineEntry } from "@/lib/timeline";
+import { useActivity } from "@/kernel/activity";
 import { useFocus } from "./Focus";
 import { Icon } from "@/shell/icons";
 
@@ -26,6 +28,63 @@ function readTasks(): { tasks: DeskTask[]; done: string[] } {
   } catch {
     return { tasks: [], done: ["done"] };
   }
+}
+
+/** The brief from the live stores. Shared with the WebMCP bridge
+ *  (shell/webmcp.ts), so an outside agent sees exactly what the Desk shows. */
+export function currentBrief(now = Date.now()) {
+  const { tasks, done } = readTasks();
+  const d = new Date(now);
+  const end = new Date(d); end.setHours(23, 59, 59, 999);
+  const f = focusStats(useFocus.getState().log, d);
+  return buildBrief({
+    now, hour: d.getHours(), endOfDay: end.getTime(), tasks, doneColumns: done,
+    jobs: useJobs.getState().jobs,
+    files: Object.values(useVFS.getState().nodes).map((n) => ({ path: n.path, kind: n.kind, updatedAt: n.updatedAt, size: n.size })),
+    unreadNotifications: useWM.getState().notifications.filter((n) => !n.read).length,
+    focusMinutesToday: f.todayMinutes, focusStreakDays: f.streakDays,
+  });
+}
+
+/** The timeline from the live stores (lib/timeline.ts), shared with WebMCP. */
+export function currentTimeline(): TimelineEntry[] {
+  const raw = readTasks().tasks as Array<DeskTask & { createdAt?: number }>;
+  return buildTimeline({
+    activity: useActivity.getState().log.map((a) => ({ source: a.source, text: a.text, at: a.at })),
+    files: Object.values(useVFS.getState().nodes).map((n) => ({ path: n.path, kind: n.kind, updatedAt: n.updatedAt, createdAt: n.createdAt })),
+    tasks: raw.map((t) => ({ title: t.title, createdAt: t.createdAt ?? 0, archivedAt: t.archivedAt })),
+    jobs: useJobs.getState().jobs.map((j) => ({ title: j.title, status: j.status, startedAt: j.startedAt, endedAt: j.endedAt })),
+    focus: useFocus.getState().log,
+    notifications: useWM.getState().notifications.map((n) => ({ title: n.title, ts: n.ts })),
+  });
+}
+
+function TimelineSearch() {
+  const [q, setQ] = useState("today");
+  const [res, setRes] = useState<ReturnType<typeof queryTimeline> | null>(null);
+  const run = () => setRes(queryTimeline(currentTimeline(), q, Date.now(), new Date().getTimezoneOffset()));
+  return (
+    <div className="mt-4" data-desk-timeline>
+      <div className="os-label mb-1">Timeline</div>
+      <form className="flex gap-1.5" onSubmit={(e) => { e.preventDefault(); run(); }}>
+        <input className="os-input flex-1 !py-1 text-[12px]" value={q} onChange={(e) => setQ(e.target.value)} placeholder="yesterday, tuesday notes, last week loop..." aria-label="Search your timeline" />
+        <button className="os-btn !py-1 text-[11px]" type="submit">Search</button>
+      </form>
+      {res && (
+        <div className="mt-1.5 text-[11.5px]">
+          <div className="mb-1 text-[10.5px] text-[var(--muted)]">{res.hits.length} from {res.query.label}{res.query.words.length ? `, matching "${res.query.words.join(" ")}"` : ""}</div>
+          {res.hits.map((e, i) => (
+            <div key={i} className="flex items-baseline gap-2 border-b border-white/5 py-0.5">
+              <span className="w-28 shrink-0 text-[10.5px] text-[var(--muted)]">{new Date(e.at).toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" })}</span>
+              <span className="min-w-0 flex-1 truncate">{e.text}</span>
+              <span className="shrink-0 text-[10px] text-[var(--muted)]">{e.source}</span>
+              {e.target && <button className="os-btn !px-1.5 !py-0 text-[10px]" onClick={() => bus.emit("app:open", { appId: e.target!.appId, args: e.target!.args })} aria-label={`Open ${e.text}`}>Open</button>}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
 const TONE = ["var(--muted)", "var(--accent)", "var(--warn)", "var(--danger)"];
@@ -79,6 +138,8 @@ export default function Desk({}: AppProps) {
           </div>
         ))}
       </div>
+
+      <TimelineSearch />
 
       <details className="mt-4 text-[11px] text-[var(--muted)]">
         <summary className="cursor-pointer">What I cannot see</summary>

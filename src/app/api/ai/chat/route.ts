@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { checkBaseUrl, deploymentKeyAllowed } from "@/lib/server-guard";
+import { checkBaseUrl, deploymentKeyAllowed, pinnedFetch } from "@/lib/server-guard";
 import { getProvider } from "@/lib/providers";
 import { streamChat, type ChatMessage, type ToolSpec } from "@/lib/ai-transport";
 
@@ -69,6 +69,7 @@ export async function POST(req: NextRequest) {
           maxTokens: body.maxTokens,
           web: body.web,
           noRedirects: !deploymentKeyAllowed(body.baseUrl, provider.baseUrl),
+          ...(!deploymentKeyAllowed(body.baseUrl, provider.baseUrl) ? { fetchImpl: pinnedFetch } : {}),
           reasoningEffort: body.reasoningEffort === "low" || body.reasoningEffort === "medium" || body.reasoningEffort === "high" ? body.reasoningEffort : undefined,
           ...(Array.isArray(body.tools) && body.tools.length ? { tools: body.tools } : {}),
           signal: req.signal,

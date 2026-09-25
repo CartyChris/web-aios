@@ -60,6 +60,7 @@ test("old failures drop off; drafts, recent files and the focus nudge are counte
   assert.equal(b.items.find((i) => i.id === "mail:drafts").title, "2 email drafts not sent");
   assert.equal(b.items.find((i) => i.id === "file:/notes/Plan.md").action.appId, "notes");
   assert.ok(!ids.some((i) => i.includes(".trash")));
+  assert.ok(!ids.some((i) => i.startsWith("file:/Mail/Drafts/")), "a draft is counted once, as a draft, not again as a recent file");
   assert.match(b.items.find((i) => i.id === "focus:none").detail, /3-day streak/);
   assert.match(briefText(b), /Cannot see:/);
 });

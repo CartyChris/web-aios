@@ -1,6 +1,7 @@
 "use client";
 
 import { create } from "zustand";
+import { nextProvenance, type Provenance } from "@/lib/provenance";
 import { persist, createJSONStorage } from "zustand/middleware";
 
 /** A single flat, path-addressed store that every app shares. Notes, the IDE,
@@ -18,6 +19,8 @@ export interface VNode {
   appId?: string;
   tags?: string[];
   starred?: boolean;
+  /** Set when a model wrote it (lib/provenance.ts). */
+  provenance?: Provenance;
 }
 
 export interface VFSState {
@@ -75,6 +78,9 @@ export const useVFS = create<VFSState>()(
           updatedAt: now,
           ...meta,
         };
+        // A write with no mark on a model-made file is a person editing it.
+        const prov = nextProvenance(prev?.provenance, meta.provenance, now);
+        if (prov) node.provenance = prov; else delete node.provenance;
         set((s) => ({ nodes: { ...s.nodes, [p]: node } }));
         return node;
       },
@@ -159,3 +165,11 @@ export const useVFS = create<VFSState>()(
     { name: "webaios.vfs.v1", storage: createJSONStorage(() => localStorage) },
   ),
 );
+
+/** The provenance mark for a model's write, naming the model currently selected. */
+export function aiMark(by: string, model?: string): { provenance: Provenance } {
+  return { provenance: { by, model: model ?? readModel(), at: Date.now() } };
+}
+function readModel(): string | undefined {
+  try { return (JSON.parse(localStorage.getItem("webaios.settings.v1") || "{}") as { state?: { ai?: { model?: string } } }).state?.ai?.model; } catch { return undefined; }
+}

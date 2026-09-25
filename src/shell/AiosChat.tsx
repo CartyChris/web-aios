@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { create } from "zustand";
 import { bus } from "@/kernel/bus";
 import { useWM } from "@/kernel/wm";
-import { useVFS } from "@/kernel/vfs";
+import { useVFS, aiMark } from "@/kernel/vfs";
 import { useSettings } from "@/kernel/settings";
 import { useUserApps } from "@/kernel/userapps";
 import { APPS, getApp } from "@/kernel/registry";
@@ -14,7 +14,7 @@ import { ask } from "@/lib/useAI";
 import type { ChatMessage } from "@/lib/ai-transport";
 import {
   MAX_AGENT_STEPS, agentSystemPrompt, parseAgentReply, needsApproval, describeCall,
-  buildIcs, eventsFromArgs, mailtoLink, slug, clip,
+  buildIcs, eventsFromArgs, mailtoLink, slug, clip, type Panel,
 } from "@/lib/aios-agent";
 import { cn } from "@/lib/cn";
 import { Icon } from "@/shell/icons";
@@ -35,6 +35,8 @@ interface ChatMsg {
   text: string;
   link?: { href: string; label: string };
   download?: { name: string; content: string; mime: string };
+  /** An interactive, allowlisted panel (lib/aios-agent.ts parsePanel). */
+  panel?: Panel;
 }
 
 interface ChatState {
@@ -151,7 +153,7 @@ export async function execTool(tool: string, args: Record<string, unknown>): Pro
       return { text: clip(n.content, 6000) };
     }
     case "write_file": {
-      const n = vfs.write(str(args.path), str(args.content));
+      const n = vfs.write(str(args.path), str(args.content), aiMark("AIOS Chat"));
       return { text: `Wrote ${n.path} (${n.size} bytes).` };
     }
     case "create_app": {
@@ -167,7 +169,7 @@ export async function execTool(tool: string, args: Record<string, unknown>): Pro
       const built = buildIcs(events, stamp, now.getTime().toString(36));
       if (!built.ok) return { text: built.reason };
       const name = `${slug(events[0]?.title ?? "event", "event")}.ics`;
-      const n = vfs.write(`/Calendar/${name}`, built.ics, { mime: "text/calendar" });
+      const n = vfs.write(`/Calendar/${name}`, built.ics, { mime: "text/calendar", ...aiMark("AIOS Chat") });
       return {
         text: `Saved ${events.length} event${events.length === 1 ? "" : "s"} to ${n.path}. The user can download it and open it in any calendar app.`,
         download: { name, content: built.ics, mime: "text/calendar" },
@@ -175,7 +177,7 @@ export async function execTool(tool: string, args: Record<string, unknown>): Pro
     }
     case "send_email": {
       const to = str(args.to), subject = str(args.subject), body = str(args.body);
-      const n = vfs.write(`/Mail/Drafts/${slug(subject, "draft")}.txt`, `To: ${to}\nSubject: ${subject}\n\n${body}\n`);
+      const n = vfs.write(`/Mail/Drafts/${slug(subject, "draft")}.txt`, `To: ${to}\nSubject: ${subject}\n\n${body}\n`, aiMark("AIOS Chat"));
       return {
         text: `Draft saved to ${n.path}. Nothing was sent: the user must click the link to open it in their mail app.`,
         link: { href: mailtoLink(to, subject, body), label: "Open draft in mail app" },
@@ -251,7 +253,8 @@ export async function runAiosAgent(prompt: string, context?: { label: string; te
       convo.push({ role: "assistant", content: reply });
       const parsed = parseAgentReply(reply);
       if (parsed.kind === "final") {
-        say({ role: "assistant", text: parsed.text });
+        say({ role: "assistant", text: parsed.panelError ? `${parsed.text}\n(A panel was dropped: ${parsed.panelError}.)` : parsed.text, ...(parsed.panel ? { panel: parsed.panel } : {}) });
+        speakIfOn(parsed.text);
         useJobs.getState().finish(jobId, "done", parsed.text.slice(0, 120));
         return;
       }
@@ -413,6 +416,7 @@ export function AiosChat() {
                     <Icon name="external" size={11} /> {m.link.label}
                   </a>
                 )}
+                {m.panel && <PanelView panel={m.panel} />}
                 {m.download && (
                   <button className="os-btn mt-1.5 flex items-center gap-1 !py-0.5 text-[11px]" onClick={() => m.download && saveFile(m.download)}>
                     <Icon name="download" size={11} /> Download {m.download.name}
@@ -449,6 +453,7 @@ export function AiosChat() {
                 if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); }
               }}
             />
+            <VoiceButtons onText={(t) => setDraft((d) => (d ? `${d} ${t}` : t))} />
             {busy ? (
               <button className="os-btn !py-1.5" onClick={stopAgent} aria-label="Stop the agent">
                 <Icon name="stop" size={12} />
@@ -460,6 +465,103 @@ export function AiosChat() {
             )}
           </div>
         </div>
+      )}
+    </>
+  );
+}
+
+/* ── panels ───────────────────────────────────────────────────────────────── */
+
+/** Renders an allowlisted panel. Everything is text; nothing from the model
+ *  becomes HTML. Choices and forms answer by sending a new message. */
+function PanelView({ panel }: { panel: Panel }) {
+  const [done, setDone] = useState<boolean[]>(() => (panel.type === "checklist" ? panel.items.map((i) => !!i.done) : []));
+  const [values, setValues] = useState<Record<string, string>>({});
+  if (panel.type === "table") {
+    return (
+      <div className="mt-1.5 overflow-x-auto" data-aios-panel="table">
+        <table className="w-full border-collapse text-[11px]">
+          <thead><tr>{panel.columns.map((c) => <th key={c} className="border-b border-white/15 px-1.5 py-1 text-left font-medium">{c}</th>)}</tr></thead>
+          <tbody>{panel.rows.map((r, i) => <tr key={i}>{r.map((c, j) => <td key={j} className="border-b border-white/5 px-1.5 py-1">{c}</td>)}</tr>)}</tbody>
+        </table>
+      </div>
+    );
+  }
+  if (panel.type === "checklist") {
+    return (
+      <div className="mt-1.5 space-y-0.5" data-aios-panel="checklist">
+        {panel.items.map((it, i) => (
+          <label key={i} className="flex items-center gap-1.5 text-[11.5px]">
+            <input type="checkbox" checked={done[i] ?? false} onChange={(e) => setDone((d) => d.map((x, k) => (k === i ? e.target.checked : x)))} />
+            <span className={cn(done[i] && "line-through opacity-60")}>{it.text}</span>
+          </label>
+        ))}
+      </div>
+    );
+  }
+  if (panel.type === "choices") {
+    return (
+      <div className="mt-1.5 flex flex-wrap gap-1.5" data-aios-panel="choices">
+        {panel.options.map((o) => <button key={o.label} className="os-btn !py-0.5 text-[11px]" aria-label={o.label} onClick={() => void runAiosAgent(o.reply)}>{o.label}</button>)}
+      </div>
+    );
+  }
+  return (
+    <form className="mt-1.5 space-y-1" data-aios-panel="form" onSubmit={(e) => { e.preventDefault(); void runAiosAgent(`${panel.submit}: ${panel.fields.map((f) => `${f.label} = ${values[f.name] ?? ""}`).join("; ")}`); }}>
+      {panel.fields.map((f) => (
+        <label key={f.name} className="block text-[11px]">
+          {f.label}
+          <input className="os-input mt-0.5 !py-0.5 text-[11.5px]" type={f.kind} value={values[f.name] ?? ""} onChange={(e) => setValues((v) => ({ ...v, [f.name]: e.target.value }))} />
+        </label>
+      ))}
+      <button type="submit" className="os-btn !py-0.5 text-[11px]" aria-label={panel.submit}>{panel.submit}</button>
+    </form>
+  );
+}
+
+/* ── voice ────────────────────────────────────────────────────────────────── */
+
+type Recognizer = { lang: string; interimResults: boolean; onresult: ((e: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void) | null; onend: (() => void) | null; onerror: (() => void) | null; start(): void; stop(): void };
+const recognizerCtor = (): (new () => Recognizer) | undefined => {
+  const w = globalThis as unknown as { SpeechRecognition?: new () => Recognizer; webkitSpeechRecognition?: new () => Recognizer };
+  return w.SpeechRecognition ?? w.webkitSpeechRecognition;
+};
+
+let speakReplies = false;
+function speakIfOn(text: string) {
+  if (!speakReplies || typeof speechSynthesis === "undefined") return;
+  speechSynthesis.cancel();
+  speechSynthesis.speak(new SpeechSynthesisUtterance(text.slice(0, 1200)));
+}
+
+/** Push-to-talk into the draft (the browser's own speech recognition), and an
+ *  optional read-aloud of final answers. Both hide where the browser has no support. */
+function VoiceButtons({ onText }: { onText: (t: string) => void }) {
+  const [listening, setListening] = useState(false);
+  const [speak, setSpeak] = useState(speakReplies);
+  const Ctor = recognizerCtor();
+  const listen = () => {
+    if (!Ctor) return;
+    const r = new Ctor();
+    r.lang = navigator.language || "en-US";
+    r.interimResults = false;
+    r.onresult = (e) => { const t = Array.from(e.results).map((x) => x[0]?.transcript ?? "").join(" ").trim(); if (t) onText(t); };
+    r.onend = () => setListening(false);
+    r.onerror = () => setListening(false);
+    setListening(true);
+    r.start();
+  };
+  return (
+    <>
+      {Ctor && (
+        <button className={cn("os-btn !py-1.5", listening && "!border-[var(--danger)]")} onClick={listen} disabled={listening} aria-label={listening ? "Listening" : "Speak your message"} aria-pressed={listening}>
+          <Icon name="mic" size={12} />
+        </button>
+      )}
+      {typeof speechSynthesis !== "undefined" && (
+        <button className={cn("os-btn !py-1.5", speak && "!border-[var(--accent)]")} onClick={() => { speakReplies = !speak; setSpeak(!speak); if (speak) speechSynthesis.cancel(); }} aria-label={speak ? "Stop reading answers aloud" : "Read answers aloud"} aria-pressed={speak}>
+          <Icon name="speaker" size={12} />
+        </button>
       )}
     </>
   );

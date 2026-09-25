@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useSettings, DEFAULT_KEYBINDS } from "@/kernel/settings";
 import { useModelCatalog, modelsFor } from "@/kernel/modelcatalog";
 import { ModelRefreshButton, ModelRefreshStatus } from "@/shell/ModelRefresh";
+import { OnDeviceSetup } from "@/shell/OnDeviceSetup";
 import { useVFS } from "@/kernel/vfs";
 import { useWM } from "@/kernel/wm";
 import { PROVIDERS, getProvider } from "@/lib/providers";
@@ -262,6 +263,7 @@ export default function Settings({}: AppProps) {
               {provider && <ModelRefreshStatus providerId={provider.id} className="mt-1 block text-[10.5px] text-[var(--muted)]" />}
               <datalist id="settings-models">{models.map((m) => <option key={m} value={m} />)}</datalist>
             </Field>
+            <OnDeviceSetup />
             {loadingModels && <div className="mt-1"><Spinner label="Querying provider…" /></div>}
 
             <div className="mt-4">

@@ -61,6 +61,12 @@ export function agentSystemPrompt(context = ""): string {
     '{"tool": "open_app", "args": {"appId": "notes"}}',
     "or finish with a short answer for the user:",
     '{"final": "Done. I opened Notes."}',
+    "A final answer may add ONE panel the user can interact with (plain text only, no HTML):",
+    '  table:     {"final": "...", "panel": {"type": "table", "columns": ["Day","Plan"], "rows": [["Mon","Gym"]]}}',
+    '  checklist: {"final": "...", "panel": {"type": "checklist", "items": [{"text": "Buy milk"}]}}',
+    '  choices:   {"final": "...", "panel": {"type": "choices", "options": [{"label": "Yes, book it", "reply": "Book the 3pm slot"}]}}',
+    '  form:      {"final": "...", "panel": {"type": "form", "fields": [{"name": "date", "label": "Which day?", "kind": "date"}], "submit": "Plan it"}}',
+    "Use a panel when the user would otherwise have to type a follow-up.",
     `You have at most ${MAX_AGENT_STEPS} steps. After each tool call you receive its result.`,
     "Tools marked [asks the user first] may be denied; if so, do not retry the same call, explain instead.",
     "Never claim you sent an email: send_email only prepares one.",
@@ -71,9 +77,58 @@ export function agentSystemPrompt(context = ""): string {
   ].join("\n");
 }
 
+/* Panels: interactive answers in the spirit of A2UI, which keeps agent UI
+   declarative with a component allowlist and no code execution. Every field
+   is plain text, sizes are capped, and anything else is refused. */
+export type Panel =
+  | { type: "table"; columns: string[]; rows: string[][] }
+  | { type: "checklist"; items: Array<{ text: string; done?: boolean }> }
+  | { type: "choices"; options: Array<{ label: string; reply: string }> }
+  | { type: "form"; fields: Array<{ name: string; label: string; kind: "text" | "date" | "number" }>; submit: string };
+
+const cell = (v: unknown, max = 200) => (typeof v === "string" || typeof v === "number" ? String(v).slice(0, max) : null);
+
+export function parsePanel(v: unknown): { ok: true; panel: Panel } | { ok: false; reason: string } {
+  if (!isRecord(v)) return { ok: false, reason: "panel must be an object" };
+  if (v.type === "table") {
+    const columns = Array.isArray(v.columns) ? v.columns.map((c) => cell(c, 60)) : [];
+    const rows = Array.isArray(v.rows) ? v.rows : [];
+    if (!columns.length || columns.length > 8 || columns.some((c) => c === null)) return { ok: false, reason: "table needs 1-8 text columns" };
+    if (rows.length > 50) return { ok: false, reason: "table is capped at 50 rows" };
+    const out: string[][] = [];
+    for (const r of rows) {
+      if (!Array.isArray(r)) return { ok: false, reason: "each row must be an array" };
+      out.push(columns.map((_c, i) => cell(r[i]) ?? ""));
+    }
+    return { ok: true, panel: { type: "table", columns: columns as string[], rows: out } };
+  }
+  if (v.type === "checklist") {
+    const items = Array.isArray(v.items) ? v.items : [];
+    if (!items.length || items.length > 30) return { ok: false, reason: "checklist needs 1-30 items" };
+    const out = items.map((it) => (isRecord(it) ? { text: cell(it.text), done: it.done === true } : { text: cell(it), done: false }));
+    if (out.some((x) => !x.text)) return { ok: false, reason: "every checklist item needs text" };
+    return { ok: true, panel: { type: "checklist", items: out as Array<{ text: string; done: boolean }> } };
+  }
+  if (v.type === "choices") {
+    const opts = Array.isArray(v.options) ? v.options : [];
+    if (!opts.length || opts.length > 6) return { ok: false, reason: "choices needs 1-6 options" };
+    const out = opts.map((o) => (isRecord(o) ? { label: cell(o.label, 80), reply: cell(o.reply ?? o.label, 400) } : null));
+    if (out.some((o) => !o || !o.label || !o.reply)) return { ok: false, reason: "each choice needs a label" };
+    return { ok: true, panel: { type: "choices", options: out as Array<{ label: string; reply: string }> } };
+  }
+  if (v.type === "form") {
+    const fields = Array.isArray(v.fields) ? v.fields : [];
+    if (!fields.length || fields.length > 8) return { ok: false, reason: "form needs 1-8 fields" };
+    const out = fields.map((f) => (isRecord(f) ? { name: cell(f.name, 40), label: cell(f.label ?? f.name, 80), kind: f.kind === "date" || f.kind === "number" ? f.kind : "text" } : null));
+    if (out.some((f) => !f || !f.name || !f.label)) return { ok: false, reason: "each field needs a name and a label" };
+    return { ok: true, panel: { type: "form", fields: out as Array<{ name: string; label: string; kind: "text" | "date" | "number" }>, submit: cell(v.submit, 60) || "Send" } };
+  }
+  return { ok: false, reason: `unknown panel type "${String(v.type)}" (allowed: table, checklist, choices, form)` };
+}
+
 export type AgentStep =
   | { kind: "tool"; tool: string; args: Record<string, unknown> }
-  | { kind: "final"; text: string }
+  | { kind: "final"; text: string; panel?: Panel; panelError?: string }
   | { kind: "invalid"; reason: string };
 
 /** First balanced {...} in `s`, respecting strings. */
@@ -119,7 +174,11 @@ export function parseAgentReply(text: string): AgentStep {
     return { kind: "invalid", reason: "Reply contained JSON that does not parse." };
   }
   if (!isRecord(obj)) return { kind: "invalid", reason: "Reply must be a JSON object." };
-  if (typeof obj.final === "string") return { kind: "final", text: obj.final };
+  if (typeof obj.final === "string") {
+    if (obj.panel === undefined) return { kind: "final", text: obj.final };
+    const p = parsePanel(obj.panel);
+    return p.ok ? { kind: "final", text: obj.final, panel: p.panel } : { kind: "final", text: obj.final, panelError: p.reason };
+  }
   if (typeof obj.tool !== "string") return { kind: "invalid", reason: 'Object needs a "tool" or a "final" field.' };
   const args = obj.args === undefined ? {} : obj.args;
   if (!isRecord(args)) return { kind: "invalid", reason: '"args" must be an object.' };

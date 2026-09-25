@@ -138,6 +138,18 @@ export const APPS: AppManifest[] = [
     accent: "#60a5fa",
   },
   {
+    id: "rewind",
+    name: "Rewind",
+    icon: "backup",
+    category: "system",
+    description: "The whole OS as it was: files, settings, scenes and themes, snapshotted when they change. See what a restore would change, restore, and undo.",
+    component: lazy(() => import("@/apps/Rewind")),
+    defaultSize: { w: 820, h: 560 },
+    singleton: true,
+    permissions: ["storage", "files"],
+    accent: "#60a5fa",
+  },
+  {
     id: "desk",
     name: "Desk",
     icon: "report",

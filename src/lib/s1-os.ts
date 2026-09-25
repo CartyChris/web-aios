@@ -11,7 +11,7 @@ import { runPassed } from "./harness/passed";
 import { makeZip } from "./zip";
 import { useSettings } from "@/kernel/settings";
 import { useWM } from "@/kernel/wm";
-import { useVFS } from "@/kernel/vfs";
+import { useVFS, aiMark } from "@/kernel/vfs";
 import { useHarness } from "@/kernel/harness";
 import { bus } from "@/kernel/bus";
 import { trackJob } from "@/kernel/jobs";
@@ -181,7 +181,7 @@ export async function combineAndSave(task: string, shape: OutputShape, outputs: 
   );
   const plan = savePlan(task, shape, res.text);
   const vfs = useVFS.getState();
-  for (const w of plan.writes) vfs.write(w.path, w.content, { appId: "systemone" });
+  for (const w of plan.writes) vfs.write(w.path, w.content, { appId: "systemone", ...aiMark("Harness Router") });
   bus.emit("notify", { title: "Harness Router finished", body: `Saved ${plan.writes.length} file(s): ${plan.primaryPath}`, kind: "success", target: { appId: "files" } });
   return { text: res.text, costUsd: res.costUsd, plan };
 }

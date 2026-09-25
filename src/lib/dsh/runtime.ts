@@ -15,7 +15,7 @@
 import { create } from "zustand";
 import { ask } from "../useAI";
 import { getProvider } from "../providers";
-import { useVFS } from "@/kernel/vfs";
+import { useVFS, aiMark } from "@/kernel/vfs";
 import { useJobs } from "@/kernel/jobs";
 import { bus } from "@/kernel/bus";
 import { useSettings } from "@/kernel/settings";
@@ -358,7 +358,7 @@ class DshRuntime {
       { name: "read_file", risk: "read", description: "Read a text file from the virtual file system.", parameters: { type: "object", properties: { path: { type: "string" } }, required: ["path"] },
         run: async (a) => { const n = vfs().read(str(a.path)); if (!n) return { content: `No file at ${str(a.path)}`, isError: true }; if (n.kind === "dir") return { content: `${n.path} is a folder`, isError: true }; return n.content.slice(0, 20_000); } },
       { name: "write_file", risk: "write", description: "Create or overwrite a text file.", parameters: { type: "object", properties: { path: { type: "string" }, content: { type: "string" } }, required: ["path", "content"] },
-        run: async (a) => { const n = vfs().write(str(a.path), str(a.content)); return `Wrote ${n.path} (${n.size} bytes).`; } },
+        run: async (a) => { const n = vfs().write(str(a.path), str(a.content), aiMark("DeepSeek Harness", this.ui.getState().model)); return `Wrote ${n.path} (${n.size} bytes).`; } },
       { name: "list_files", risk: "read", description: "List a folder.", parameters: { type: "object", properties: { dir: { type: "string" } } },
         run: async (a) => vfs().list(str(a.dir) || "/").slice(0, 200).map((n) => `${n.path}${n.kind === "dir" ? "/" : ` ${n.size}b`}`).join("\n") || "Empty." },
       { name: "grep", risk: "read", description: "Search file contents with a regular expression.", parameters: { type: "object", properties: { pattern: { type: "string" }, dir: { type: "string" } }, required: ["pattern"] },
