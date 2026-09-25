@@ -80,15 +80,31 @@ export function deriveMessages(events: readonly DshEvent[]): { system: string; m
     if (e.type === "compaction/summary") { summaryUpTo = e.data.uptoSeq; summary = e.data.text; }
   }
   const messages: ChatMessage[] = [];
+  // Only calls that were answered are replayed: a call with no result makes
+  // every provider reject the request (defence for sessions logged before the
+  // loop answered cancelled calls).
+  const answered = new Set(events.filter((x) => x.type === "tool/result").map((x) => x.data.callId as string));
+  // DeepSeek wants reasoning back only inside the current turn.
+  let turnStart = -1;
+  for (const e of events) if (e.type === "turn/start") turnStart = e.seq;
   if (summaryUpTo >= 0) messages.push({ role: "user", content: `[Summary of the earlier conversation, written by the harness when history grew too long]\n${summary}` });
   for (const e of events) {
     if (e.type === "system/message") { system = e.data.text; continue; }
     if (e.seq < summaryUpTo) continue;
     switch (e.type) {
       case "user/message": messages.push({ role: "user", content: e.data.text }); break;
-      case "assistant/message":
-        messages.push({ role: "assistant", content: e.data.text, ...(e.data.toolCalls?.length ? { toolCalls: e.data.toolCalls } : {}) });
+      case "assistant/message": {
+        const calls = (e.data.toolCalls ?? []).filter((c: { id: string }) => answered.has(c.id));
+        // An empty reply is not a message: Anthropic and Gemini reject an
+        // empty assistant turn in history on every later request.
+        if (!String(e.data.text ?? "").trim() && calls.length === 0) break;
+        messages.push({
+          role: "assistant", content: e.data.text,
+          ...(calls.length ? { toolCalls: calls } : {}),
+          ...(calls.length && e.seq > turnStart && e.data.reasoning ? { reasoning: e.data.reasoning } : {}),
+        });
         break;
+      }
       case "tool/result":
         messages.push({ role: "tool", content: pruned.get(e.seq) ?? e.data.content, toolCallId: e.data.callId, toolName: e.data.name });
         break;

@@ -73,7 +73,12 @@ test("Google: whole functionCall parts, two chunks, positional ids", () => {
   ];
   const { calls } = fold("google", frames);
   assert.equal(calls.length, 2, "a second chunk's call at part index 0 must not merge into the first");
-  assert.deepEqual(calls.map((c) => [c.id, c.name, JSON.parse(c.args).path]), [["call_0", "read_file", "/c"], ["call_1", "read_file", "/d"]]);
+  assert.deepEqual(calls.map((c) => [c.name, JSON.parse(c.args).path]), [["read_file", "/c"], ["read_file", "/d"]]);
+  // Ids were pinned as "call_0"/"call_1" here, which encoded a bug: every
+  // response restarted at call_0, so ids repeated across steps.
+  assert.notEqual(calls[0].id, calls[1].id);
+  const again = fold("google", frames).calls;
+  assert.ok(again.every((c) => !calls.some((x) => x.id === c.id)), "a second response's id-less calls get new ids");
 });
 
 test("requests without tools are unchanged: no tools key, plain role/content messages", () => {
@@ -125,7 +130,9 @@ test("Google request: functionDeclarations with schema stripped to the portable 
   const decl = g.tools[0].functionDeclarations[0];
   assert.equal(decl.name, "read_file");
   assert.equal("additionalProperties" in decl.parameters, false);
-  assert.deepEqual(g.contents[1], { role: "model", parts: [{ functionCall: { name: "read_file", args: { path: "/a" } } }] });
+  // Gemini 3 rejects a replayed functionCall without its thought signature;
+  // a call that never had one carries Google's documented placeholder.
+  assert.deepEqual(g.contents[1], { role: "model", parts: [{ functionCall: { name: "read_file", args: { path: "/a" } }, thoughtSignature: "skip_thought_signature_validator" }] });
   assert.deepEqual(g.contents[2], { role: "user", parts: [{ functionResponse: { name: "read_file", response: { content: "body" } } }] });
 });
 
@@ -134,4 +141,21 @@ test("parseToolArgs reports bad JSON instead of throwing", () => {
   assert.equal(parseToolArgs("{oops").ok, false);
   assert.equal(parseToolArgs("[1]").ok, false);
   assert.deepEqual(toGoogleSchema({ type: "object", $schema: "x", properties: { a: { type: "string", pattern: "p" } } }), { type: "object", properties: { a: { type: "string" } } });
+});
+
+test("a Gemini thought signature survives the round trip onto the replayed call", () => {
+  const acc = new ToolCallAccumulator();
+  acc.add(parseChunk("google", JSON.stringify({ candidates: [{ content: { parts: [{ functionCall: { name: "read_file", args: { path: "/a" } }, thoughtSignature: "SIG123" }] } }] })).toolCalls);
+  const [call] = acc.result();
+  assert.equal(call.signature, "SIG123");
+  const body = JSON.parse(buildRequest({ dialect: "google", baseUrl: "https://g", apiKey: "k", model: "m", messages: [{ role: "user", content: "x" }, { role: "assistant", content: "", toolCalls: [call] }, { role: "tool", content: "r", toolCallId: call.id, toolName: "read_file" }] }).init.body);
+  assert.equal(body.contents[1].parts[0].thoughtSignature, "SIG123");
+});
+
+test("DeepSeek gets reasoning_content back on tool-call turns; other hosts do not", () => {
+  const msgs = [{ role: "user", content: "x" }, { role: "assistant", content: "", reasoning: "think", toolCalls: [{ id: "c1", name: "f", args: "{}" }] }, { role: "tool", content: "r", toolCallId: "c1", toolName: "f" }];
+  const ds = JSON.parse(buildRequest({ dialect: "openai", baseUrl: "https://api.deepseek.com/v1", apiKey: "k", model: "deepseek-reasoner", messages: msgs }).init.body);
+  assert.equal(ds.messages[1].reasoning_content, "think");
+  const oa = JSON.parse(buildRequest({ dialect: "openai", baseUrl: "https://api.openai.com/v1", apiKey: "k", model: "m", messages: msgs }).init.body);
+  assert.equal(oa.messages[1].reasoning_content, undefined);
 });

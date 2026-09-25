@@ -261,10 +261,13 @@ export function skillsPlugin(list: () => Array<{ name: string; body: string }>):
     description: "Expands /skill-name at the start of a message into that skill's instructions (skills live in /dsh/skills/*.md).",
     apply(ctx: DshContext) {
       ctx.waterfall<PreStepPayload, PreStepPayload>("agent/pre-step", async (p, next) => {
-        const m = /^\/([\w-]+)\s*([\s\S]*)$/.exec(p.input.trim());
+        // "/name" must end at whitespace or the end: "/Documents/plan.md ..."
+        // is a path, not a skill. An unknown name passes through as ordinary
+        // text rather than rejecting the user's message outright.
+        const m = /^\/([\w-]+)(?:\s+([\s\S]*))?$/.exec(p.input.trim());
         if (!m) return next(p);
         const skill = list().find((s) => s.name === m[1]);
-        if (!skill) return next({ ...p, reject: `No skill named "${m[1]}". Skills: ${list().map((s) => s.name).join(", ") || "none"}` });
+        if (!skill) return next(p);
         return next({ ...p, input: `[Skill: ${skill.name}]\n${skill.body}\n\n[Task]\n${m[2] || "(apply the skill)"}` });
       });
     },

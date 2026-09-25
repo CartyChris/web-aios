@@ -375,7 +375,9 @@ class DshRuntime {
         } },
       { name: "run_js", risk: "write", description: "Run JavaScript in a sandboxed Web Worker (no DOM, no network, 5s timeout). The value of the last `return` is the result; console.log output is captured.", parameters: { type: "object", properties: { code: { type: "string" } }, required: ["code"] },
         run: async (a) => runInWorker(str(a.code)) },
-      { name: "web_fetch", risk: "read", description: "Fetch a public web page as plain text.", parameters: { type: "object", properties: { url: { type: "string" } }, required: ["url"] },
+      // "write", not "read": the model picks the URL, so a fetch can carry
+      // data out (…?d=<file contents>) after a prompt-injected page says so.
+      { name: "web_fetch", risk: "write", description: "Fetch a public web page as plain text.", parameters: { type: "object", properties: { url: { type: "string" } }, required: ["url"] },
         run: async (a) => {
           const r = await fetch(`/api/proxy?mode=text&url=${encodeURIComponent(str(a.url))}`);
           const j = (await r.json()) as { text?: string; title?: string; error?: string; status?: number };
@@ -550,25 +552,33 @@ function runInWorker(code: string, timeoutMs = 5000): Promise<string | { content
     const logs = [];
     self.console = { log: (...a) => logs.push(a.map(String).join(" ")), error: (...a) => logs.push("error: " + a.map(String).join(" ")), warn: (...a) => logs.push("warn: " + a.map(String).join(" ")) };
     for (const k of ["fetch", "XMLHttpRequest", "WebSocket", "importScripts", "EventSource", "indexedDB", "caches", "BroadcastChannel"]) { try { self[k] = undefined; } catch (e) {} }
-    self.onmessage = async (ev) => {
-      try {
-        const fn = new Function(ev.data);
-        const value = await fn();
-        self.postMessage({ ok: true, value: value === undefined ? undefined : JSON.stringify(value), logs });
-      } catch (e) {
-        self.postMessage({ ok: false, error: String(e && e.message || e), logs });
-      }
-    };`;
+    self.onmessage = (() => {
+      const post = self.postMessage.bind(self);
+      return async (ev) => {
+        const { nonce, code } = ev.data;
+        try {
+          const fn = new Function(code);
+          const value = await fn();
+          post({ __dsh: nonce, ok: true, value: value === undefined ? undefined : JSON.stringify(value), logs });
+        } catch (e) {
+          post({ __dsh: nonce, ok: false, error: String(e && e.message || e), logs });
+        }
+      };
+    })();`;
+  const nonce = `n${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
   return new Promise((resolve) => {
     const url = URL.createObjectURL(new Blob([src], { type: "text/javascript" }));
     const w = new Worker(url);
     const t = setTimeout(() => { w.terminate(); URL.revokeObjectURL(url); resolve({ content: `Timed out after ${timeoutMs}ms.`, isError: true }); }, timeoutMs);
-    w.onmessage = (ev: MessageEvent<{ ok: boolean; value?: string; error?: string; logs: string[] }>) => {
+    // The code itself can call postMessage; only the wrapper's nonce-tagged
+    // message counts, and the timeout stays armed until it arrives.
+    w.onmessage = (ev: MessageEvent<{ __dsh?: string; ok: boolean; value?: string; error?: string; logs: string[] }>) => {
+      if (!ev.data || ev.data.__dsh !== nonce) return;
       clearTimeout(t); w.terminate(); URL.revokeObjectURL(url);
       const out = [...ev.data.logs, ev.data.ok ? `=> ${ev.data.value ?? "undefined"}` : `Error: ${ev.data.error}`].join("\n");
       resolve(ev.data.ok ? out : { content: out, isError: true });
     };
-    w.postMessage(code);
+    w.postMessage({ nonce, code });
   });
 }
 

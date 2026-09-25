@@ -45,6 +45,7 @@ export async function GET(req: NextRequest) {
   if (provider.dialect === "anthropic") {
     try {
       const res = await fetch(`${root}/models?limit=1000`, {
+        redirect: "manual",
         headers: { "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
         signal: AbortSignal.timeout(12000),
       });
@@ -61,6 +62,7 @@ export async function GET(req: NextRequest) {
   if (provider.dialect === "google") {
     try {
       const res = await fetch(`${root}/models?pageSize=1000&key=${encodeURIComponent(apiKey)}`, {
+        redirect: "manual",
         signal: AbortSignal.timeout(12000),
       });
       if (!res.ok) return catalog(`${provider.name} answered ${res.status}`);
@@ -73,6 +75,7 @@ export async function GET(req: NextRequest) {
 
   try {
     const res = await fetch(`${baseUrl.replace(/\/+$/, "")}/models`, {
+        redirect: "manual",
       headers: apiKey ? { authorization: `Bearer ${apiKey}` } : {},
       signal: AbortSignal.timeout(12000),
     });

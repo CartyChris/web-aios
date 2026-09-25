@@ -68,6 +68,7 @@ export async function POST(req: NextRequest) {
           temperature: body.temperature,
           maxTokens: body.maxTokens,
           web: body.web,
+          noRedirects: !deploymentKeyAllowed(body.baseUrl, provider.baseUrl),
           reasoningEffort: body.reasoningEffort === "low" || body.reasoningEffort === "medium" || body.reasoningEffort === "high" ? body.reasoningEffort : undefined,
           ...(Array.isArray(body.tools) && body.tools.length ? { tools: body.tools } : {}),
           signal: req.signal,

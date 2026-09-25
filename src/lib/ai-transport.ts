@@ -25,6 +25,10 @@ export interface ChatMessage {
    *  (Google matches a result to its call by name, not by id). */
   toolCallId?: string;
   toolName?: string;
+  /** Assistant tool-call turn only: the model's reasoning for it. DeepSeek's
+   *  thinking mode requires it back as reasoning_content on the next step of
+   *  the same turn, or rejects the request. */
+  reasoning?: string;
 }
 
 /* ── Native tool calling ──────────────────────────────────────────────────
@@ -47,6 +51,9 @@ export interface ToolCall {
   id: string;
   name: string;
   args: string;
+  /** Gemini 3's thought signature for this call. It must be replayed on the
+   *  functionCall part or the next step is rejected with 400. */
+  signature?: string;
 }
 
 /** A streamed fragment of a tool call. OpenAI and Anthropic send the name and
@@ -59,11 +66,18 @@ export interface ToolCallDelta {
   name?: string;
   argsDelta?: string;
   complete?: boolean;
+  signature?: string;
 }
 
 /** Fold tool-call deltas into complete calls. Pure; keep one per response. */
+let accumulatorSeq = 0;
+
 export class ToolCallAccumulator {
-  private calls: Array<{ id: string; name: string; args: string }> = [];
+  private calls: Array<{ id: string; name: string; args: string; signature?: string }> = [];
+  /** Per-response tag for id-less calls. Positional ids alone ("call_0")
+   *  repeat on every step, so step 2's result paired with step 1's card and
+   *  Anthropic rejected the duplicate tool_use ids. */
+  private readonly tag = (accumulatorSeq++).toString(36);
   private byIndex = new Map<number, number>();
   add(deltas: ToolCallDelta[] | undefined): void {
     for (const d of deltas ?? []) {
@@ -77,12 +91,13 @@ export class ToolCallAccumulator {
       if (d.id) c.id = d.id;
       if (d.name) c.name = d.name;
       if (d.argsDelta) c.args += d.argsDelta;
+      if (d.signature) c.signature = d.signature;
     }
   }
   /** Complete calls in arrival order. A call the provider sent no id for gets
    *  a positional one, so a result can still be matched back to it. */
   result(): ToolCall[] {
-    return this.calls.filter((c) => c.name).map((c, i) => ({ id: c.id || `call_${i}`, name: c.name, args: c.args || "{}" }));
+    return this.calls.filter((c) => c.name).map((c, i) => ({ id: c.id || `call_${this.tag}_${i}`, name: c.name, args: c.args || "{}", ...(c.signature ? { signature: c.signature } : {}) }));
   }
 }
 
@@ -120,12 +135,13 @@ const safeArgs = (args: string): unknown => {
 };
 const hasToolShape = (messages: ChatMessage[]) => messages.some((m) => m.role === "tool" || (m.toolCalls?.length ?? 0) > 0);
 
-function openAIMessage(m: ChatMessage): Record<string, unknown> {
+function openAIMessage(m: ChatMessage, reasoningBack = false): Record<string, unknown> {
   if (m.role === "tool") return { role: "tool", tool_call_id: m.toolCallId ?? "", content: messageText(m) };
   if (m.role === "assistant" && m.toolCalls?.length) {
     return {
       role: "assistant",
       content: messageText(m) || null,
+      ...(reasoningBack && m.reasoning ? { reasoning_content: m.reasoning } : {}),
       tool_calls: m.toolCalls.map((c) => ({ id: c.id, type: "function", function: { name: c.name, arguments: c.args || "{}" } })),
     };
   }
@@ -173,7 +189,13 @@ function googleContents(rest: ChatMessage[]): Array<Record<string, unknown>> {
     }
     if (m.role === "assistant" && m.toolCalls?.length) {
       const text = messageText(m);
-      out.push({ role: "model", parts: [...(text ? [{ text }] : []), ...m.toolCalls.map((c) => ({ functionCall: { name: c.name, args: safeArgs(c.args) } }))] });
+      out.push({ role: "model", parts: [...(text ? [{ text }] : []), ...m.toolCalls.map((c) => ({
+        functionCall: { name: c.name, args: safeArgs(c.args) },
+        // Gemini 3 requires the signature it issued. For calls that never had
+        // one (history from another provider), Google documents this
+        // placeholder as the way to skip validation.
+        thoughtSignature: c.signature ?? "skip_thought_signature_validator",
+      }))] });
       continue;
     }
     out.push({ role: m.role === "assistant" ? "model" : "user", parts: toGoogleParts(m.content) });
@@ -209,6 +231,9 @@ export function requiresVision(messages: ChatMessage[]): boolean {
 }
 
 export interface ChatRequest {
+  /** Refuse redirects. Set by server relays for caller-chosen base URLs, so a
+   *  public host cannot 307 the server into an internal address. */
+  noRedirects?: boolean;
   dialect: "openai" | "anthropic" | "google";
   baseUrl: string;
   apiKey: string;
@@ -318,7 +343,7 @@ export function buildRequest(req: ChatRequest): { url: string; init: RequestInit
       },
       body: JSON.stringify({
         model: req.model,
-        messages: hasToolShape(req.messages) ? req.messages.map(openAIMessage) : req.messages.map((m) => ({ role: m.role, content: toOpenAIContent(m.content) })),
+        messages: hasToolShape(req.messages) ? req.messages.map((m) => openAIMessage(m, /deepseek/i.test(base))) : req.messages.map((m) => ({ role: m.role, content: toOpenAIContent(m.content) })),
         ...(req.tools?.length ? { tools: req.tools.map((t) => ({ type: "function", function: { name: t.name, description: t.description, parameters: t.parameters } })) } : {}),
         temperature: req.temperature,
         max_tokens: req.maxTokens ?? 4096,
@@ -409,11 +434,11 @@ export function parseChunk(dialect: ChatRequest["dialect"], raw: string): ChatCh
   }
 
   if (dialect === "google") {
-    const cands = json.candidates as Array<{ content?: { parts?: Array<{ text?: string; thought?: boolean; functionCall?: { name?: string; args?: unknown } }> }; finishReason?: string }> | undefined;
+    const cands = json.candidates as Array<{ content?: { parts?: Array<{ text?: string; thought?: boolean; thoughtSignature?: string; functionCall?: { name?: string; args?: unknown } }> }; finishReason?: string }> | undefined;
     const parts = cands?.[0]?.content?.parts ?? [];
     const calls: ToolCallDelta[] = parts
       .filter((p) => p.functionCall?.name)
-      .map((p, i) => ({ index: i, name: p.functionCall!.name, argsDelta: JSON.stringify(p.functionCall!.args ?? {}), complete: true }));
+      .map((p, i) => ({ index: i, name: p.functionCall!.name, argsDelta: JSON.stringify(p.functionCall!.args ?? {}), complete: true, ...(p.thoughtSignature ? { signature: p.thoughtSignature } : {}) }));
     const text = parts.filter((p) => !p.thought).map((p) => p.text ?? "").join("");
     const thought = parts.filter((p) => p.thought).map((p) => p.text ?? "").join("");
     const fr = cands?.[0]?.finishReason;
@@ -462,8 +487,11 @@ export function parseChunk(dialect: ChatRequest["dialect"], raw: string): ChatCh
 /** Consume an SSE body and yield deltas. Works in both runtimes. */
 export async function* streamChat(req: ChatRequest): AsyncGenerator<ChatChunk> {
   const { url, init } = buildRequest({ ...req, stream: true });
-  const res = await fetch(url, { ...init, signal: req.signal });
+  const res = await fetch(url, { ...init, signal: req.signal, ...(req.noRedirects ? { redirect: "manual" as const } : {}) });
 
+  if (req.noRedirects && (res.type === "opaqueredirect" || (res.status >= 300 && res.status < 400))) {
+    throw new Error("The custom base URL answered with a redirect, which is refused for relayed requests.");
+  }
   if (!res.ok) {
     const body = await res.text().catch(() => "");
     throw new Error(`${res.status} ${res.statusText}${body ? ` — ${body.slice(0, 400)}` : ""}`);

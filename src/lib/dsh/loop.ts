@@ -91,6 +91,7 @@ export async function runTurn(input: string, d: TurnDeps): Promise<TurnResult> {
   }
   let step = 0;
   let lastText = "";
+  let pending: Array<{ id: string; name: string; args: string }> = [];
   const end = (reason: TurnResult["reason"], error?: string): TurnResult => {
     log.append("turn/end", { reason, ...(error ? { error } : {}) });
     return { reason, steps: step, text: lastText, ...(error ? { error } : {}) };
@@ -136,11 +137,13 @@ export async function runTurn(input: string, d: TurnDeps): Promise<TurnResult> {
         ...(r.model ? { model: r.model } : {}),
       });
       const calls = r.toolCalls ?? [];
+      pending = [...calls];
       for (const call of calls) {
         check(d.signal);
         log.append("tool/call", { callId: call.id, name: call.name, args: call.args });
         const started = d.clock();
         const res = await runToolPipeline(ctx, call, tools, d.signal);
+        pending = pending.filter((c) => c.id !== call.id);
         log.append("tool/result", { callId: call.id, name: call.name, content: res.content, isError: !!res.isError, ms: Math.max(0, d.clock() - started), ...(res.approval ? { approval: res.approval } : {}) });
       }
       log.append("step/end", { step, toolCalls: calls.length });
@@ -151,6 +154,13 @@ export async function runTurn(input: string, d: TurnDeps): Promise<TurnResult> {
       }
     }
   } catch (e) {
+    // Every call the model made must be answered, or providers reject the
+    // whole session from the next request on ("tool_use ids without
+    // tool_result"). Unanswered calls get an explicit cancelled result.
+    for (const call of pending) {
+      if (!log.events.some((x) => x.type === "tool/call" && x.data.callId === call.id)) log.append("tool/call", { callId: call.id, name: call.name, args: call.args });
+      log.append("tool/result", { callId: call.id, name: call.name, content: e instanceof DshCancelled ? "Cancelled before it finished." : `Not run: ${e instanceof Error ? e.message : String(e)}`, isError: true, ms: 0 });
+    }
     if (e instanceof DshCancelled) {
       log.append("assistant/attempt", { text: "", reason: "cancelled" });
       return end("cancelled");

@@ -143,7 +143,8 @@ function ChatPane() {
   const rt = dsh();
   const log = ui.activeId ? rt.log(ui.activeId) : undefined;
   const events = log?.events ?? [];
-  const send = () => { const t = input.trim(); if (!t) return; setInput(""); void rt.send(t); };
+  // While a turn runs, Enter keeps the text (it used to be cleared and lost).
+  const send = () => { const t = input.trim(); if (!t || ui.running) return; setInput(""); void rt.send(t); };
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
