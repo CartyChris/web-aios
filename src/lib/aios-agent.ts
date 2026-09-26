@@ -72,7 +72,10 @@ export function agentSystemPrompt(context = ""): string {
     '  checklist: {"final": "...", "panel": {"type": "checklist", "items": [{"text": "Buy milk"}]}}',
     '  choices:   {"final": "...", "panel": {"type": "choices", "options": [{"label": "Yes, book it", "reply": "Book the 3pm slot"}]}}',
     '  form:      {"final": "...", "panel": {"type": "form", "fields": [{"name": "date", "label": "Which day?", "kind": "date"}], "submit": "Plan it"}}',
-    "Use a panel when the user would otherwise have to type a follow-up.",
+    '  chart:     {"final": "...", "panel": {"type": "chart", "kind": "bar", "title": "Focus minutes", "unit": "min", "labels": ["Mon","Tue"], "series": [{"name": "Focus", "values": [30, 45]}]}}',
+    '  timeline:  {"final": "...", "panel": {"type": "timeline", "items": [{"when": "Tue 09:12", "text": "Created plan.md", "appId": "notes", "path": "/notes/plan.md"}]}}',
+    '  diff:      {"final": "...", "panel": {"type": "diff", "title": "plan.md", "before": "old text", "after": "new text"}}',
+    "Use a panel when the user would otherwise have to type a follow-up, or when a chart, timeline or diff says it better than prose.",
     `You have at most ${MAX_AGENT_STEPS} steps. After each tool call you receive its result.`,
     "Tools marked [asks the user first] may be denied; if so, do not retry the same call, explain instead.",
     "Never claim you sent an email: send_email only prepares one.",
@@ -90,7 +93,24 @@ export type Panel =
   | { type: "table"; columns: string[]; rows: string[][] }
   | { type: "checklist"; items: Array<{ text: string; done?: boolean }> }
   | { type: "choices"; options: Array<{ label: string; reply: string }> }
-  | { type: "form"; fields: Array<{ name: string; label: string; kind: "text" | "date" | "number" }>; submit: string };
+  | { type: "form"; fields: Array<{ name: string; label: string; kind: "text" | "date" | "number" }>; submit: string }
+  /* Drawn by the app from numbers (lib/panelchart.ts); the model sends no markup. */
+  | { type: "chart"; kind: "bar" | "line"; title: string; unit: string; labels: string[]; series: Array<{ name: string; values: Array<number | null> }> }
+  /* Dated entries; `appId` + `path` become an Open button only for an app that exists. */
+  | { type: "timeline"; items: Array<{ when: string; text: string; appId?: string; path?: string }> }
+  /* Two texts; the app computes the line diff (lib/textdiff.ts). */
+  | { type: "diff"; title: string; before: string; after: string };
+
+export const PANEL_TYPES = ["table", "checklist", "choices", "form", "chart", "timeline", "diff"] as const;
+export const MAX_DIFF_CHARS = 20_000;
+
+/** A finite number, or a numeric string; null for a gap; undefined for anything else. */
+const num = (v: unknown): number | null | undefined => {
+  if (v === null) return null;
+  if (typeof v === "number") return Number.isFinite(v) ? v : undefined;
+  if (typeof v === "string" && v.trim() !== "" && Number.isFinite(Number(v))) return Number(v);
+  return undefined;
+};
 
 const cell = (v: unknown, max = 200) => (typeof v === "string" || typeof v === "number" ? String(v).slice(0, max) : null);
 
@@ -129,7 +149,47 @@ export function parsePanel(v: unknown): { ok: true; panel: Panel } | { ok: false
     if (out.some((f) => !f || !f.name || !f.label)) return { ok: false, reason: "each field needs a name and a label" };
     return { ok: true, panel: { type: "form", fields: out as Array<{ name: string; label: string; kind: "text" | "date" | "number" }>, submit: cell(v.submit, 60) || "Send" } };
   }
-  return { ok: false, reason: `unknown panel type "${String(v.type)}" (allowed: table, checklist, choices, form)` };
+  if (v.type === "chart") {
+    const labels = Array.isArray(v.labels) ? v.labels.map((l) => cell(l, 24)) : [];
+    if (!labels.length || labels.length > 24 || labels.some((l) => l === null)) return { ok: false, reason: "chart needs 1-24 text labels" };
+    const rawSeries = Array.isArray(v.series) ? v.series : isRecord(v.series) || Array.isArray(v.values) ? [v.series ?? { name: "", values: v.values }] : [];
+    if (!rawSeries.length || rawSeries.length > 3) return { ok: false, reason: "chart needs 1-3 series" };
+    const series: Array<{ name: string; values: Array<number | null> }> = [];
+    for (const s of rawSeries) {
+      if (!isRecord(s) || !Array.isArray(s.values)) return { ok: false, reason: "each series needs a values array" };
+      if (s.values.length > labels.length) return { ok: false, reason: "a series has more values than there are labels" };
+      const values = s.values.map(num);
+      if (values.some((x) => x === undefined)) return { ok: false, reason: "chart values must be numbers (or null for a gap)" };
+      const padded = labels.map((_l, i) => (values[i] as number | null | undefined) ?? null);
+      series.push({ name: cell(s.name, 40) ?? "", values: padded });
+    }
+    if (series.every((s) => s.values.every((x) => x === null))) return { ok: false, reason: "chart has no values" };
+    return {
+      ok: true,
+      panel: { type: "chart", kind: v.kind === "line" ? "line" : "bar", title: cell(v.title, 80) ?? "", unit: cell(v.unit, 16) ?? "", labels: labels as string[], series },
+    };
+  }
+  if (v.type === "timeline") {
+    const items = Array.isArray(v.items) ? v.items : [];
+    if (!items.length || items.length > 40) return { ok: false, reason: "timeline needs 1-40 items" };
+    const out: Array<{ when: string; text: string; appId?: string; path?: string }> = [];
+    for (const it of items) {
+      if (!isRecord(it)) return { ok: false, reason: "each timeline item must be an object" };
+      const when = cell(it.when, 40), text = cell(it.text);
+      if (!when || !text) return { ok: false, reason: "each timeline item needs when and text" };
+      const item: { when: string; text: string; appId?: string; path?: string } = { when, text };
+      if (typeof it.appId === "string" && /^[a-z0-9][a-z0-9-]{0,39}$/.test(it.appId)) item.appId = it.appId;
+      if (item.appId && typeof it.path === "string" && it.path.startsWith("/") && it.path.length <= 300 && !it.path.includes("..")) item.path = it.path;
+      out.push(item);
+    }
+    return { ok: true, panel: { type: "timeline", items: out } };
+  }
+  if (v.type === "diff") {
+    if (typeof v.before !== "string" || typeof v.after !== "string") return { ok: false, reason: "diff needs before and after as text" };
+    if (v.before.length > MAX_DIFF_CHARS || v.after.length > MAX_DIFF_CHARS) return { ok: false, reason: `diff texts are capped at ${MAX_DIFF_CHARS} characters each` };
+    return { ok: true, panel: { type: "diff", title: cell(v.title, 80) ?? "", before: v.before, after: v.after } };
+  }
+  return { ok: false, reason: `unknown panel type "${String(v.type)}" (allowed: ${PANEL_TYPES.join(", ")})` };
 }
 
 export type AgentStep =

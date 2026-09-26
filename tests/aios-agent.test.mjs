@@ -159,3 +159,51 @@ test("panels: unknown types, HTML-ish objects and oversize panels are refused, t
   const form = parsePanel({ type: "form", fields: [{ name: "d", label: "Day", kind: "datetime-local" }] });
   assert.equal(form.panel.fields[0].kind, "text", "an unknown input kind falls back to text");
 });
+
+/* ── chart, timeline and diff panels ─────────────────────────────────────── */
+
+test("panels: a chart is numbers and labels only, padded with gaps", () => {
+  const r = parsePanel({ type: "chart", kind: "line", title: "Focus", labels: ["Mon", "Tue", "Wed"], series: [{ name: "min", values: [30, "45"] }] });
+  assert.equal(r.ok, true);
+  assert.deepEqual(r.panel.series[0].values, [30, 45, null], "a numeric string is a number; a missing value is a gap");
+  assert.equal(r.panel.kind, "line");
+  assert.equal(parsePanel({ type: "chart", kind: "pie", labels: ["a"], series: [{ values: [1] }] }).panel.kind, "bar", "unknown kinds fall back to bar");
+});
+
+test("panels: a chart with non-numbers, too many values or no values is refused", () => {
+  assert.match(parsePanel({ type: "chart", labels: ["a"], series: [{ values: ["<script>"] }] }).reason, /numbers/);
+  assert.match(parsePanel({ type: "chart", labels: ["a"], series: [{ values: [Infinity] }] }).reason, /numbers/);
+  assert.match(parsePanel({ type: "chart", labels: ["a"], series: [{ values: [1, 2] }] }).reason, /more values/);
+  assert.match(parsePanel({ type: "chart", labels: ["a"], series: [{ values: [null] }] }).reason, /no values/);
+  assert.equal(parsePanel({ type: "chart", labels: Array.from({ length: 25 }, () => "x"), series: [{ values: [1] }] }).ok, false);
+  assert.equal(parsePanel({ type: "chart", labels: ["a"], series: [1, 2, 3, 4].map(() => ({ values: [1] })) }).ok, false);
+  assert.equal(parsePanel({ type: "chart", labels: [{ html: "<b>" }], series: [{ values: [1] }] }).ok, false);
+});
+
+test("panels: timeline links are kept only when they are an app id and a plain absolute path", () => {
+  const r = parsePanel({ type: "timeline", items: [
+    { when: "Tue 09:12", text: "Created plan.md", appId: "notes", path: "/notes/plan.md" },
+    { when: "Tue 10:00", text: "bad app", appId: "javascript:alert(1)", path: "/x" },
+    { when: "Tue 11:00", text: "bad path", appId: "files", path: "/a/../../etc" },
+    { when: "Tue 12:00", text: "path without app", path: "/x" },
+  ] });
+  assert.equal(r.ok, true);
+  assert.deepEqual(r.panel.items[0], { when: "Tue 09:12", text: "Created plan.md", appId: "notes", path: "/notes/plan.md" });
+  assert.deepEqual(r.panel.items[1], { when: "Tue 10:00", text: "bad app" });
+  assert.deepEqual(r.panel.items[2], { when: "Tue 11:00", text: "bad path", appId: "files" });
+  assert.deepEqual(r.panel.items[3], { when: "Tue 12:00", text: "path without app" });
+  assert.equal(parsePanel({ type: "timeline", items: [{ text: "no when" }] }).ok, false);
+});
+
+test("panels: a diff is two capped texts", () => {
+  const r = parsePanel({ type: "diff", title: "plan.md", before: "a\nb", after: "a\nB" });
+  assert.deepEqual(r.panel, { type: "diff", title: "plan.md", before: "a\nb", after: "a\nB" });
+  assert.equal(parsePanel({ type: "diff", before: "", after: "x" }).ok, true, "an empty side is allowed");
+  assert.match(parsePanel({ type: "diff", before: 1, after: "x" }).reason, /as text/);
+  assert.match(parsePanel({ type: "diff", before: "x".repeat(20_001), after: "" }).reason, /capped/);
+});
+
+test("panels: the error for an unknown type lists every allowed type", () => {
+  const r = parsePanel({ type: "iframe" });
+  for (const t of ["table", "checklist", "choices", "form", "chart", "timeline", "diff"]) assert.match(r.reason, new RegExp(t));
+});

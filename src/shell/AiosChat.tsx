@@ -20,6 +20,8 @@ import {
 } from "@/lib/aios-agent";
 import { cn } from "@/lib/cn";
 import { Icon } from "@/shell/icons";
+import { PanelView } from "@/shell/PanelView";
+import { useDeskPins } from "@/kernel/deskpins";
 
 /* AIOS Chat: a top-bar agent that operates the OS with the selected model.
 
@@ -426,6 +428,7 @@ export function AiosChat() {
                   </a>
                 )}
                 {m.panel && <PanelView panel={m.panel} />}
+                {m.panel && <PinToDesk panel={m.panel} caption={m.text} />}
                 {m.download && (
                   <button className="os-btn mt-1.5 flex items-center gap-1 !py-0.5 text-[11px]" onClick={() => m.download && saveFile(m.download)}>
                     <Icon name="download" size={11} /> Download {m.download.name}
@@ -479,52 +482,19 @@ export function AiosChat() {
   );
 }
 
-/* ── panels ───────────────────────────────────────────────────────────────── */
+/* ── pin to Desk ──────────────────────────────────────────────────────────── */
 
-/** Renders an allowlisted panel. Everything is text; nothing from the model
- *  becomes HTML. Choices and forms answer by sending a new message. */
-function PanelView({ panel }: { panel: Panel }) {
-  const [done, setDone] = useState<boolean[]>(() => (panel.type === "checklist" ? panel.items.map((i) => !!i.done) : []));
-  const [values, setValues] = useState<Record<string, string>>({});
-  if (panel.type === "table") {
-    return (
-      <div className="mt-1.5 overflow-x-auto" data-aios-panel="table">
-        <table className="w-full border-collapse text-[11px]">
-          <thead><tr>{panel.columns.map((c) => <th key={c} className="border-b border-white/15 px-1.5 py-1 text-left font-medium">{c}</th>)}</tr></thead>
-          <tbody>{panel.rows.map((r, i) => <tr key={i}>{r.map((c, j) => <td key={j} className="border-b border-white/5 px-1.5 py-1">{c}</td>)}</tr>)}</tbody>
-        </table>
-      </div>
-    );
-  }
-  if (panel.type === "checklist") {
-    return (
-      <div className="mt-1.5 space-y-0.5" data-aios-panel="checklist">
-        {panel.items.map((it, i) => (
-          <label key={i} className="flex items-center gap-1.5 text-[11.5px]">
-            <input type="checkbox" checked={done[i] ?? false} onChange={(e) => setDone((d) => d.map((x, k) => (k === i ? e.target.checked : x)))} />
-            <span className={cn(done[i] && "line-through opacity-60")}>{it.text}</span>
-          </label>
-        ))}
-      </div>
-    );
-  }
-  if (panel.type === "choices") {
-    return (
-      <div className="mt-1.5 flex flex-wrap gap-1.5" data-aios-panel="choices">
-        {panel.options.map((o) => <button key={o.label} className="os-btn !py-0.5 text-[11px]" aria-label={o.label} onClick={() => void runAiosAgent(o.reply)}>{o.label}</button>)}
-      </div>
-    );
-  }
+function PinToDesk({ panel, caption }: { panel: Panel; caption: string }) {
+  const pinned = useDeskPins((s) => s.pins.some((p) => JSON.stringify(p.panel) === JSON.stringify(panel)));
   return (
-    <form className="mt-1.5 space-y-1" data-aios-panel="form" onSubmit={(e) => { e.preventDefault(); void runAiosAgent(`${panel.submit}: ${panel.fields.map((f) => `${f.label} = ${values[f.name] ?? ""}`).join("; ")}`); }}>
-      {panel.fields.map((f) => (
-        <label key={f.name} className="block text-[11px]">
-          {f.label}
-          <input className="os-input mt-0.5 !py-0.5 text-[11.5px]" type={f.kind} value={values[f.name] ?? ""} onChange={(e) => setValues((v) => ({ ...v, [f.name]: e.target.value }))} />
-        </label>
-      ))}
-      <button type="submit" className="os-btn !py-0.5 text-[11px]" aria-label={panel.submit}>{panel.submit}</button>
-    </form>
+    <button
+      className="os-btn mt-1 flex items-center gap-1 !py-0.5 text-[10.5px]"
+      disabled={pinned}
+      aria-pressed={pinned}
+      onClick={() => { useDeskPins.getState().pin(panel, caption); bus.emit("notify", { title: "Pinned to the Desk", kind: "success" }); }}
+    >
+      <Icon name="pin" size={10} /> {pinned ? "On the Desk" : "Pin to Desk"}
+    </button>
   );
 }
 

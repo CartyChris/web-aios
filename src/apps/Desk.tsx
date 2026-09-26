@@ -13,6 +13,8 @@ import { buildTimeline, queryTimeline, type TimelineEntry } from "@/lib/timeline
 import { useActivity } from "@/kernel/activity";
 import { useFocus } from "./Focus";
 import { Icon } from "@/shell/icons";
+import { PanelView } from "@/shell/PanelView";
+import { useDeskPins } from "@/kernel/deskpins";
 
 /* Desk: Claude Opus 5.5 at the front of the OS. It reads what is on this
    device (jobs, tasks, files, focus, notifications), tells you what needs you
@@ -87,6 +89,31 @@ function TimelineSearch() {
   );
 }
 
+/** Panels pinned from AIOS Chat ("Pin to Desk"), rendered by the same
+ *  PanelView, so a chart or checklist the agent made stays at hand. */
+function PinnedPanels() {
+  const pins = useDeskPins((s) => s.pins);
+  if (!pins.length) return null;
+  return (
+    <div className="mt-4" data-desk-pins>
+      <div className="os-label mb-1">Pinned from AIOS Chat</div>
+      <div className="space-y-2">
+        {pins.map((p) => (
+          <div key={p.id} className="os-card !p-2.5" data-desk-pin={p.id}>
+            <div className="flex items-start gap-2">
+              <div className="min-w-0 flex-1 text-[11.5px] text-[var(--muted)]">{p.caption}</div>
+              <button className="os-btn shrink-0 !px-1.5 !py-0 text-[10px]" onClick={() => useDeskPins.getState().unpin(p.id)} aria-label={`Unpin ${p.caption || "this panel"} from the Desk`}>
+                <Icon name="close" size={10} />
+              </button>
+            </div>
+            <PanelView panel={p.panel} />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 const TONE = ["var(--muted)", "var(--accent)", "var(--warn)", "var(--danger)"];
 
 export default function Desk({}: AppProps) {
@@ -138,6 +165,8 @@ export default function Desk({}: AppProps) {
           </div>
         ))}
       </div>
+
+      <PinnedPanels />
 
       <TimelineSearch />
 

@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import type { AppProps } from "@/kernel/types";
 import { listSnapshots, loadSnapshot, takeSnapshot, restoreSnapshot, restoreFile, renameSnapshot, setPinned, currentData, type SnapshotInfo, type SnapshotData } from "@/kernel/rewind";
 import { useVFS } from "@/kernel/vfs";
-import { diffLines, sideBySide, collapse, rowIsSame, type SideRow } from "@/lib/textdiff";
+import { DiffTable } from "@/shell/DiffTable";
 import { diffFiles, diffKeys, formatBytes, type FileDiff } from "@/lib/rewind";
 import { relTime } from "@/lib/format";
 import { Empty, Spinner } from "./_ui";
@@ -199,40 +199,5 @@ function FileRows({ title, paths, notes, action, danger, busy, onAction, compare
    do. Unchanged runs collapse, keeping three lines of context either side. */
 function FileCompare({ path, then }: { path: string; then: string }) {
   const now = useVFS((s) => s.nodes[path]?.content ?? "");
-  const TOO_BIG = 400_000;
-  const result = useMemo(() => (now.length + then.length > TOO_BIG ? null : diffLines(now, then)), [now, then]);
-  if (!result) {
-    return <p className="mb-2 text-[11px] text-[var(--muted)]">This file is too large to compare here ({Math.round((now.length + then.length) / 1024)} KB).</p>;
-  }
-  const items = collapse(sideBySide(result.ops), rowIsSame, 3);
-  const cell = (c: SideRow["left"], side: "left" | "right") => (
-    <div
-      className={cn("flex min-w-0 font-mono text-[11px] leading-[1.45]", c?.kind === "del" && "bg-[var(--danger)]/14", c?.kind === "add" && "bg-[var(--ok)]/14")}
-      data-side={side} data-kind={c?.kind ?? "empty"}
-    >
-      <span className="w-9 shrink-0 select-none pr-1.5 text-right text-[var(--muted)]">{c?.n ?? ""}</span>
-      <span className="min-w-0 flex-1 whitespace-pre-wrap break-all">{c?.text ?? ""}</span>
-    </div>
-  );
-  return (
-    <div className="mb-3 overflow-hidden rounded border border-[var(--border)]" data-rewind-compare={path}>
-      <div className="grid grid-cols-2 border-b border-[var(--border)] text-[10.5px] text-[var(--muted)]">
-        <div className="px-2 py-1">Now</div>
-        <div className="border-l border-[var(--border)] px-2 py-1">In the snapshot</div>
-      </div>
-      {result.truncated && <p className="px-2 py-1 text-[10.5px] text-[var(--warn)]">These versions are too different to line up, so every line is shown as changed.</p>}
-      {result.added + result.removed === 0 ? (
-        <p className="px-2 py-1.5 text-[11px] text-[var(--muted)]">The text is identical; only the file&apos;s metadata differs.</p>
-      ) : items.map((it, i) =>
-        it.kind === "skip" ? (
-          <div key={`s${i}`} className="bg-[var(--bg2)] px-2 py-0.5 text-center text-[10px] text-[var(--muted)]">{it.count} unchanged line{it.count === 1 ? "" : "s"}</div>
-        ) : (
-          <div key={i} className="grid grid-cols-2">
-            {cell(it.row.left, "left")}
-            <div className="border-l border-[var(--border)]">{cell(it.row.right, "right")}</div>
-          </div>
-        ),
-      )}
-    </div>
-  );
+  return <DiffTable className="mb-3" before={now} after={then} leftLabel="Now" rightLabel="In the snapshot" identical="The text is identical; only the file's metadata differs." data-rewind-compare={path} />;
 }
