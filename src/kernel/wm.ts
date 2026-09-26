@@ -3,7 +3,7 @@
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 import { resolveOpen } from "@/lib/window-open";
-import { tile } from "@/lib/zones";
+import { tile, zoneRect } from "@/lib/zones";
 import type { Notification, WindowInstance, WindowState } from "./types";
 
 /** Where a window lands when dropped against an edge or driven by a keybinding. */
@@ -101,30 +101,16 @@ function cascadeOffset(count: number) {
   return { dx: ring * step, dy: ring * step };
 }
 
+/** Where a window goes when it is snapped to `zone`.
+ *
+ *  One geometry for the whole OS: this delegates to zoneRect in
+ *  src/lib/zones.ts, the same function drag-to-snap and the layout engine use.
+ *  It used to be a second hand-written table here that halved with
+ *  Math.floor while zoneRect used Math.round, so on an odd-width screen a half
+ *  snapped by dragging and a half snapped from the keyboard or a menu landed a
+ *  pixel apart. Now there is one tested implementation. */
 export function snapGeometry(zone: SnapZone) {
-  const v = viewport();
-  const availH = v.h - v.top - v.bottom;
-  const halfW = Math.floor(v.w / 2);
-  const halfH = Math.floor(availH / 2);
-  const T = v.top;
-  const map: Record<SnapZone, { x: number; y: number; w: number; h: number }> = {
-    left: { x: 0, y: T, w: halfW, h: availH },
-    right: { x: halfW, y: T, w: v.w - halfW, h: availH },
-    top: { x: 0, y: T, w: v.w, h: halfH },
-    bottom: { x: 0, y: T + halfH, w: v.w, h: availH - halfH },
-    tl: { x: 0, y: T, w: halfW, h: halfH },
-    tr: { x: halfW, y: T, w: v.w - halfW, h: halfH },
-    bl: { x: 0, y: T + halfH, w: halfW, h: availH - halfH },
-    br: { x: halfW, y: T + halfH, w: v.w - halfW, h: availH - halfH },
-    center: {
-      x: Math.floor(v.w * 0.15),
-      y: T + Math.floor(availH * 0.08),
-      w: Math.floor(v.w * 0.7),
-      h: Math.floor(availH * 0.84),
-    },
-    max: { x: 0, y: T, w: v.w, h: availH },
-  };
-  return map[zone];
+  return zoneRect(zone, workArea());
 }
 
 export const useWM = create<WMState>()(

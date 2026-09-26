@@ -115,6 +115,7 @@
     "src/lib/mcp-apps.ts",
     "src/lib/harness/frozen-eval.ts",
     "src/lib/timeline.ts",
-    "src/lib/media-embed.ts"
+    "src/lib/media-embed.ts",
+    "src/lib/textdiff.ts"
   ]
 }

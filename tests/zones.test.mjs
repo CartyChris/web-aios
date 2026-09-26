@@ -257,3 +257,34 @@ test("the four quadrants tile the area exactly", () => {
 test("max is the whole work area", () => {
   assert.deepEqual(zoneRect("max", ODD), { ...ODD });
 });
+
+/* ── one geometry for the whole OS ───────────────────────────────────────── */
+
+test("center is a centred window inside the area, not a half", () => {
+  const r = zoneRect("center", ODD);
+  assert.ok(r.x > ODD.x && r.y > ODD.y, "inset from the edges");
+  assert.ok(r.x + r.w < ODD.x + ODD.w && r.y + r.h < ODD.y + ODD.h, "and inside them");
+  // Horizontally centred to within the floor() of the inset.
+  const left = r.x - ODD.x, right = ODD.x + ODD.w - (r.x + r.w);
+  assert.ok(Math.abs(left - right) <= 1, `left ${left} vs right ${right}`);
+  assert.ok(r.w > ODD.w / 2, "bigger than a half, or it is just a small window");
+});
+
+test("zoneAt never returns center — it is reached from keys and menus, not a drag", () => {
+  for (let x = 0; x <= AREA.w; x += 37) {
+    for (let y = AREA.y; y <= AREA.y + AREA.h; y += 41) {
+      const hit = zoneAt(x, y, AREA);
+      assert.notEqual(hit?.zone, "center");
+    }
+  }
+});
+
+test("on an odd-width screen a snapped half and a dragged half are the same rect", () => {
+  // wm.snapGeometry used to halve with floor and zoneRect with round, so these
+  // two paths put a window a pixel apart. snapGeometry now delegates here; this
+  // pins the rect both paths receive.
+  const area = { x: 0, y: 40, w: 1001, h: 683 };
+  const viaZone = zoneAt(2, 300, area).rect;
+  assert.deepEqual(viaZone, zoneRect("left", area));
+  assert.equal(zoneRect("left", area).w + zoneRect("right", area).w, 1001);
+});

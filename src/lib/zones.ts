@@ -206,7 +206,7 @@ function cascade(area: WorkArea, count: number, gap: number): Rect[] {
 
 /* ── drag-to-zone ────────────────────────────────────────────────────────── */
 
-export type ZoneId = "left" | "right" | "top" | "bottom" | "tl" | "tr" | "bl" | "br" | "max";
+export type ZoneId = "left" | "right" | "top" | "bottom" | "tl" | "tr" | "bl" | "br" | "center" | "max";
 
 export interface ZoneHit {
   zone: ZoneId;
@@ -255,6 +255,15 @@ export function zoneRect(zone: ZoneId, area: WorkArea): Rect {
     case "tr": return { x: mx, y: area.y, w: rightW, h: my - area.y };
     case "bl": return { x: area.x, y: my, w: mx - area.x, h: bottomH };
     case "br": return { x: mx, y: my, w: rightW, h: bottomH };
+    // A comfortable centred window, not a half: 70% by 84%, set a little high
+    // so the titlebar is where the eye already is. zoneAt never returns it —
+    // it is reached from the keyboard and menus, not by dragging to an edge.
+    case "center": return {
+      x: area.x + Math.floor(area.w * 0.15),
+      y: area.y + Math.floor(area.h * 0.08),
+      w: Math.floor(area.w * 0.7),
+      h: Math.floor(area.h * 0.84),
+    };
     case "max": default: return { ...area };
   }
 }
