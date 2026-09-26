@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { APPS } from "@/kernel/registry";
 import { useWM } from "@/kernel/wm";
+import { bus } from "@/kernel/bus";
 import { useSettings } from "@/kernel/settings";
 import { useVFS } from "@/kernel/vfs";
 import { WALLPAPERS } from "@/kernel/themes";
@@ -105,6 +106,7 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
         icon: "save",
         run: () => useScenes.getState().save(`Scene ${new Date().toLocaleString()}`),
       },
+      { id: "sys.shortcuts", label: "Show keyboard shortcuts", hint: "? anywhere, or the cheat-sheet binding", group: "System", icon: "keyboard", run: () => bus.emit("shortcuts:open") },
       { id: "wm.tile", label: "Tile all windows", group: "Window", run: () => wm.tileAll() },
       { id: "wm.cascade", label: "Cascade all windows", group: "Window", run: () => wm.cascadeAll() },
       { id: "wm.minAll", label: "Show desktop (minimize all)", group: "Window", run: () => wm.minimizeAll() },

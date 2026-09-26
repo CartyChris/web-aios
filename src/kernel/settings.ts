@@ -161,6 +161,7 @@ export const DEFAULT_KEYBINDS: Record<string, string> = {
   "workspace.prev": "mod+alt+up",
   "shell.settings": "mod+,",
   "shell.showDesktop": "mod+shift+d",
+  "shell.shortcuts": "mod+/",
 };
 
 const DEFAULTS: Settings = {

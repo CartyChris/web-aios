@@ -33,6 +33,7 @@ import { installActivityRecorder } from "@/kernel/activity";
 import { receiveHandoff } from "@/kernel/scenes";
 import { installRewind } from "@/kernel/rewind";
 import { installWebMcp } from "./webmcp";
+import { ShortcutSheet } from "./ShortcutSheet";
 
 export function Desktop() {
   const hydrated = useHydrated();
@@ -41,6 +42,7 @@ export function Desktop() {
   const settings = useSettings();
   const [launcher, setLauncher] = useState(false);
   const [palette, setPalette] = useState(false);
+  const [sheet, setSheet] = useState(false);
   // One document-level listener owns every right-click in the OS.
   useGlobalContextMenu();
   const funMode = settings.funMode;
@@ -129,7 +131,12 @@ export function Desktop() {
       // that is the whole point of a global command surface.
       if (matches(e, kb["palette.open"])) { e.preventDefault(); setPalette((v) => !v); setLauncher(false); return; }
       if (matches(e, kb["launcher.open"])) { e.preventDefault(); setLauncher((v) => !v); setPalette(false); return; }
+      if (kb["shell.shortcuts"] && matches(e, kb["shell.shortcuts"])) { e.preventDefault(); setSheet((v) => !v); return; }
       if (typing) return;
+      // "?" is the web's convention for "show the shortcuts" (GitHub, Gmail).
+      // Only outside text fields, and only when no window has claimed it:
+      // Settings opens its own copy on "?".
+      if (e.key === "?" && !e.metaKey && !e.ctrlKey && !e.altKey && !e.defaultPrevented) { e.preventDefault(); setSheet(true); return; }
 
       const act: Array<[string, () => void]> = [
         ["window.close", () => focused && wm.close(focused)],
@@ -167,7 +174,7 @@ export function Desktop() {
         const n = Number(e.key);
         if (n <= wm.workspaces) { e.preventDefault(); wm.setWorkspace(n); }
       }
-      if (e.key === "Escape") { setLauncher(false); setPalette(false); }
+      if (e.key === "Escape") { setLauncher(false); setPalette(false); setSheet(false); }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -213,7 +220,8 @@ export function Desktop() {
       const n = (p ?? {}) as { title?: string; body?: string; kind?: "info" | "success" | "warn" | "error"; appId?: string; target?: { appId: string; args?: Record<string, unknown>; windowId?: string }; jobId?: string };
       if (n.title) wm.notify({ title: n.title, body: n.body, kind: n.kind ?? "info", appId: n.appId, target: n.target, jobId: n.jobId });
     });
-    return () => { offOpen(); offNotify(); };
+    const offSheet = bus.on("shortcuts:open", () => setSheet(true));
+    return () => { offOpen(); offNotify(); offSheet(); };
   }, [wm]);
 
   const visible = useMemo(
@@ -258,6 +266,7 @@ export function Desktop() {
       <Dock onLauncher={() => setLauncher((v) => !v)} />
       {launcher && <Launcher onClose={() => setLauncher(false)} />}
       {palette && <CommandPalette onClose={() => setPalette(false)} />}
+      {sheet && <ShortcutSheet global onClose={() => setSheet(false)} />}
 
       <ContextMenuHost />
       <LiveToasts />

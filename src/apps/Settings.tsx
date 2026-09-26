@@ -15,7 +15,8 @@ import { bytes, download } from "@/lib/format";
 import { Tabs, Slider, Field, ErrorNote, Spinner } from "./_ui";
 import { cn } from "@/lib/cn";
 import { Icon } from "@/shell/icons";
-import { chordKeys, findConflicts, actionLabel, searchSettings, type SettingEntry } from "@/lib/keyhelp";
+import { findConflicts, actionLabel, searchSettings, type SettingEntry } from "@/lib/keyhelp";
+import { ShortcutSheet } from "@/shell/ShortcutSheet";
 
 const TAB_LABELS: Record<string, string> = {
   providers: "Providers & Keys", ai: "AI", keys: "Keyboard", screen: "Phone & Screen", privacy: "Privacy", storage: "Storage", about: "About",
@@ -49,31 +50,7 @@ const SETTINGS_INDEX: SettingEntry[] = [
   E("about", "Version and runtime", "about version pwa runtime build"),
 ];
 
-/** Shortcuts that are fixed rather than user-editable, so the cheat sheet is complete. */
-const FIXED_SHORTCUTS: Array<{ where: string; keys: string; what: string }> = [
-  { where: "Anywhere", keys: "shift+f10", what: "Open the context menu for the focused item (or the Menu key)" },
-  { where: "Menus", keys: "up / down / home / end", what: "Move through a context menu; type a letter to jump" },
-  { where: "Menus", keys: "escape", what: "Close a menu or dialog" },
-  { where: "Terminal", keys: "up / down", what: "Walk command history (kept across reloads)" },
-  { where: "Terminal", keys: "tab", what: "Complete a command or a file path" },
-  { where: "Terminal", keys: "ctrl+l", what: "Clear the screen" },
-  { where: "Calculator", keys: "enter / =", what: "Evaluate and add to history" },
-  { where: "Calculator", keys: "escape", what: "Clear the expression" },
-  { where: "Tasks", keys: "enter", what: "Quick add: \"tomorrow 3pm call Sam !high\"" },
-  { where: "Settings", keys: "?", what: "Open this cheat sheet" },
-];
 
-const isMacLike = () => typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
-
-function Keys({ chord, mac }: { chord: string; mac: boolean }) {
-  // Fixed shortcuts are written "up / down"; editable ones are "mod+shift+t".
-  if (chord.includes(" / ")) return <span className="flex flex-wrap gap-0.5">{chord.split(" / ").map((c, i) => <Keys key={i} chord={c} mac={mac} />)}</span>;
-  return (
-    <span className="flex gap-0.5">
-      {chordKeys(chord, mac).map((k, i) => <kbd key={i} className="rounded border border-[var(--border)] bg-white/8 px-1 font-[family-name:var(--font-mono)] text-[10.5px]">{k}</kbd>)}
-    </span>
-  );
-}
 
 /** Settings — providers and keys, AI tuning, keybindings, privacy and storage. */
 export default function Settings({}: AppProps) {
@@ -86,7 +63,6 @@ export default function Settings({}: AppProps) {
   const [capturing, setCapturing] = useState<string | null>(null);
   const [find, setFind] = useState("");
   const [sheet, setSheet] = useState(false);
-  const [mac] = useState(isMacLike);
   const found = searchSettings(SETTINGS_INDEX, find);
   const conflicts = findConflicts(s.keybinds);
   const conflicted = new Set(conflicts.flatMap((c) => c.actions));
@@ -474,37 +450,7 @@ export default function Settings({}: AppProps) {
           </div>
         )}
       </div>
-      {sheet && (
-        <div className="absolute inset-0 z-20 flex flex-col overflow-hidden" style={{ background: "color-mix(in srgb, var(--panel-solid) 96%, transparent)" }} role="dialog" aria-modal="true" aria-label="Keyboard shortcuts">
-          <div className="flex shrink-0 items-center gap-2 border-b border-[var(--border)] px-3 py-2">
-            <Icon name="keyboard" size={14} />
-            <span className="flex-1 text-[13px] font-medium">Keyboard shortcuts</span>
-            <span className="hidden text-[10.5px] text-[var(--muted)] sm:inline">{mac ? "Mac keys" : "Windows / Linux keys"}</span>
-            <button className="os-btn !px-2 !py-0.5 text-[11px]" aria-label="Close cheat sheet" autoFocus onClick={() => setSheet(false)}><Icon name="close" size={11} /></button>
-          </div>
-          <div className="min-h-0 flex-1 overflow-y-auto p-3" data-testid="shortcut-sheet">
-            <div className="os-label mb-1">Shell (editable on the Keyboard tab)</div>
-            <div className="mb-3 grid gap-x-4 gap-y-1" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))" }}>
-              {Object.entries(s.keybinds).map(([action, chord]) => (
-                <div key={action} className="flex items-center gap-2 text-[12px]">
-                  <span className="min-w-0 flex-1 truncate">{actionLabel(action)}</span>
-                  {conflicted.has(action) && <span className="text-[10px]" style={{ color: "var(--danger)" }}>conflict</span>}
-                  <Keys chord={chord} mac={mac} />
-                </div>
-              ))}
-            </div>
-            <div className="os-label mb-1">In apps</div>
-            <div className="grid gap-x-4 gap-y-1" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))" }}>
-              {FIXED_SHORTCUTS.map((f) => (
-                <div key={f.where + f.keys} className="flex items-center gap-2 text-[12px]">
-                  <span className="min-w-0 flex-1"><span className="text-[var(--muted)]">{f.where}:</span> {f.what}</span>
-                  <Keys chord={f.keys} mac={mac} />
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
+      {sheet && <ShortcutSheet onClose={() => setSheet(false)} />}
     </div>
   );
 }

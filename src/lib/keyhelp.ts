@@ -74,3 +74,48 @@ export function searchSettings(index: SettingEntry[], query: string): SettingEnt
   }
   return scored.sort((a, b) => b.score - a.score || a.e.label.localeCompare(b.e.label)).map((x) => x.e);
 }
+
+/* ── the cheat sheet ─────────────────────────────────────────────────────── */
+
+export interface FixedShortcut { where: string; keys: string; what: string }
+
+/** Shortcuts that are fixed rather than user-editable, so the cheat sheet is complete. */
+export const FIXED_SHORTCUTS: FixedShortcut[] = [
+  { where: "Anywhere", keys: "?", what: "Show this cheat sheet (when you are not typing)" },
+  { where: "Anywhere", keys: "mod+1", what: "Go to workspace 1 (1 to 9)" },
+  { where: "Anywhere", keys: "mod+alt+1", what: "Apply tiling layout 1 (1 to 7)" },
+  { where: "Anywhere", keys: "shift+f10", what: "Open the context menu for the focused item (or the Menu key)" },
+  { where: "Menus", keys: "up / down / home / end", what: "Move through a context menu; type a letter to jump" },
+  { where: "Menus", keys: "escape", what: "Close a menu or dialog" },
+  { where: "Terminal", keys: "up / down", what: "Walk command history (kept across reloads)" },
+  { where: "Terminal", keys: "tab", what: "Complete a command or a file path" },
+  { where: "Terminal", keys: "ctrl+l", what: "Clear the screen" },
+  { where: "Calculator", keys: "enter / =", what: "Evaluate and add to history" },
+  { where: "Calculator", keys: "escape", what: "Clear the expression" },
+  { where: "Tasks", keys: "enter", what: "Quick add: \"tomorrow 3pm call Sam !high\"" },
+  { where: "Settings", keys: "?", what: "Open this cheat sheet" },
+];
+
+export interface SheetRow { id: string; label: string; chord: string; conflict: boolean; editable: boolean }
+
+/**
+ * Every shortcut in two sections, filtered by a search. Editable bindings come
+ * from settings (so the sheet can never disagree with what the keyboard does)
+ * and a binding shared with another action is flagged, because one of the two
+ * silently never runs. A query matches the label, the place, or the keys as
+ * displayed ("cmd shift t" finds mod+shift+t on a Mac).
+ */
+export function sheetRows(binds: Record<string, string>, fixed: FixedShortcut[], query: string, isMac: boolean): { shell: SheetRow[]; apps: SheetRow[] } {
+  const conflicted = new Set(findConflicts(binds).flatMap((c) => c.actions));
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+  const hit = (hay: string) => words.every((w) => hay.includes(w));
+  const keysText = (chord: string) => chord.split(" / ").map((c) => chordKeys(c, isMac).join(" ")).join(" ").toLowerCase();
+  const shell = Object.entries(binds)
+    .filter(([, chord]) => !!chord)
+    .map(([action, chord]) => ({ id: action, label: actionLabel(action), chord, conflict: conflicted.has(action), editable: true }))
+    .filter((r) => hit(`${r.label.toLowerCase()} ${r.id.toLowerCase()} ${keysText(r.chord)}`));
+  const apps = fixed
+    .map((f) => ({ id: `${f.where}:${f.keys}`, label: `${f.where}: ${f.what}`, chord: f.keys, conflict: false, editable: false }))
+    .filter((r) => hit(`${r.label.toLowerCase()} ${keysText(r.chord)}`));
+  return { shell, apps };
+}
