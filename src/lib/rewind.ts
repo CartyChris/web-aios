@@ -117,3 +117,53 @@ export function formatBytes(n: number): string {
   if (a < 1024 * 1024) return `${sign}${(a / 1024).toFixed(1)} KB`;
   return `${sign}${(a / 1048576).toFixed(1)} MB`;
 }
+
+/* ── restoring one file ──────────────────────────────────────────────────── */
+
+export type RestoreAction = "created" | "replaced" | "removed" | "unchanged" | "missing";
+
+/** The ancestor paths of `path`, outermost first: "/a/b/c.txt" -> ["/a", "/a/b"]. */
+export function ancestors(path: string): string[] {
+  const parts = path.split("/").filter(Boolean);
+  const out: string[] = [];
+  for (let i = 1; i < parts.length; i++) out.push(`/${parts.slice(0, i).join("/")}`);
+  return out;
+}
+
+/**
+ * Put ONE path back the way it was in a snapshot, leaving everything else as
+ * it is now.
+ *
+ * Three real cases, and the one that is easy to get wrong is the first: a file
+ * that comes back into a folder that has since been deleted. Restoring only the
+ * file node would leave it under a parent the file system has no node for, so
+ * Files would not show it. Any ancestor folder missing now but present in the
+ * snapshot comes back with it. Nothing outside `path` and those ancestors is
+ * touched, which the tests check against every other key.
+ *
+ * - created:   in the snapshot, not now
+ * - replaced:  in both, and different
+ * - removed:   not in the snapshot, but exists now (restoring means deleting it)
+ * - unchanged: identical in both, so there is nothing to do
+ * - missing:   in neither
+ */
+export function restoreOne<N extends FileEntry>(
+  then: Record<string, N>,
+  now: Record<string, N>,
+  path: string,
+): { next: Record<string, N>; action: RestoreAction } {
+  const was = then[path];
+  const is = now[path];
+  if (!was && !is) return { next: now, action: "missing" };
+  if (!was) {
+    const next = { ...now };
+    delete next[path];
+    return { next, action: "removed" };
+  }
+  if (is && stableJson(is) === stableJson(was)) return { next: now, action: "unchanged" };
+  const next = { ...now, [path]: was };
+  for (const a of ancestors(path)) {
+    if (!next[a] && then[a]) next[a] = then[a];
+  }
+  return { next, action: is ? "replaced" : "created" };
+}

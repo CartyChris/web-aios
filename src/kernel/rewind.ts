@@ -11,7 +11,7 @@ import { useSettings } from "./settings";
 import { useScenes } from "./scenes";
 import { useCustomThemes } from "./customthemes";
 import { bus } from "./bus";
-import { fingerprint, prune, type SnapshotMeta } from "@/lib/rewind";
+import { fingerprint, prune, restoreOne, type SnapshotMeta, type RestoreAction } from "@/lib/rewind";
 
 export interface SnapshotInfo extends SnapshotMeta {
   fp: string;
@@ -112,6 +112,38 @@ export async function restoreSnapshot(id: string): Promise<string | null> {
   lastFp = fingerprint(currentData() as unknown as Record<string, unknown>);
   bus.emit("notify", { title: "Rewound", body: "Your files, settings, scenes and themes are back to that snapshot. Undo is in Rewind.", kind: "success", target: { appId: "rewind" } });
   return before?.id ?? null;
+}
+
+/** Name a snapshot. Naming pins it: a snapshot someone bothered to name is one
+ *  they care about, and an unpinned one can be pruned out from under them. */
+export async function renameSnapshot(id: string, label: string): Promise<void> {
+  const name = label.trim().slice(0, 60);
+  if (!name) return;
+  const list = await listSnapshots();
+  const s = list.find((x) => x.id === id);
+  if (s) await tx(["meta"], "readwrite", (t) => { t.objectStore("meta").put({ ...s, label: name, pinned: true }); });
+}
+
+/**
+ * Put ONE file back as it was in a snapshot, and leave everything else alone.
+ *
+ * The decision is made by restoreOne in lib/rewind.ts (pure, tested). Like a
+ * full restore, the state being replaced is snapshotted and pinned first, so a
+ * single-file restore is undoable with the same Undo button. Nothing is written
+ * when there is nothing to do.
+ */
+export async function restoreFile(id: string, path: string): Promise<{ action: RestoreAction; undoId: string | null }> {
+  const data = await loadSnapshot(id);
+  if (!data) return { action: "missing", undoId: null };
+  const r = restoreOne(data.vfs, useVFS.getState().nodes, path);
+  if (r.action === "unchanged" || r.action === "missing") return { action: r.action, undoId: null };
+  const name = path.split("/").pop() || path;
+  const before = await takeSnapshot(`Before restoring ${name}`, { force: true, pinned: true });
+  useVFS.setState({ nodes: r.next });
+  lastFp = fingerprint(currentData() as unknown as Record<string, unknown>);
+  const verb = r.action === "removed" ? "Removed" : "Restored";
+  bus.emit("notify", { title: `${verb} ${name}`, body: "Only this file changed. Undo is in Rewind.", kind: "success", target: { appId: "rewind" } });
+  return { action: r.action, undoId: before?.id ?? null };
 }
 
 let installed = false;

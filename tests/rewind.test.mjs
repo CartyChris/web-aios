@@ -2,7 +2,7 @@
  *  retention that thins old snapshots without losing pinned ones. */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { fingerprint, diffFiles, diffKeys, prune, formatBytes } from "../.test-build/rewind.js";
+import { fingerprint, diffFiles, diffKeys, prune, formatBytes, restoreOne, ancestors } from "../.test-build/rewind.js";
 
 test("fingerprint ignores key order and functions, and sees real changes", () => {
   assert.equal(fingerprint({ a: 1, b: { c: 2, d: 3 } }), fingerprint({ b: { d: 3, c: 2 }, a: 1 }));
@@ -51,4 +51,78 @@ test("prune keeps pinned and recent, thins by hour then day, and caps", () => {
 test("formatBytes", () => {
   assert.equal(formatBytes(512), "512 B");
   assert.equal(formatBytes(-2048), "-2.0 KB");
+});
+
+/* ── restoring one file ──────────────────────────────────────────────────── */
+
+const node = (path, content, extra = {}) => ({ path, kind: "file", content, size: content.length, updatedAt: 1, ...extra });
+const dir = (path) => ({ path, kind: "dir", content: "", size: 0, updatedAt: 1 });
+
+test("ancestors lists every parent folder, outermost first", () => {
+  assert.deepEqual(ancestors("/a/b/c.txt"), ["/a", "/a/b"]);
+  assert.deepEqual(ancestors("/c.txt"), []);
+});
+
+test("a changed file is replaced and nothing else moves", () => {
+  const then = { "/a.txt": node("/a.txt", "old"), "/b.txt": node("/b.txt", "b then") };
+  const now = { "/a.txt": node("/a.txt", "new"), "/b.txt": node("/b.txt", "b now"), "/c.txt": node("/c.txt", "c") };
+  const r = restoreOne(then, now, "/a.txt");
+  assert.equal(r.action, "replaced");
+  assert.equal(r.next["/a.txt"].content, "old");
+  // Every other key is exactly the current one: restoring a file is not a
+  // restore of the snapshot.
+  assert.equal(r.next["/b.txt"], now["/b.txt"]);
+  assert.equal(r.next["/c.txt"], now["/c.txt"]);
+  assert.deepEqual(Object.keys(r.next).sort(), Object.keys(now).sort());
+});
+
+test("a deleted file comes back WITH the folders it lived in", () => {
+  // Restoring only the file node would leave it under a parent the file
+  // system no longer has, and Files would not show it.
+  const then = { "/docs": dir("/docs"), "/docs/notes": dir("/docs/notes"), "/docs/notes/x.md": node("/docs/notes/x.md", "hi") };
+  const now = { "/other.txt": node("/other.txt", "o") };
+  const r = restoreOne(then, now, "/docs/notes/x.md");
+  assert.equal(r.action, "created");
+  assert.ok(r.next["/docs"] && r.next["/docs/notes"], "the parents come back");
+  assert.equal(r.next["/docs/notes/x.md"].content, "hi");
+  assert.equal(r.next["/other.txt"], now["/other.txt"]);
+});
+
+test("a folder that still exists is not overwritten by the snapshot's copy", () => {
+  const then = { "/d": dir("/d"), "/d/f": node("/d/f", "then") };
+  const nowDir = { ...dir("/d"), starred: true };
+  const now = { "/d": nowDir };
+  const r = restoreOne(then, now, "/d/f");
+  assert.equal(r.next["/d"], nowDir, "the current folder, with its star, is kept");
+});
+
+test("a file that did not exist in the snapshot is removed", () => {
+  const r = restoreOne({ "/a": node("/a", "a") }, { "/a": node("/a", "a"), "/new": node("/new", "n") }, "/new");
+  assert.equal(r.action, "removed");
+  assert.ok(!("/new" in r.next));
+  assert.ok("/a" in r.next);
+});
+
+test("an identical file is unchanged and returns the same object", () => {
+  const now = { "/a": node("/a", "same") };
+  const r = restoreOne({ "/a": node("/a", "same") }, now, "/a");
+  assert.equal(r.action, "unchanged");
+  assert.equal(r.next, now, "no new object, so no store update and no re-render");
+});
+
+test("a path in neither is reported missing", () => {
+  const now = { "/a": node("/a", "x") };
+  const r = restoreOne({}, now, "/nope");
+  assert.equal(r.action, "missing");
+  assert.equal(r.next, now);
+});
+
+test("restoreOne never mutates either input", () => {
+  const then = { "/a": node("/a", "then") };
+  const now = { "/a": node("/a", "now"), "/b": node("/b", "b") };
+  const thenCopy = JSON.stringify(then), nowCopy = JSON.stringify(now);
+  restoreOne(then, now, "/a");
+  restoreOne(then, now, "/b");
+  assert.equal(JSON.stringify(then), thenCopy);
+  assert.equal(JSON.stringify(now), nowCopy);
 });
