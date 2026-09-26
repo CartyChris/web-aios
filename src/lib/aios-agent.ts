@@ -29,6 +29,12 @@ export const AGENT_TOOLS: AgentToolSpec[] = [
   { name: "close_window", args: ["windowId"], desc: "Close a window.", sideEffect: true },
   { name: "list_files", args: ["dir?"], desc: "List files in the virtual file system (default: root).", sideEffect: false },
   { name: "read_file", args: ["path"], desc: "Read a file's text.", sideEffect: false },
+  {
+    name: "timeline",
+    args: ["query?"],
+    desc: "What happened on this device, by time. query is plain words: 'yesterday', '3 days ago', 'last 10 days', 'since monday', 'march 3', 'in march', 'last month', optionally with search words ('last week loop'). Returns dated entries, each with its source and the open_app call that leads back to it. Use it instead of guessing what the user did.",
+    sideEffect: false,
+  },
   { name: "write_file", args: ["path", "content"], desc: "Create or overwrite a text file.", sideEffect: true },
   { name: "create_app", args: ["name", "html"], desc: "Install a new app from one self-contained HTML document.", sideEffect: true },
   {

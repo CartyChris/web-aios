@@ -386,6 +386,7 @@ class DshRuntime {
         } },
       { name: "read_os", risk: "read", description: "Summary of the desktop: open windows, apps, files.", parameters: { type: "object", properties: {} }, run: os("read_os") },
       { name: "list_apps", risk: "read", description: "Every app id you can open.", parameters: { type: "object", properties: {} }, run: os("list_apps") },
+      { name: "timeline", risk: "read", description: "What happened on this device, by time: 'yesterday', '3 days ago', 'since monday', 'in march', optionally with search words. Dated entries, each with its source.", parameters: { type: "object", properties: { query: { type: "string" } } }, run: os("timeline") },
       { name: "open_app", risk: "read", description: "Open an app by id.", parameters: { type: "object", properties: { appId: { type: "string" } }, required: ["appId"] }, run: os("open_app") },
       { name: "close_window", risk: "destructive", description: "Close a window by id.", parameters: { type: "object", properties: { windowId: { type: "string" } }, required: ["windowId"] }, run: os("close_window") },
       { name: "set_theme", risk: "write", description: "Switch the desktop theme.", parameters: { type: "object", properties: { themeId: { type: "string" } }, required: ["themeId"] }, run: os("set_theme") },

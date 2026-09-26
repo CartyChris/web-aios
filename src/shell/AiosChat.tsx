@@ -5,6 +5,8 @@ import { create } from "zustand";
 import { bus } from "@/kernel/bus";
 import { useWM } from "@/kernel/wm";
 import { useVFS, aiMark } from "@/kernel/vfs";
+import { queryTimeline, timelineAnswer } from "@/lib/timeline";
+import { currentTimeline } from "@/apps/Desk";
 import { useSettings } from "@/kernel/settings";
 import { useUserApps } from "@/kernel/userapps";
 import { APPS, getApp } from "@/kernel/registry";
@@ -151,6 +153,13 @@ export async function execTool(tool: string, args: Record<string, unknown>): Pro
       if (!n) return { text: `No file at ${str(args.path)}.` };
       if (n.kind === "dir") return { text: `${n.path} is a folder; use list_files.` };
       return { text: clip(n.content, 6000) };
+    }
+    case "timeline": {
+      // Read-only, so it needs no approval: it reports what the OS already
+      // recorded, with a source and a way back to each entry.
+      const tz = new Date().getTimezoneOffset();
+      const r = queryTimeline(currentTimeline(), str(args.query) || "today", Date.now(), tz, 40);
+      return { text: timelineAnswer(r, tz) };
     }
     case "write_file": {
       const n = vfs.write(str(args.path), str(args.content), aiMark("AIOS Chat"));
