@@ -6,10 +6,8 @@ import { useHarness } from "@/kernel/harness";
 import { useTriggers, attemptFrom } from "@/kernel/triggers";
 import { useSettings } from "@/kernel/settings";
 import { useJobs } from "@/kernel/jobs";
-import { runPassed } from "./harness/passed";
 import { registerAiosModule } from "./aios-api";
 import { uid } from "./format";
-import { startRun } from "./harness-runtime";
 import { createDedupeLedger, decideFire, type DedupeLedger } from "./harness/triggers";
 import { DEFAULT_LOOP_CONFIG } from "./harness/config";
 import type { TriggerKind } from "./harness/types";
@@ -97,6 +95,10 @@ async function dispatch(kind: TriggerKind, signal: string, payload: unknown) {
     // started without them. It gets a live job that leads to the Harness.
     const jobId = useJobs.getState().start({ kind: "task", title: `Automation: ${spec.kind}${spec.match ? ` ${spec.match}` : ""}`, detail: decision.objective.slice(0, 120), target: { appId: "harness" } });
     try {
+      // Loaded on the first fire, not at boot: the runtime pulls in the whole
+      // harness (tools, loop, fixtures, trace, services), about a third of the
+      // shell's startup JavaScript, and most sessions never fire a trigger.
+      const [{ startRun }, { runPassed }] = await Promise.all([import("./harness-runtime"), import("./harness/passed")]);
       const result = await startRun({
         objective: decision.objective,
         dod,

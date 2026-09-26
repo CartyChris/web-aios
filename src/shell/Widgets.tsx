@@ -1,8 +1,6 @@
 "use client";
 
-import { NewsWidget } from "./widgets/NewsWidget";
-import { DataWidget } from "./widgets/DataWidget";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSettings, type WidgetInstance } from "@/kernel/settings";
 import { useWM } from "@/kernel/wm";
 import { useVFS } from "@/kernel/vfs";
@@ -12,6 +10,11 @@ import { Icon } from "./icons";
 import { cn } from "@/lib/cn";
 import { useCustomWidgets, widgetDocument } from "@/kernel/widgets";
 import { resolveTokens } from "@/kernel/settings";
+
+// Loaded only when one is on the desktop: the data widget carries the whole
+// service catalogue (lib/services.ts), which most desktops never need.
+const NewsWidget = lazy(() => import("./widgets/NewsWidget").then((m) => ({ default: m.NewsWidget })));
+const DataWidget = lazy(() => import("./widgets/DataWidget").then((m) => ({ default: m.DataWidget })));
 
 export const WIDGET_KINDS = [
   { id: "clock", name: "Clock", icon: "clock" },
@@ -113,8 +116,8 @@ function WidgetBody({ id, kind, customId, config }: { id: string; kind: string; 
   if (kind === "custom") return <CustomWidgetFrame id={customId} />;
   const onConfig = (c: Record<string, unknown>) => useSettings.getState().configureWidget(id, c);
   switch (kind) {
-    case "news": return <NewsWidget config={config} onConfig={onConfig} />;
-    case "data": return <DataWidget config={config} onConfig={onConfig} />;
+    case "news": return <Suspense fallback={null}><NewsWidget config={config} onConfig={onConfig} /></Suspense>;
+    case "data": return <Suspense fallback={null}><DataWidget config={config} onConfig={onConfig} /></Suspense>;
     case "clock": return <ClockWidget />;
     case "calendar": return <CalendarWidget />;
     case "system": return <SystemWidget />;

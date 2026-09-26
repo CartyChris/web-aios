@@ -16,7 +16,6 @@ import { useVFS } from "@/kernel/vfs";
 import { bus } from "@/kernel/bus";
 import { registerAiosModule } from "@/lib/aios-api";
 import { briefText } from "@/lib/desk";
-import { currentBrief, currentTimeline } from "@/apps/Desk";
 import { queryTimeline } from "@/lib/timeline";
 
 type ToolResult = { content: Array<{ type: "text"; text: string }> };
@@ -63,13 +62,15 @@ export const WEBMCP_TOOLS = [
     name: "aios_desk_brief",
     description: "What needs the user's attention right now, computed from their tasks, jobs, files and focus (the Desk brief).",
     inputSchema: { type: "object", properties: {} },
-    execute: async () => reply(briefText(currentBrief())),
+    // The Desk module is loaded on first use, not with the shell.
+    execute: async () => reply(briefText((await import("@/apps/Desk")).currentBrief())),
   },
   {
     name: "aios_timeline",
     description: "Search what the user did on this device by time and words, e.g. 'yesterday', 'tuesday notes', 'last week loop'. Every entry has a time and a source.",
     inputSchema: { type: "object", properties: { query: { type: "string" } }, required: ["query"] },
     execute: async (a: Record<string, unknown>) => {
+      const { currentTimeline } = await import("@/apps/Desk");
       const r = queryTimeline(currentTimeline(), String(a.query ?? ""), Date.now(), new Date().getTimezoneOffset(), 40);
       return reply([`${r.hits.length} entries from ${r.query.label}:`, ...r.hits.map((e) => `${new Date(e.at).toISOString()} [${e.source}] ${e.text}`)].join("\n"));
     },

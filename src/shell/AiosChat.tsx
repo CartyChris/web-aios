@@ -6,7 +6,6 @@ import { bus } from "@/kernel/bus";
 import { useWM } from "@/kernel/wm";
 import { useVFS, aiMark } from "@/kernel/vfs";
 import { queryTimeline, timelineAnswer } from "@/lib/timeline";
-import { currentTimeline } from "@/apps/Desk";
 import { useSettings } from "@/kernel/settings";
 import { useUserApps } from "@/kernel/userapps";
 import { APPS, getApp } from "@/kernel/registry";
@@ -160,6 +159,8 @@ export async function execTool(tool: string, args: Record<string, unknown>): Pro
       // Read-only, so it needs no approval: it reports what the OS already
       // recorded, with a source and a way back to each entry.
       const tz = new Date().getTimezoneOffset();
+      // The Desk module is loaded on first use, not with the shell.
+      const { currentTimeline } = await import("@/apps/Desk");
       const r = queryTimeline(currentTimeline(), str(args.query) || "today", Date.now(), tz, 40);
       return { text: timelineAnswer(r, tz) };
     }
