@@ -92,6 +92,10 @@ export interface Settings {
   phoneMode: "auto" | "desktop" | "phone";
   /** The one-time "turn your phone on its side" notice has been dismissed. */
   phoneTipSeen: boolean;
+  /** Apple status bar for the installed app: "translucent" runs the wallpaper
+   *  under the Dynamic Island; "solid" avoids the iOS 26 bottom-gap bug.
+   *  Read before first paint by the boot script in app/layout.tsx. */
+  statusBar: "translucent" | "solid";
 
   // ── AI ──────────────────────────────────────────────────────────────────
   ai: AISettings;
@@ -235,6 +239,7 @@ const DEFAULTS: Settings = {
   keybinds: { ...DEFAULT_KEYBINDS },
   phoneMode: "auto",
   phoneTipSeen: false,
+  statusBar: "translucent",
 
   ai: {
     provider: "openai",
@@ -441,6 +446,7 @@ export const useSettings = create<SettingsState>()(
           ai: { ...current.ai, ...(p.ai ?? {}) },
           keybinds: { ...DEFAULT_KEYBINDS, ...(p.keybinds ?? {}) },
           customVars: { ...(p.customVars ?? {}) },
+          statusBar: p.statusBar === "solid" ? "solid" : "translucent",
         };
       },
     },

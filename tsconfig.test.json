@@ -117,6 +117,7 @@
     "src/lib/timeline.ts",
     "src/lib/media-embed.ts",
     "src/lib/textdiff.ts",
-    "src/lib/panelchart.ts"
+    "src/lib/panelchart.ts",
+    "src/lib/viewport-fit.ts"
   ]
 }

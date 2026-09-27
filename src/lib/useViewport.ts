@@ -1,6 +1,7 @@
 "use client";
 
 import { useSyncExternalStore } from "react";
+import { appHeight } from "@/kernel/viewport";
 
 export interface Viewport {
   w: number;
@@ -36,7 +37,9 @@ function measure(): Viewport {
   // the two disagree about which axis is longer.
   const vv = window.visualViewport;
   const w = Math.round(vv?.width ?? window.innerWidth);
-  const h = Math.round(vv?.height ?? window.innerHeight);
+  // appHeight() is the visual height, stretched over the iOS 26 installed-app
+  // gap when that is being covered (kernel/viewport.ts).
+  const h = vv ? appHeight() : Math.round(window.innerHeight);
   return {
     w,
     h,

@@ -33,6 +33,7 @@ import { installActivityRecorder } from "@/kernel/activity";
 import { receiveHandoff } from "@/kernel/scenes";
 import { installRewind } from "@/kernel/rewind";
 import { installWebMcp } from "./webmcp";
+import { installViewportFit } from "@/kernel/viewport";
 import { ShortcutSheet } from "./ShortcutSheet";
 
 export function Desktop() {
@@ -63,6 +64,7 @@ export function Desktop() {
   // Installed as early as the shell mounts so automation, the console and the
   // harness all have the same way in. See lib/aios-api.ts for why this exists.
   useEffect(() => {
+    installViewportFit();
     installAiosApi();
     installTriggers();
     // The span ring is the OS's, not Observatory's. A trace lost by closing a
@@ -251,7 +253,7 @@ export function Desktop() {
 
   return (
     <div
-      className={cn("relative h-screen w-screen overflow-hidden", !settings.motion && "motion-off")}
+      className={cn("os-root overflow-hidden", !settings.motion && "motion-off")}
     >
       <Wallpaper />
       <WidgetLayer />

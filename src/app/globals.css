@@ -55,6 +55,27 @@
 
 * { box-sizing: border-box; min-width: 0; }
 
+/* The OS root. Fixed to the viewport rather than sized with 100vh: an
+   installed iOS 26 web app reports every "small" unit short by the status-bar
+   height (WebKit bug 301108), leaving a band at the bottom. In an installed
+   app we use the large viewport, and kernel/viewport.ts sets --os-fill-h to
+   the measured screen height when it sees that exact gap. A browser tab keeps
+   100dvh, because there the toolbars really do take space. */
+.os-root {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100dvh;
+}
+:root[data-display-mode="standalone"],
+:root[data-display-mode="standalone"] body {
+  height: 100lvh;
+}
+:root[data-display-mode="standalone"] .os-root {
+  height: var(--os-fill-h, 100lvh);
+}
+
 html, body {
   height: 100%;
   margin: 0;

@@ -17,6 +17,7 @@ import { cn } from "@/lib/cn";
 import { Icon } from "@/shell/icons";
 import { findConflicts, actionLabel, searchSettings, type SettingEntry } from "@/lib/keyhelp";
 import { ShortcutSheet } from "@/shell/ShortcutSheet";
+import { ScreenFit } from "@/shell/ScreenFit";
 
 const TAB_LABELS: Record<string, string> = {
   providers: "Providers & Keys", ai: "AI", keys: "Keyboard", screen: "Phone & Screen", privacy: "Privacy", storage: "Storage", about: "About",
@@ -41,6 +42,7 @@ const SETTINGS_INDEX: SettingEntry[] = [
   E("keys", "Reset all shortcuts", "default restore keybinds"),
   E("screen", "Phone layout", "mobile phone desktop auto layout screen"),
   E("screen", "Phone tips", "tips hints onboarding"),
+  E("screen", "Status bar and screen fit", "iphone pwa home screen bottom gap band black bar cut off notch dynamic island status bar"),
   E("privacy", "What leaves this browser", "network data privacy telemetry"),
   E("privacy", "App permissions", "permissions allow deny apps"),
   E("privacy", "Erase everything", "reset wipe delete clear data"),
@@ -331,6 +333,7 @@ export default function Settings({}: AppProps) {
                 ))}
               </div>
             </div>
+            <ScreenFit />
             <div className="os-card">
               <div className="mb-1.5 font-medium text-[13px]">Phone tips</div>
               <p className="mb-2 text-[12px] text-[var(--muted)]">Show the one-time &ldquo;turn your phone on its side&rdquo; notice again the next time the phone view opens.</p>

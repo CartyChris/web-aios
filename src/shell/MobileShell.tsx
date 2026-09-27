@@ -121,7 +121,7 @@ export function MobileShell() {
 
   return (
     <div
-      className={cn("relative h-[100dvh] w-screen overflow-hidden", !settings.motion && "motion-off")}
+      className={cn("os-root overflow-hidden", !settings.motion && "motion-off")}
       onTouchStart={onTouchStart}
       onTouchEnd={onTouchEnd}
     >

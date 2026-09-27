@@ -1,5 +1,6 @@
 "use client";
 
+import { appHeight } from "./viewport";
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 import { resolveOpen } from "@/lib/window-open";
@@ -80,7 +81,7 @@ export function workArea(): { x: number; y: number; w: number; h: number } {
 
 function viewport() {
   if (typeof window === "undefined") return { w: 1440, h: 900, top: 40, bottom: 76 };
-  return { w: window.innerWidth, h: window.innerHeight, top: 40, bottom: 76 };
+  return { w: window.innerWidth, h: appHeight(), top: 40, bottom: 76 };
 }
 
 function clampToViewport(win: WindowInstance): WindowInstance {
