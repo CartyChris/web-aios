@@ -11,20 +11,20 @@ Live:   https://web-aios.vercel.app     — Vercel auto-deploys main. A push to 
 Stack:  Next.js 16.3.5 App Router · React 19.3 · TypeScript 5.9 strict · Tailwind v4 over CSS vars · zustand 5 + persist
 ```
 
-**Verified state on 2026-09-26:** HEAD is the docs commit right after `a755996`, working tree
-clean. **Not pushed:** `origin/main` is `9974135` (7 commits behind) unless Chris has pushed since; run
-`git status -sb` to see. All five checks were green together:
+**Verified state on 2026-09-27:** HEAD is the docs commit right after `245be2c`, working tree
+clean. **Not pushed:** `origin/main` is `9974135` unless Chris has pushed since (`git status -sb`
+shows how far ahead). All five checks were green together:
 
 | Check | Result |
 |---|---|
-| `npm run check` | OK: 38 apps, 58 themes, 615 buttons with accessible names |
-| `npm test` | 1304/1304 |
+| `npm run check` | OK: 45 apps, 58 themes, 658 buttons with accessible names |
+| `npm test` | 1446/1446 |
 | `tsc --noEmit` | clean |
 | ESLint | 0 errors, 0 warnings |
 | `next build` | OK |
 
-The work since the last hand-off is eight commits, `7ec3ac2` to `a755996` plus this docs
-commit (HANDOFF §21). `git log -8` explains each one in prose, including how it was verified.
+The work since the last hand-off is ten commits, `1d78a9a` to `245be2c`, plus the docs commit
+(HANDOFF §22). `git log -11` explains each one in prose, including how it was verified.
 
 ---
 
@@ -32,7 +32,7 @@ commit (HANDOFF §21). `git log -8` explains each one in prose, including how it
 
 1. **Rematerialize the repo from iCloud**, before anything else (see §1a).
 2. **Read these, in this order:**
-   - `docs/HANDOFF-2026-09-20.md` §16–§21. That's everything built in the last five sessions, what was verified, and what wasn't.
+   - `docs/HANDOFF-2026-09-20.md` §16–§22. That's everything built in the last six sessions, what was verified, and what wasn't.
    - `docs/ROADMAP-2026-09-25.md`. It lists the 10 roadmap features and their sources. All 10 have a first slice.
 3. **Prove the baseline yourself** (§1c). If a number differs from the table above, find out why before you change anything.
 4. **Write a numbered stage plan**, giving each stage a check that can fail. Then build.
@@ -92,6 +92,7 @@ mkdir -p .next && xattr -w 'com.apple.fileprovider.ignore#P' 1 .next
 | 19 | Roadmap build |
 | 20 | Dock, video sound |
 | 21 | Snap geometry, Rewind v2, Timeline tool, chart/timeline/diff panels, cheat sheet, startup -18% |
+| 22 | iPhone fit, office suite, Bridge CLI provider, ThreeUI + Effects, pets, resumable AIOS Chat |
 
 `HANDOFF.md` at the repo root is stale and has a banner pointing to the docs file.
 There's no `docs/WORKLOG.md` here; that convention belongs to the sibling Eigenstate project.
@@ -100,7 +101,7 @@ There's no `docs/WORKLOG.md` here; that convention belongs to the sibling Eigens
 
 ```bash
 npm run check                      # integrity gate, under a second
-npm test                           # 1304 pass (gate + tsc -p tsconfig.test.json + node --test)
+npm test                           # 1446 pass (gate + tsc -p tsconfig.test.json + node --test)
 ./node_modules/.bin/tsc --noEmit
 npm run lint                       # must be 0 errors AND 0 warnings
 ./node_modules/.bin/next build
@@ -213,7 +214,7 @@ npm run lint                       # must be 0 errors AND 0 warnings
 5. **No real model? Use the scripted stub** (the method used for every AIOS Chat, Agent Loop and
    System One verification): `node scripts/stub-model.mjs [rules.json] [port]`.
    - An OpenAI-compatible server on `:3199` that returns canned replies chosen by regex rules. It
-     is **not** a model, so it doesn't break rule 3. `scripts/stub-panels.json` is an example.
+     is **not** a model, so it doesn't break rule 3. Rule files kept in `scripts/`: `stub-panels.json`, `stub-office.json`, `stub-resume.json`.
    - Point provider `lmstudio` at `http://localhost:3199/v1` in the test browser's settings, and
      put Chris's provider back afterwards (it was `openai` / `gpt-5.2`). Save the old values in
      localStorage, not on `window`: a reload loses `window`.
@@ -239,6 +240,12 @@ npm run lint                       # must be 0 errors AND 0 warnings
 
 | Subsystem | Where | § |
 |---|---|---|
+| **Office suite:** Office start centre, Writer, Sheets, Impress, Draw, Math, Base, each with an AI panel; .docx .xlsx .pptx and ODF in/out | `src/lib/office/*` (pure), `src/apps/office/*` | 22 |
+| **Bridge CLI provider:** AI through local Claude Code / Codex via the Bridge daemon's `/ai` | `src/lib/bridge-cli.ts`, `useAI.ts` "bridge" branch | 22 |
+| **iPhone installed-app fit:** iOS 26 gap cover, status-bar choice, live readout | `lib/viewport-fit.ts`, `kernel/viewport.ts`, `shell/ScreenFit.tsx` | 22 |
+| **ThreeUI wallpapers + Effects tab** (grain, vignette, cursor, window animation, icon shape, sounds, day/night) | `lib/customize.ts`, `shell/CustomizeLayer.tsx`, `shell/ThreeUIWallpaper.tsx` | 22 |
+| **Pets with a life:** needs, bond levels, accessories, tricks, fetch, OS reactions | `lib/petlife.ts`, `kernel/petlife.ts`, `shell/pets.tsx` | 22 |
+| **Resumable AIOS Chat:** per-step checkpoints, kept transcript, "Resume from step N" | `lib/aios-resume.ts`, `shell/AiosChat.tsx` | 22 |
 | **Startup diet:** harness runtime, Desk and data/news widgets load on first use (338 to 276 KB gz); a graph test keeps it that way | `src/lib/harness-triggers.ts`, `src/shell/Widgets.tsx`, `tests/shell-graph.test.mjs` | 21 |
 | **Global cheat sheet:** `?` or `mod+/` anywhere, palette command, filter by keys | `src/shell/ShortcutSheet.tsx`, `sheetRows` in `src/lib/keyhelp.ts` | 21 |
 | **Chart, timeline and diff panels** (app-drawn from data) and **Pin to Desk** | `src/lib/panelchart.ts`, `src/shell/PanelView.tsx`, `src/kernel/deskpins.ts` | 21 |
@@ -290,101 +297,59 @@ Ask Chris to supply these. Never go looking for keys yourself.
 
 ### B. Known debt (small, real)
 
-Done on 2026-09-26 (HANDOFF §21): **9** one snap geometry, **11** confirmed already wired (the
-note was stale), **12** global cheat sheet, **13** performance pass (startup -18%; drag measured
-and left alone).
+Done since the last hand-off: **24** backwards window cycling. Still open:
 
-10. **`wm.setArgs` has no callers** (re-checked 2026-09-26). Give it one (e.g. Files opening a
-    path in an already-open Notes window instead of a second window), or leave it documented.
-24. **Backwards window cycling never fires.** `window.cycle`'s handler reverses on Shift, but
-    `matches()` in `src/shell/Desktop.tsx` rejects a press whose Shift state differs from the
-    binding. Fix in `matches` (allow an extra Shift for `window.cycle` only), compare `e.code ===
-    "Backquote"` (Shift+` is "~" on US layouts), then flip the test in `tests/keyhelp.test.mjs`
-    that pins the sheet NOT listing it, and add the row.
-25. **DNS-rebinding pinning** for custom base URLs (review #7, second half; see the roadmap doc).
-26. **Drag re-renders:** only if a slow device shows jank. Measured 1.45 ms per move with 15 windows.
-    Start with selector subscriptions in `src/shell/Window.tsx` (`useWM((s) => s.windows.find(...))`)
-    and re-measure the same way (HANDOFF §21).
+10. **`wm.setArgs` has no callers.** Give it one (Files opening a path in an open Notes window).
+25. **DNS-rebinding pinning** for custom base URLs (review #7, second half).
+26. **Drag re-renders:** only if a slow device shows jank (1.45 ms per move with 15 windows).
+27. **Office fidelity:** docx/odt carry no comments, tracked changes, headers/footers or page size
+    choices; pptx exports no speaker notes (odp does); xlsx exports no cell styles beyond a percent
+    format; Draw imports nothing. Each is a bounded exporter change with a round-trip test.
+28. **Gemini CLI** in the Bridge allowlist: install it, read its `--help`, add fixed arguments and a
+    test with a fake binary, as for claude/codex.
 
-### C. Second slices of the ten roadmap features (each first slice shipped; this is where "massively" lives)
+### C. Second slices still open
 
-Done on 2026-09-26: **17** Timeline tool with fuzzy dates and provenance, **18** Rewind v2,
-**19** chart/timeline/diff panels and Pin to Desk. Still open, with the plan for each in D:
+14. WebMCP write tools. 16. The self-improvement proposer. 20. On-device beyond Chrome (Chris
+tests). 21. C2PA (verify a signer exists first). 22. Realtime voice (Chris's key). 23. Third-party
+MCP Apps. And 15b: **Agent Loop checkpoints**, the other half of resumable runs.
 
-14. **WebMCP write tools** behind the same Approve/Deny job flow as AIOS Chat.
-15. **Resumable everything:** checkpoint AIOS Chat steps and Agent Loop rounds; "Resume from step N".
-16. **The self-improvement loop, end to end:** the proposer between Patterns and the frozen-eval gate.
-20. **On-device beyond Chrome:** transformers.js v4 on WebGPU. Chris tests it (rule 3).
-21. **Provenance → C2PA** content credentials, if a browser-side signer proves real.
-22. **Voice v2:** optional realtime voice with the user's own key.
-23. **MCP Apps from third-party servers:** per-server consent and a CSP from the resource's `_meta`.
+### D. Implementation map (updated 2026-09-27)
 
-### D. Implementation map for what is left (written 2026-09-26)
+**1. Verify the iPhone fix on the device (minutes, Chris).** Settings > Phone & Screen on the
+iPhone Air: read "Gap" and "Covering it with". If a band remains with Full-bleed, try Solid and
+reopen from the Home Screen. Record the numbers in HANDOFF; if 100lvh did not recover the band,
+make Solid the default for iOS 26 standalone.
 
-Order chosen by value per risk. Each stage names its failable check. Sizes are rough session
-fractions.
+**2. C15b Agent Loop checkpoints (half a session).** Reuse `lib/aios-resume.ts`: checkpoint each
+round in `src/lib/agent-loop.ts`'s caller, clear on completion, offer "Resume from round N" in
+`src/apps/Loop.tsx`. A round that was building code re-runs; a round that was spending money asks
+first. Check: a stub-driven loop reloaded mid-round resumes and the stub log shows the rounds
+carried.
 
-**1. C15 Resumable AIOS Chat (half a session). Do first:** it makes every later agent feature
-safer to test.
-- Stage 1: persist the chat transcript and in-flight step (`useAiosChat` in
-  `src/shell/AiosChat.tsx` is a plain zustand store today) to a capped `webaios.aioschat.v1`.
-  Check: reload mid-run with the stub, and the messages are still there.
-- Stage 2: a pure `resumePlan(log)` in a new `src/lib/aios-resume.ts` that decides where to
-  restart. A side-effect step that was approved but has no recorded result is NOT re-run
-  silently; it asks again. Check: tests for each cut point.
-- Stage 3: a "Resume from step N" button on the last message after a crash, reload or timeout,
-  like DeepSeek Harness's `onResume` in `src/apps/DeepSeekHarness.tsx`. Check: stub rules that
-  stop mid-run, reload, resume, and assert that the stub log shows the context carried over.
-- Then the same for Agent Loop rounds (`src/lib/agent-loop.ts`).
+**3. Office second slices (a session).**
+- Stage 1: pptx speaker notes (notesMaster + notesSlide parts), with a python-pptx read-back.
+- Stage 2: xlsx cell styles (bold, fills, number formats) via a real styles.xml, with an
+  openpyxl read-back of the styles.
+- Stage 3: Writer headers/footers and page size/margins.
+- Stage 4: Writer comments (docx comments.xml; odt office:annotation).
+- Stage 5: Sheets conditional formatting and freeze panes.
 
-**2. C14 WebMCP write tools (half a session).**
-- Stage 0: re-read the spec (github.com/webmachinelearning/webmcp): the registration API has
-  moved before. Record the exact signature in the commit.
-- Stage 1: register `aios_write_file`, `aios_open_app` and `aios_create_event` in
-  `src/shell/webmcp.ts`. Each runs through the approval flow in AIOS Chat
-  (`requestApproval`, `APPROVAL_TIMEOUT_MS`): export a small `approveThenRun(what, fn)` instead
-  of copying it. Check: a unit test that a denied call writes nothing, and one that a timeout
-  counts as a denial.
-- Stage 2: feature-detected as today; the status on `window.__aios.webmcp` lists which tools are
-  write tools. Not verifiable without a WebMCP-capable Chrome, so say so.
+Every stage must keep the round-trip tests exact.
 
-**3. C16 Self-improvement proposer (one session).** Pieces that exist:
-- `src/lib/harness/patterns.ts` (recurring failures)
-- `src/lib/harness/frozen-eval.ts` (`sealEval`, `gateProposal`, `isHeldOut`)
-- the evals in `src/lib/harness/evals.ts`
+**4. C14 WebMCP write tools (half a session).** As in the previous map: re-read the spec, register
+write tools behind `requestApproval` (export an `approveThenRun` from AIOS Chat), tests for
+denial and timeout.
 
-Stages:
-- Stage 1: a pure `proposalPrompt(pattern, config)` plus `parseProposal(reply)`, allowing edits
-  only to named config fields with bounds (no code, no eval files), and requiring a falsifiable
-  prediction ("pass rate on tasks X, Y rises from a to b"). Check: adversarial parse tests,
-  including a proposal that tries to edit the eval.
-- Stage 2: run the proposal on a copy of the config over the non-held-out tasks, then the
-  held-out third, through `gateProposal`. Check: with the stub, one proposal that helps is
-  accepted and one that regresses a single task is rejected, and the rejection names the task.
-- Stage 3: a "Proposals" tab in Harness Hub showing prediction against measured result, with
-  Keep/Revert like `_updateTrial.tsx`. Needs a real model to mean anything, so ask Chris for a
-  key-backed run (A1) before calling it verified.
+**5. C16 self-improvement proposer (a session).** As in the previous map (proposal prompt and
+parser, run on a copy through `gateProposal`, a Proposals tab); needs a real model to mean
+anything.
 
-**4. B24 backwards cycling, and B10 setArgs (an hour, together).** See B.
-
-**5. C23 Third-party MCP Apps (half a session).** `src/lib/mcp-apps.ts` renders `ui://`
-resources from the demo server only.
-- Stage 1: a per-server consent record (kernel store), asked on first render.
-- Stage 2: build the iframe CSP from the resource's `_meta` (re-read ext-apps for the field
-  names) and intersect it with a hard floor: no `unsafe-eval`, no top navigation. Check: tests
-  that a `_meta` asking for more than the floor gets the floor.
-- Not verifiable end to end without a third-party server Chris trusts.
-
-**6. Needs Chris (do not start without asking):**
-- **C20** transformers.js v4 needs a model download, which rule 3 forbids from a session. Build
-  the feature-detected plumbing and size warning only; Chris runs it.
-- **C22** realtime voice needs Chris's key and a microphone. Build behind a setting, off by
-  default.
-- **C21** C2PA: first confirm that a maintained browser-side signing library exists (fetch it,
-  read it). If none does, write that down and stop; don't promise it.
+**6. Needs Chris:** the real CLIs through the Bridge (his accounts), C20 (model download), C22
+(key, microphone), and C21 (confirm a browser-side C2PA signer exists first).
 
 When you finish a stage, append a numbered section to `docs/HANDOFF-2026-09-20.md` (next is
-**§22**). Use the format of §16–§21: what was built, how it was verified, and what was **not** verified.
+**§23**). Use the format of §16–§22: what was built, how it was verified, and what was **not** verified.
 
 ---
 
@@ -434,7 +399,7 @@ When you finish a stage, append a numbered section to `docs/HANDOFF-2026-09-20.m
 2. **When a test fails, first ask whether the *test* is wrong.** It has been, several times.
 3. **Re-run all five checks and state the counts.**
 4. **Update the docs:**
-   - Append §22+ to `docs/HANDOFF-2026-09-20.md`.
+   - Append §23+ to `docs/HANDOFF-2026-09-20.md`.
    - Update this file's "Verified state" block and §6–§7.
    - Keep `docs/ROADMAP-2026-09-25.md` status honest.
 5. **Commit with a prose message** (`git commit -F`). Push only if asked, then ask Chris to confirm
