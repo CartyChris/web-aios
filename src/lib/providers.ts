@@ -154,6 +154,18 @@ export const PROVIDERS: ProviderDef[] = [
     docs: "https://developer.chrome.com/docs/ai/prompt-api",
   },
   {
+    // A local AI CLI (Claude Code or Codex) through the Bridge companion
+    // daemon (lib/bridge-cli.ts). The "key" is the Bridge pairing token; the
+    // "model" names the CLI, optionally with its own model: "claude:sonnet".
+    id: "bridge",
+    name: "Bridge (local CLI: Claude Code, Codex)",
+    dialect: "openai",
+    baseUrl: "http://127.0.0.1:8787",
+    models: ["claude", "claude:sonnet", "claude:opus", "codex"],
+    local: true,
+    docs: "https://docs.claude.com/en/docs/claude-code/cli-reference",
+  },
+  {
     id: "lmstudio",
     name: "LM Studio (local)",
     dialect: "openai",

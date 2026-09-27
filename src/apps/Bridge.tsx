@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { bus } from "@/kernel/bus";
 import type { AppProps } from "@/kernel/types";
 import { download } from "@/lib/format";
+import { BRIDGE_DAEMON_SOURCE } from "@/lib/bridge-cli";
 import { Tabs, ErrorNote, Empty, Spinner, CopyButton } from "./_ui";
 import { cn } from "@/lib/cn";
 
@@ -230,120 +231,5 @@ export default function Bridge({}: AppProps) {
   );
 }
 
-const DAEMON = `#!/usr/bin/env node
-/* Web-AIOS companion bridge — no dependencies.
- *
- * Bound to loopback only. The pairing token is generated at startup and dies
- * with the process. Commands are restricted to an allowlist and file access is
- * confined to one workspace directory. Run it, paste the token into the Bridge
- * app, and close the terminal when you are done.
- */
-const http = require('http');
-const { execFile } = require('child_process');
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
-const crypto = require('crypto');
-
-const PORTS = [8787, 8788, 8789, 8790, 8791];
-const TOKEN = crypto.randomBytes(16).toString('hex');
-const ROOT = path.join(os.homedir(), 'web-aios-workspace');
-const ALLOW = new Set(['ls', 'pwd', 'date', 'uname', 'whoami', 'node', 'python3', 'git', 'which', 'echo']);
-fs.mkdirSync(ROOT, { recursive: true });
-
-const cors = (res) => {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type,x-aurora-token');
-  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
-};
-const json = (res, code, body) => {
-  cors(res);
-  res.writeHead(code, { 'Content-Type': 'application/json' });
-  res.end(JSON.stringify(body));
-};
-
-/** Refuse any path that escapes the workspace, including via symlink or "..". */
-const safePath = (p) => {
-  const full = path.resolve(ROOT, p || '.');
-  if (full !== ROOT && !full.startsWith(ROOT + path.sep)) throw new Error('path escapes workspace');
-  return full;
-};
-
-const server = http.createServer((req, res) => {
-  if (req.method === 'OPTIONS') { cors(res); res.writeHead(204); return res.end(); }
-
-  const url = new URL(req.url, 'http://localhost');
-
-  if (url.pathname === '/health') {
-    return json(res, 200, { version: '1.0.0', root: ROOT, allow: [...ALLOW] });
-  }
-
-  // Everything past this point requires the token.
-  const given = req.headers['x-aurora-token'];
-  if (given !== TOKEN) return json(res, 401, { error: 'bad or missing token' });
-
-  if (url.pathname === '/exec' && req.method === 'POST') {
-    let body = '';
-    req.on('data', (c) => { body += c; if (body.length > 1e6) req.destroy(); });
-    req.on('end', () => {
-      let cmd;
-      try { cmd = JSON.parse(body).cmd; } catch { return json(res, 400, { error: 'bad JSON' }); }
-      const parts = String(cmd || '').trim().split(/\\s+/);
-      const bin = parts[0];
-      if (!ALLOW.has(bin)) return json(res, 403, { error: bin + ' is not allowlisted' });
-      // execFile, not exec: no shell means no injection through the arguments.
-      execFile(bin, parts.slice(1), { cwd: ROOT, timeout: 25000, maxBuffer: 4e6 }, (err, stdout, stderr) => {
-        json(res, 200, { stdout: stdout || '', stderr: stderr || (err ? String(err.message) : '') });
-      });
-    });
-    return;
-  }
-
-  if (url.pathname === '/read') {
-    try {
-      const f = safePath(url.searchParams.get('path'));
-      return json(res, 200, { content: fs.readFileSync(f, 'utf8') });
-    } catch (e) { return json(res, 400, { error: e.message }); }
-  }
-
-  if (url.pathname === '/write' && req.method === 'POST') {
-    let body = '';
-    req.on('data', (c) => { body += c; if (body.length > 5e6) req.destroy(); });
-    req.on('end', () => {
-      try {
-        const { path: p, content } = JSON.parse(body);
-        const f = safePath(p);
-        fs.mkdirSync(path.dirname(f), { recursive: true });
-        fs.writeFileSync(f, String(content ?? ''));
-        json(res, 200, { ok: true, path: f });
-      } catch (e) { json(res, 400, { error: e.message }); }
-    });
-    return;
-  }
-
-  if (url.pathname === '/list') {
-    try {
-      const d = safePath(url.searchParams.get('path'));
-      const entries = fs.readdirSync(d, { withFileTypes: true })
-        .map((e) => ({ name: e.name, dir: e.isDirectory() }));
-      return json(res, 200, { entries });
-    } catch (e) { return json(res, 400, { error: e.message }); }
-  }
-
-  json(res, 404, { error: 'not found' });
-});
-
-(function listen(i) {
-  if (i >= PORTS.length) { console.error('No free port in', PORTS.join(', ')); process.exit(1); }
-  server.listen(PORTS[i], '127.0.0.1')
-    .on('listening', () => {
-      console.log('Web-AIOS bridge on http://127.0.0.1:' + PORTS[i]);
-      console.log('Workspace: ' + ROOT);
-      console.log('');
-      console.log('  Pairing token:  ' + TOKEN);
-      console.log('');
-      console.log('Paste that into the Bridge app. Ctrl-C ends the session and invalidates it.');
-    })
-    .on('error', () => listen(i + 1));
-})(0);
-`;
+// The daemon source lives in lib/bridge-cli.ts, where a test runs it for real.
+const DAEMON = BRIDGE_DAEMON_SOURCE;

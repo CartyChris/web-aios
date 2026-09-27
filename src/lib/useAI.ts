@@ -1,5 +1,6 @@
 "use client";
 
+import { parseBridgeModel, transcriptPrompt } from "./bridge-cli";
 import { useCallback, useRef, useState } from "react";
 import { useSettings } from "@/kernel/settings";
 import { assistantSteeringLine } from "@/lib/petmind";
@@ -173,7 +174,23 @@ async function askOnce(opts: AskOptions): Promise<AskResult> {
   const baseUrl = s.ai.baseUrls[providerId] || provider.baseUrl;
   const apiKey = s.ai.keys[providerId] ?? "";
 
-  if (providerId === "browser") {
+  if (providerId === "bridge") {
+    // A local CLI through the Bridge daemon: one request, one answer (the CLI
+    // prints its reply when it finishes, so there is nothing to stream).
+    const which = parseBridgeModel(model);
+    if (!which) throw new Error(`"${model}" is not a Bridge CLI. Use claude, claude:<model> or codex.`);
+    if (!apiKey) throw new Error("Paste the Bridge pairing token as the key for the Bridge provider (Settings > Providers). Start the daemon from the Bridge app first.");
+    const res = await fetch(`${baseUrl.replace(/\/+$/, "")}/ai`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-aurora-token": apiKey },
+      body: JSON.stringify({ cli: which.cli, model: which.model, system: system ?? "", prompt: transcriptPrompt(messages) }),
+      signal: opts.signal,
+    }).catch((e: unknown) => { throw new Error(`Could not reach the Bridge at ${baseUrl} (${(e as Error).message}). Is the daemon running? From an https page some browsers block localhost; see the Bridge app.`); });
+    const body = (await res.json().catch(() => ({}))) as { text?: string; error?: string; stderr?: string };
+    if (!res.ok) throw new Error(`Bridge ${which.cli}: ${body.error ?? res.status}${body.stderr ? ` -- ${body.stderr.slice(-300)}` : ""}`);
+    text = body.text ?? "";
+    opts.onDelta?.(text, text);
+  } else if (providerId === "browser") {
     // The on-device model. Usage is estimated below from text length; it costs nothing.
     for await (const delta of promptOnDevice(system ?? "", messages, opts.signal)) {
       text += delta;
