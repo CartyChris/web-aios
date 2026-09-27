@@ -1,0 +1,5 @@
+[
+  {"when": "Result of write_file", "reply": "{\"final\":\"RESUMED-DONE: {{last}}\"}"},
+  {"when": "RESUME-TEST", "reply": "{\"tool\":\"write_file\",\"args\":{\"path\":\"/notes/resume-probe.md\",\"content\":\"written after a resume\"}}"},
+  {"when": ".", "reply": "{\"final\":\"STUB: no rule matched\"}"}
+]

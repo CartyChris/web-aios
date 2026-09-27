@@ -133,6 +133,7 @@
     "src/lib/office/sheetops.ts",
     "src/lib/bridge-cli.ts",
     "src/lib/customize.ts",
-    "src/lib/petlife.ts"
+    "src/lib/petlife.ts",
+    "src/lib/aios-resume.ts"
   ]
 }
