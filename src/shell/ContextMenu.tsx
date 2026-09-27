@@ -53,12 +53,16 @@ export function ContextMenuHost() {
 }
 
 function MenuLevel({
-  entries, x, y, onClose, depth, autoFocus, parentRect,
+  entries, x, y, onClose, onDone, depth, autoFocus, parentRect,
 }: {
   entries: Entry[];
   x: number;
   y: number;
+  /** Close this level (Escape, Left in a submenu). */
   onClose: () => void;
+  /** Close the whole menu: an item was chosen. A submenu used to close only
+   *  itself here, leaving the parent menu open after every choice in it. */
+  onDone?: () => void;
   depth: number;
   autoFocus?: boolean;
   /** Present for a submenu: the parent menu's box, so it can flip sides. */
@@ -106,11 +110,11 @@ function MenuLevel({
   const runItem = useCallback((it: MenuItem) => {
     if (it.disabled) return;
     if (it.submenu) return;
-    onClose();
+    (onDone ?? onClose)();
     // After the menu is gone, so an action that opens a window is not fighting
     // the menu's own teardown for focus.
     queueMicrotask(() => it.run?.());
-  }, [onClose]);
+  }, [onClose, onDone]);
 
   const onKeyDown = (e: React.KeyboardEvent) => {
     const k = e.key;
@@ -217,6 +221,7 @@ function MenuLevel({
             parentRect={subRect}
             depth={depth + 1}
             onClose={() => setOpenSub(null)}
+            onDone={onDone ?? onClose}
           />
         );
       })()}
