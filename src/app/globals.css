@@ -357,3 +357,12 @@ input, textarea, select, button { font: inherit; color: inherit; }
   .os-office-toolbar > * { flex-shrink: 0; }
   .os-office-toolbar::-webkit-scrollbar { display: none; }
 }
+
+/* Pet tricks (lib/petlife.ts), scaled by --motion like every animation. */
+@keyframes pet-spin { to { transform: rotate(360deg); } }
+@keyframes pet-jump { 0%, 100% { transform: translateY(0); } 40% { transform: translateY(-38%) scale(1.04, 0.96); } 70% { transform: translateY(0) scale(1.08, 0.92); } }
+@keyframes pet-dance { 0%, 100% { transform: rotate(0); } 20% { transform: rotate(-14deg) translateX(-6%); } 40% { transform: rotate(14deg) translateX(6%); } 60% { transform: rotate(-10deg) translateX(-4%); } 80% { transform: rotate(10deg) translateX(4%); } }
+@keyframes pet-ball { from { transform: translateY(-120px) scale(0.6); opacity: 0; } to { transform: none; opacity: 1; } }
+.pet-spin { animation: pet-spin calc(700ms * var(--motion, 1)) cubic-bezier(.5,0,.3,1); }
+.pet-jump { animation: pet-jump calc(650ms * var(--motion, 1)) ease-out; }
+.pet-dance { animation: pet-dance calc(1100ms * var(--motion, 1)) ease-in-out; }

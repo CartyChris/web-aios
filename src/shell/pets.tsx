@@ -9,6 +9,10 @@ import { ask } from "@/lib/useAI";
 import { bus } from "@/kernel/bus";
 import { cn } from "@/lib/cn";
 import { EGGS, useEggs } from "@/lib/easter";
+import { usePetLife } from "@/kernel/petlife";
+import { useJobs } from "@/kernel/jobs";
+import { registerContextTarget } from "@/kernel/ctxmenu";
+import { mood as lifeMood, spriteMood, level, unlocked, ACCESSORIES, type PetAction, type PetMood } from "@/lib/petlife";
 
 /* ────────────────────────────────────────────────────────────────────────────
    Pet rendering.
@@ -39,6 +43,8 @@ interface SpriteProps {
   className?: string;
   /** Pets on a wallpaper need a rim so they read against any background. */
   outlined?: boolean;
+  /** An accessory from lib/petlife.ts ACCESSORIES, drawn on the head, face or neck. */
+  accessory?: string | null;
 }
 
 /* ── Body silhouettes ─────────────────────────────────────────────────────
@@ -97,7 +103,7 @@ const shade = (hex: string, amt: number) => {
   return hex;
 };
 
-export function PetSprite({ species: sp, detail = "detailed", size = 64, mood = "idle", className, outlined }: SpriteProps) {
+export function PetSprite({ species: sp, detail = "detailed", size = 64, mood = "idle", className, outlined, accessory }: SpriteProps) {
   const uid = useId().replace(/:/g, "");
   const flat = detail === "basic";
   const live = detail === "expressive";
@@ -155,6 +161,7 @@ export function PetSprite({ species: sp, detail = "detailed", size = 64, mood = 
         )}
 
         <Face sp={sp} x={fx} y={fy} flat={flat} live={live} mood={mood} light={light} />
+        {accessory && <AccessoryArt id={accessory} x={fx} y={fy} />}
       </g>
     </svg>
   );
@@ -402,6 +409,27 @@ function Face({ sp, x, y, flat, live, mood, light }: {
    a pet that goes mute the moment wifi drops reads as broken, not offline.
    ──────────────────────────────────────────────────────────────────────────── */
 
+/* ── Accessories (unlocked by bond level; lib/petlife.ts) ───────────────────
+   Drawn in the sprite's own 100x100 space relative to where its face is, so
+   one drawing fits every body shape. */
+function AccessoryArt({ id, x, y }: { id: string; x: number; y: number }) {
+  const ink = "#1b1b24";
+  switch (id) {
+    case "bow": return <g data-accessory="bow"><path d={`M${x} ${y + 17}l-9 -5v10z M${x} ${y + 17}l9 -5v10z`} fill="#e0344b" stroke={ink} strokeWidth={1.2} strokeLinejoin="round" /><circle cx={x} cy={y + 17} r={2.2} fill="#b8243a" /></g>;
+    case "flower": return <g data-accessory="flower">{[0, 72, 144, 216, 288].map((a) => <circle key={a} cx={x + 13 + 4 * Math.cos((a * Math.PI) / 180)} cy={y - 21 + 4 * Math.sin((a * Math.PI) / 180)} r={3.4} fill="#ff8fc7" />)}<circle cx={x + 13} cy={y - 21} r={2.4} fill="#ffd43b" /></g>;
+    case "scarf": return <g data-accessory="scarf"><rect x={x - 17} y={y + 13} width={34} height={7} rx={3.5} fill="#4dabf7" stroke={ink} strokeWidth={1} /><rect x={x + 7} y={y + 17} width={6} height={13} rx={2} fill="#339af0" stroke={ink} strokeWidth={1} /></g>;
+    case "glasses": return <g data-accessory="glasses" fill="none" stroke={ink} strokeWidth={1.6}><circle cx={x - 8} cy={y - 3} r={5.2} /><circle cx={x + 8} cy={y - 3} r={5.2} /><path d={`M${x - 2.8} ${y - 3}h5.6`} /></g>;
+    case "shades": return <g data-accessory="shades"><rect x={x - 14} y={y - 7} width={11} height={7} rx={2.5} fill={ink} /><rect x={x + 3} y={y - 7} width={11} height={7} rx={2.5} fill={ink} /><path d={`M${x - 3} ${y - 5}h6`} stroke={ink} strokeWidth={1.6} /></g>;
+    case "beanie": return <g data-accessory="beanie"><path d={`M${x - 16} ${y - 18}a16 13 0 0 1 32 0z`} fill="#fa5252" stroke={ink} strokeWidth={1.2} /><rect x={x - 17} y={y - 20} width={34} height={5} rx={2.5} fill="#e03131" stroke={ink} strokeWidth={1} /><circle cx={x} cy={y - 33} r={3.5} fill="#fff" stroke={ink} strokeWidth={1} /></g>;
+    case "headphones": return <g data-accessory="headphones"><path d={`M${x - 19} ${y - 6}a19 19 0 0 1 38 0`} fill="none" stroke={ink} strokeWidth={3} /><rect x={x - 23} y={y - 9} width={7} height={11} rx={3} fill="#495057" /><rect x={x + 16} y={y - 9} width={7} height={11} rx={3} fill="#495057" /></g>;
+    case "party": return <g data-accessory="party"><path d={`M${x - 9} ${y - 18}L${x} ${y - 42}L${x + 9} ${y - 18}z`} fill="#7950f2" stroke={ink} strokeWidth={1.2} strokeLinejoin="round" /><path d={`M${x - 6} ${y - 26}l12 -2M${x - 3.5} ${y - 33}l7 -1.5`} stroke="#ffd43b" strokeWidth={2} /><circle cx={x} cy={y - 43} r={3} fill="#ffd43b" /></g>;
+    case "wizard": return <g data-accessory="wizard"><path d={`M${x - 20} ${y - 16}h40`} stroke="#364fc7" strokeWidth={4} strokeLinecap="round" /><path d={`M${x - 11} ${y - 17}L${x + 4} ${y - 50}L${x + 11} ${y - 17}z`} fill="#4263eb" stroke={ink} strokeWidth={1.2} strokeLinejoin="round" /><path d={`M${x + 1} ${y - 32}l1.3 2.7 3 .4-2.2 2 .6 3-2.7-1.4-2.7 1.4.6-3-2.2-2 3-.4z`} fill="#ffd43b" /></g>;
+    case "crown": return <g data-accessory="crown"><path d={`M${x - 13} ${y - 17}L${x - 14} ${y - 31}L${x - 7} ${y - 24}L${x} ${y - 34}L${x + 7} ${y - 24}L${x + 14} ${y - 31}L${x + 13} ${y - 17}z`} fill="#fcc419" stroke={ink} strokeWidth={1.2} strokeLinejoin="round" /><circle cx={x} cy={y - 22} r={2} fill="#e03131" /></g>;
+    case "halo": return <ellipse data-accessory="halo" cx={x} cy={y - 32} rx={14} ry={4} fill="none" stroke="#ffe066" strokeWidth={3} opacity={0.95} />;
+    default: return null;
+  }
+}
+
 export function PetLayer() {
   const s = useSettings();
   // Subscribed so an AI-made pet appears as soon as its store hydrates.
@@ -416,6 +444,103 @@ export function PetLayer() {
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const busy = useRef(false);
   const pats = useRef(0);
+  const petId = sp?.id ?? "";
+  const life = usePetLife((l) => (petId ? l.lives[petId] : undefined));
+  const [reaction, setReaction] = useState<PetMood | null>(null);
+  const [trick, setTrick] = useState<{ anim: string; k: number } | null>(null);
+  const [card, setCard] = useState(false);
+  const [ball, setBall] = useState<{ x: number; y: number } | null>(null);
+  const [fetchPos, setFetchPos] = useState<{ x: number; y: number } | null>(null);
+  const wrap = useRef<HTMLDivElement>(null);
+  const reactTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const show = (line: string, ms = 4500) => {
+    setSay(line);
+    if (hideTimer.current) clearTimeout(hideTimer.current);
+    hideTimer.current = setTimeout(() => setSay(null), ms);
+  };
+  const flash = (m: PetMood, ms = 6000) => {
+    setReaction(m);
+    if (reactTimer.current) clearTimeout(reactTimer.current);
+    reactTimer.current = setTimeout(() => setReaction(null), ms);
+  };
+
+  // Needs catch up now, then every minute; a new day greets you (and counts the streak).
+  useEffect(() => {
+    if (!petId || !s.petVisible) return;
+    const r = usePetLife.getState().refresh(petId);
+    if (r.newDay && r.life.streak > 1) setTimeout(() => show(`Day ${r.life.streak} together!`, 5000), 1200);
+    const t = setInterval(() => usePetLife.getState().refresh(petId), 60_000);
+    return () => clearInterval(t);
+  }, [petId, s.petVisible]);
+
+  // It notices the OS: finished work cheers it up, failures worry it.
+  useEffect(() => {
+    if (!petId || !s.petVisible) return;
+    let prev = new Map(useJobs.getState().jobs.map((j) => [j.id, j.status]));
+    const unsub = useJobs.subscribe((st) => {
+      for (const j of st.jobs) {
+        const was = prev.get(j.id);
+        if (was === j.status) continue;
+        if (j.status === "done" && was) { const r = usePetLife.getState().react(petId, "job-done"); flash(r.mood); show(r.line, 3500); }
+        if ((j.status === "error" || j.status === "timeout") && was) { const r = usePetLife.getState().react(petId, "job-failed"); flash(r.mood); show(r.line, 4000); }
+      }
+      prev = new Map(st.jobs.map((j) => [j.id, j.status]));
+    });
+    const off = bus.on("notify", (p) => { if ((p as { kind?: string })?.kind === "error") { const r = usePetLife.getState().react(petId, "error"); flash(r.mood, 4000); } });
+    return () => { unsub(); off(); };
+  }, [petId, s.petVisible]);
+
+  const doAct = (a: PetAction) => {
+    if (!petId) return;
+    const before = level(usePetLife.getState().get(petId).xp).level;
+    const r = usePetLife.getState().act(petId, a);
+    show(r.line);
+    if (r.anim !== "none") setTrick({ anim: r.anim, k: Date.now() });
+    const after = level(r.life.xp).level;
+    if (after > before) {
+      const gift = ACCESSORIES.filter((x) => x.unlock === after).map((x) => x.name);
+      bus.emit("notify", { title: `Bond level ${after}`, body: gift.length ? `Unlocked: ${gift.join(", ")}. Right-click your pet to wear it.` : "Your pet likes you more.", kind: "success" });
+    }
+  };
+
+  const playFetch = () => {
+    if (!petId) return;
+    const l = usePetLife.getState().get(petId);
+    if (l.asleep || l.energy < 20) { doAct("play"); return; }
+    const target = { x: 10 + Math.random() * 75, y: 18 + Math.random() * 55 };
+    setBall(target);
+    setTimeout(() => setFetchPos(target), 500);
+    setTimeout(() => { setBall(null); setFetchPos(null); doAct("play"); }, 2600);
+  };
+
+  // Right-click: everything you can do with it, and what it can wear.
+  useEffect(() => {
+    const el = wrap.current;
+    if (!el || !petId) return;
+    return registerContextTarget(el, () => {
+      const l = usePetLife.getState().get(petId);
+      const wearable = unlocked(l.xp);
+      return {
+        id: "pet",
+        entries: [
+          { id: "feed", label: "Feed", icon: "plus", run: () => doAct("feed") },
+          { id: "treat", label: "Give a treat", icon: "star", run: () => doAct("treat") },
+          { id: "fetch", label: "Play fetch", icon: "play", run: playFetch },
+          { id: "pat", label: "Pat", icon: "pet", run: () => doAct("pat") },
+          { id: "trick", label: "Do a trick", icon: "sparkles", run: () => doAct("trick") },
+          l.asleep ? { id: "wake", label: "Wake up", icon: "bell", run: () => doAct("wake") } : { id: "nap", label: "Take a nap", icon: "clock", run: () => doAct("nap") },
+          { separator: true },
+          { id: "wear", label: "Wear", icon: "wand", submenu: [
+            { id: "none", label: "Nothing", checked: !l.accessory, run: () => usePetLife.getState().setAccessory(petId, null) },
+            ...ACCESSORIES.map((a) => ({ id: a.id, label: wearable.includes(a) ? a.name : `${a.name} (bond level ${a.unlock})`, disabled: !wearable.includes(a), checked: l.accessory === a.id, run: () => usePetLife.getState().setAccessory(petId, a.id) })),
+          ] },
+          { id: "status", label: card ? "Hide status" : "Status...", icon: "info", run: () => setCard((c) => !c) },
+        ],
+      };
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [petId, card]);
 
   // Wander. A pet that never moves is a sticker; one that moves constantly is
   // a distraction — so it steps every 9-17s and only while nothing is hovered.
@@ -511,19 +636,43 @@ export function PetLayer() {
   };
 
   if (!s.petVisible || !sp) return null;
-  const pos = s.petMotion === "still" ? s.petPos : drift;
+  const pos = fetchPos ?? (s.petMotion === "still" ? s.petPos : drift);
+  const needMood: PetMood = reaction ?? (life ? lifeMood(life) : "idle");
+  const lv = level(life?.xp ?? 0);
   const size = 52 * s.petScale;
   const detail = s.petDetail as Detail;
 
   return (
+    <>
+    {ball && <div className="pointer-events-none absolute z-[2] h-3 w-3 rounded-full" style={{ left: `${ball.x}%`, top: `${ball.y}%`, background: "#ffd43b", boxShadow: "0 0 0 2px #1b1b24", animation: s.motion ? "pet-ball 500ms ease-out" : undefined }} data-pet-ball aria-hidden />}
     <div
+      ref={wrap}
       className="absolute z-[2] select-none"
+      data-pet={sp.id}
+      data-pet-mood={needMood}
       style={{
         left: `${pos.x}%`,
         top: `${pos.y}%`,
-        transition: s.motion && s.petMotion === "wander" ? "left 6s cubic-bezier(.4,0,.2,1), top 6s cubic-bezier(.4,0,.2,1)" : undefined,
+        transition: fetchPos ? "left 1.4s cubic-bezier(.3,.7,.3,1), top 1.4s cubic-bezier(.3,.7,.3,1)" : s.motion && s.petMotion === "wander" ? "left 6s cubic-bezier(.4,0,.2,1), top 6s cubic-bezier(.4,0,.2,1)" : undefined,
       }}
     >
+      {card && life && (
+        <div className="glass absolute bottom-full left-1/2 mb-8 w-[210px] -translate-x-1/2 p-2.5 text-[11px]" style={{ borderRadius: "calc(var(--radius) * 0.8)" }} data-pet-card role="dialog" aria-label={`${s.petName || sp.name} status`}>
+          <div className="mb-1 flex items-center gap-1"><b className="text-[12px]">{s.petName || sp.name}</b><span className="ml-auto text-[var(--muted)]">bond {lv.level}{life.streak > 1 ? ` · ${life.streak} days` : ""}</span></div>
+          <div className="mb-1.5 h-1 overflow-hidden rounded bg-white/10" title={`${lv.into}/${lv.span} XP to the next level`}><div className="h-full bg-[var(--accent)]" style={{ width: `${Math.round((lv.into / lv.span) * 100)}%` }} /></div>
+          {([["Fullness", life.fullness], ["Energy", life.energy], ["Joy", life.joy]] as const).map(([k, v]) => (
+            <div key={k} className="mb-0.5 flex items-center gap-1.5"><span className="w-14 text-[var(--muted)]">{k}</span><div className="h-1.5 flex-1 overflow-hidden rounded bg-white/10"><div className="h-full" style={{ width: `${Math.round(v)}%`, background: v < 30 ? "var(--danger)" : v < 60 ? "var(--warn)" : "var(--ok)" }} /></div><span className="w-7 text-right">{Math.round(v)}</span></div>
+          ))}
+          <div className="mt-1.5 flex flex-wrap gap-1">
+            <button className="os-btn !px-1.5 !py-0 text-[10.5px]" onClick={() => doAct("feed")}>Feed</button>
+            <button className="os-btn !px-1.5 !py-0 text-[10.5px]" onClick={playFetch}>Fetch</button>
+            <button className="os-btn !px-1.5 !py-0 text-[10.5px]" onClick={() => doAct("trick")}>Trick</button>
+            <button className="os-btn !px-1.5 !py-0 text-[10.5px]" onClick={() => doAct(life.asleep ? "wake" : "nap")}>{life.asleep ? "Wake" : "Nap"}</button>
+            <button className="os-btn ml-auto !px-1.5 !py-0 text-[10.5px]" onClick={() => setCard(false)} aria-label="Close pet status">Close</button>
+          </div>
+          <div className="mt-1 text-[10px] text-[var(--muted)]">Fed {life.fed} · played {life.played} · patted {life.patted}</div>
+        </div>
+      )}
       {(say || thinking) && (
         <div
           className="glass absolute bottom-full left-1/2 mb-1.5 w-max max-w-[220px] -translate-x-1/2 px-2.5 py-1.5 text-[11.5px] leading-snug"
@@ -542,10 +691,14 @@ export function PetLayer() {
         aria-label={`${s.petName || sp.name}, desktop pet. Click to talk.`}
       >
         {/* Keyed on the pat count so each click restarts the bounce. */}
-        <span key={bounce} className={bounce ? "pet-bounce inline-block" : "inline-block"}>
-          <PetSprite species={sp} detail={detail} size={size} mood={thinking ? "think" : say ? "happy" : "idle"} outlined />
+        <span key={`${bounce}-${trick?.k ?? 0}`} className={cn("inline-block", trick ? `pet-${trick.anim}` : bounce ? "pet-bounce" : "")} onAnimationEnd={() => setTrick(null)}>
+          <PetSprite species={sp} detail={detail} size={size} mood={thinking ? "think" : say && !reaction ? "happy" : spriteMood(needMood)} outlined accessory={life?.accessory} />
         </span>
+        {!say && !thinking && (needMood === "hungry" || needMood === "tired" || needMood === "sad" || needMood === "worried") && (
+          <span className="absolute -right-1 -top-1 rounded-full bg-[var(--panel-solid)] px-1 text-[9px] leading-[14px] text-[var(--muted)] ring-1 ring-white/15" aria-hidden data-pet-need>{needMood === "hungry" ? "hungry" : needMood === "tired" ? "zz" : needMood === "worried" ? "?!" : "..."}</span>
+        )}
       </button>
     </div>
+    </>
   );
 }

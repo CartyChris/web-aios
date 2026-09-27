@@ -132,6 +132,7 @@
     "src/lib/office/ai.ts",
     "src/lib/office/sheetops.ts",
     "src/lib/bridge-cli.ts",
-    "src/lib/customize.ts"
+    "src/lib/customize.ts",
+    "src/lib/petlife.ts"
   ]
 }
