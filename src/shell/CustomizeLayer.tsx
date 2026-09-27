@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { useSettings } from "@/kernel/settings";
+import { useSettings, useCustomize } from "@/kernel/settings";
 import { useWM } from "@/kernel/wm";
 import { bus } from "@/kernel/bus";
 import { iconRadius, themeForHour, SOUND_SETS, type SoundEvent, type Tone } from "@/lib/customize";
@@ -37,7 +37,7 @@ function play(tones: Tone[], volume: number) {
 }
 
 export function CustomizeLayer() {
-  const c = useSettings((s) => s.customize);
+  const c = useCustomize();
   const themeId = useSettings((s) => s.themeId);
   const motion = useSettings((s) => s.motion);
   const canvas = useRef<HTMLCanvasElement>(null);

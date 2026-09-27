@@ -1,6 +1,7 @@
 "use client";
 
 import { CUSTOMIZE_DEFAULTS, normaliseCustomize, type Customize } from "@/lib/customize";
+import { useMemo } from "react";
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 import { THEMES, FONT_STACKS, type Theme, type WallpaperId } from "./themes";
@@ -487,4 +488,14 @@ export function resolveTokens(s: Settings): Record<string, string> {
     "--motion": s.motion ? "1" : "0",
     ...s.customVars,
   };
+}
+
+/** The customizations, always valid: stored settings are normalised on load,
+ *  but a live set("customize", ...) from anywhere (an AI system update, a
+ *  script) could still hand the shell a broken value, and every effect and
+ *  wallpaper reads this. Memoised on the stored object, so effects keyed on its
+ *  parts do not re-run every render. */
+export function useCustomize(): Customize {
+  const raw = useSettings((s) => s.customize);
+  return useMemo(() => normaliseCustomize(raw), [raw]);
 }

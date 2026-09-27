@@ -1,7 +1,7 @@
 "use client";
 
 import { Component, lazy, Suspense, type ComponentType, type ReactNode } from "react";
-import { useSettings } from "@/kernel/settings";
+import { useCustomize } from "@/kernel/settings";
 import { THREE_WALLPAPERS, threeProps } from "@/lib/customize";
 import "@designcodeio/threeui/style.css";
 
@@ -40,7 +40,7 @@ class Fallback extends Component<{ children: ReactNode }, { failed: boolean }> {
 }
 
 export default function ThreeUIWallpaper() {
-  const w = useSettings((s) => s.customize.threeWallpaper);
+  const w = useCustomize().threeWallpaper;
   const def = THREE_WALLPAPERS.find((x) => x.id === w.id) ?? THREE_WALLPAPERS[0];
   const C = LAZY[def.component] ?? LAZY.ConstellationField;
   const props = threeProps(def, w);

@@ -3,7 +3,7 @@
 import { THREE_WALLPAPERS, CURSOR_FX, WINDOW_ANIMS, ICON_SHAPES, UI_SOUNDS, CUSTOMIZE_DEFAULTS } from "@/lib/customize";
 import { WallpaperThemeButton } from "@/shell/WallpaperThemeButton";
 import { useCallback, useMemo, useRef, useState } from "react";
-import { useSettings, resolveTokens } from "@/kernel/settings";
+import { useCustomize, useSettings, resolveTokens } from "@/kernel/settings";
 import { WALLPAPERS, FONT_STACKS, pairedTheme } from "@/kernel/themes";
 import { useCustomThemes, allThemes } from "@/kernel/customthemes";
 import { SPECIES, PET_FAMILIES, PERSONALITIES, PET_MODES, VOICES, getSpecies, useCustomPets } from "@/kernel/pets";
@@ -35,6 +35,7 @@ import type { Theme } from "@/kernel/themes";
 
 export default function Personalize({}: AppProps) {
   const s = useSettings();
+  const custom = useCustomize();
   const [tab, setTab] = useState("profiles");
   const [error, setError] = useState<string | null>(null);
   const importRef = useRef<HTMLInputElement>(null);
@@ -340,9 +341,9 @@ export default function Personalize({}: AppProps) {
             )}
 
             {s.wallpaper === "threeui" && (() => {
-              const tw = s.customize.threeWallpaper;
+              const tw = custom.threeWallpaper;
               const def = THREE_WALLPAPERS.find((w) => w.id === tw.id) ?? THREE_WALLPAPERS[0];
-              const setTw = (patch: Partial<typeof tw>) => s.set("customize", { ...s.customize, threeWallpaper: { ...tw, ...patch } });
+              const setTw = (patch: Partial<typeof tw>) => s.set("customize", { ...custom, threeWallpaper: { ...tw, ...patch } });
               return (
                 <div className="os-card mb-4 !p-2.5" data-threeui-picker>
                   <div className="mb-1.5 text-[12px] font-medium">ThreeUI live wallpaper</div>
@@ -367,7 +368,7 @@ export default function Personalize({}: AppProps) {
 
         {/* ── EFFECTS (lib/customize.ts, drawn by shell/CustomizeLayer.tsx) ── */}
         {tab === "effects" && (() => {
-          const c = s.customize;
+          const c = custom;
           const setC = (patch: Partial<typeof c>) => s.set("customize", { ...c, ...patch });
           const pick = <T extends string>(label: string, value: T, all: readonly T[], on: (v: T) => void, names?: Record<string, string>) => (
             <div className="mb-3">
