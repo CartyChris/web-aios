@@ -84,6 +84,7 @@ export const FIXED_SHORTCUTS: FixedShortcut[] = [
   { where: "Anywhere", keys: "?", what: "Show this cheat sheet (when you are not typing)" },
   { where: "Anywhere", keys: "mod+1", what: "Go to workspace 1 (1 to 9)" },
   { where: "Anywhere", keys: "mod+alt+1", what: "Apply tiling layout 1 (1 to 7)" },
+  { where: "Anywhere", keys: "mod+shift+`", what: "Cycle windows backwards" },
   { where: "Anywhere", keys: "shift+f10", what: "Open the context menu for the focused item (or the Menu key)" },
   { where: "Menus", keys: "up / down / home / end", what: "Move through a context menu; type a letter to jump" },
   { where: "Menus", keys: "escape", what: "Close a menu or dialog" },
@@ -118,4 +119,31 @@ export function sheetRows(binds: Record<string, string>, fixed: FixedShortcut[],
     .map((f) => ({ id: `${f.where}:${f.keys}`, label: `${f.where}: ${f.what}`, chord: f.keys, conflict: false, editable: false }))
     .filter((r) => hit(`${r.label.toLowerCase()} ${keysText(r.chord)}`));
   return { shell, apps };
+}
+
+/* ── matching a key press to a binding ──────────────────────────────────── */
+
+export interface KeyPress { key: string; code?: string; metaKey: boolean; ctrlKey: boolean; shiftKey: boolean; altKey: boolean }
+
+/** Physical keys for the punctuation a binding may name: with Shift held,
+ *  e.key reports the shifted character ("~" for "`"), so these match on e.code. */
+const CODE_FOR: Record<string, string> = { "`": "Backquote", ",": "Comma", ".": "Period", "/": "Slash", ";": "Semicolon", "'": "Quote", "[": "BracketLeft", "]": "BracketRight", "-": "Minus", "=": "Equal", "\\": "Backslash" };
+const NAMED_KEYS: Record<string, string> = { up: "arrowup", down: "arrowdown", left: "arrowleft", right: "arrowright", space: " ", esc: "escape" };
+
+/**
+ * Does a key press match a binding like "mod+shift+t"? "mod" is Cmd or Ctrl.
+ * Modifiers must match exactly, except that `allowShift` lets an extra Shift
+ * through -- how "hold Shift to go backwards" works on a binding that does not
+ * mention Shift.
+ */
+export function chordMatches(e: KeyPress, binding: string, allowShift = false): boolean {
+  if (!binding) return false;
+  const parts = binding.toLowerCase().endsWith("++") ? [...binding.toLowerCase().slice(0, -2).split("+"), "+"] : binding.toLowerCase().split("+");
+  const key = parts[parts.length - 1];
+  const needMod = parts.includes("mod"), needShift = parts.includes("shift"), needAlt = parts.includes("alt");
+  if (needMod !== (e.metaKey || e.ctrlKey)) return false;
+  if (needAlt !== e.altKey) return false;
+  if (needShift !== e.shiftKey && !(allowShift && e.shiftKey && !needShift)) return false;
+  if (CODE_FOR[key] && e.code === CODE_FOR[key]) return true;
+  return e.key.toLowerCase() === (NAMED_KEYS[key] ?? key);
 }

@@ -34,6 +34,7 @@ import { installActivityRecorder } from "@/kernel/activity";
 import { receiveHandoff } from "@/kernel/scenes";
 import { installRewind } from "@/kernel/rewind";
 import { installWebMcp } from "./webmcp";
+import { chordMatches } from "@/lib/keyhelp";
 import { installViewportFit } from "@/kernel/viewport";
 import { ShortcutSheet } from "./ShortcutSheet";
 
@@ -109,19 +110,9 @@ export function Desktop() {
   }, [hydrated]);
 
   // ── Keybindings ───────────────────────────────────────────────────────────
-  const matches = useCallback((e: KeyboardEvent, binding: string) => {
-    const parts = binding.toLowerCase().split("+");
-    const key = parts[parts.length - 1];
-    const needMod = parts.includes("mod");
-    const needShift = parts.includes("shift");
-    const needAlt = parts.includes("alt");
-    const mod = e.metaKey || e.ctrlKey;
-    if (needMod !== mod) return false;
-    if (needShift !== e.shiftKey) return false;
-    if (needAlt !== e.altKey) return false;
-    const named: Record<string, string> = { up: "arrowup", down: "arrowdown", left: "arrowleft", right: "arrowright" };
-    return e.key.toLowerCase() === (named[key] ?? key);
-  }, []);
+  // Pure and tested in lib/keyhelp.ts; window.cycle lets an extra Shift
+  // through, so Shift reverses the cycle.
+  const matches = useCallback((e: KeyboardEvent, binding: string, allowShift = false) => chordMatches(e, binding, allowShift), []);
 
   useEffect(() => {
     if (!hydrated) return;
@@ -155,7 +146,7 @@ export function Desktop() {
         ["shell.showDesktop", () => wm.minimizeAll()],
       ];
       for (const [id, run] of act) {
-        if (kb[id] && matches(e, kb[id])) { e.preventDefault(); run(); return; }
+        if (kb[id] && matches(e, kb[id], id === "window.cycle")) { e.preventDefault(); run(); return; }
       }
 
       // ⌘/Ctrl + Alt + 1..7 applies a tiling layout.

@@ -81,5 +81,25 @@ test("sheet: the fixed list covers the shell's hard-wired keys", () => {
   assert.match(text, /^\? /m, "? opens the sheet");
   assert.match(text, /mod\+1 .*workspace/i);
   assert.match(text, /mod\+alt\+1 .*layout/i);
-  assert.ok(!/backwards/i.test(text), "shift+cycle is not listed: the matcher rejects an extra Shift, so it never fires");
+  assert.match(text, /mod\+shift\+` .*backwards/i, "shift reverses window cycling, and the sheet says so");
+});
+
+import { chordMatches } from "../.test-build/keyhelp.js";
+
+const press = (key, mods = {}, code) => ({ key, code, metaKey: false, ctrlKey: false, shiftKey: false, altKey: false, ...mods });
+
+test("chords: exact modifiers, mod means Cmd or Ctrl, named keys", () => {
+  assert.ok(chordMatches(press("k", { metaKey: true }), "mod+k"));
+  assert.ok(chordMatches(press("k", { ctrlKey: true }), "mod+k"));
+  assert.ok(!chordMatches(press("k", { metaKey: true, shiftKey: true }), "mod+k"), "an extra Shift is a different chord");
+  assert.ok(chordMatches(press("ArrowLeft", { metaKey: true, altKey: true }), "mod+alt+left"));
+  assert.ok(chordMatches(press("T", { metaKey: true, shiftKey: true }), "mod+shift+t"));
+});
+
+test("chords: Shift+` reports '~', and still matches the backquote key when Shift is allowed", () => {
+  const backwards = press("~", { metaKey: true, shiftKey: true }, "Backquote");
+  assert.ok(!chordMatches(backwards, "mod+`"), "without allowShift, the old behaviour");
+  assert.ok(chordMatches(backwards, "mod+`", true));
+  assert.ok(chordMatches(press("`", { metaKey: true }, "Backquote"), "mod+`", true), "forwards still works");
+  assert.ok(chordMatches(press("/", { metaKey: true }, "Slash"), "mod+/"));
 });
