@@ -98,6 +98,21 @@ export const ICONS: Record<string, React.ReactNode> = {
   terminal: <><rect x="3.5" y="4.5" width="17" height="15" rx="1.8" /><P d="M7.5 9.5 10.5 12l-3 2.5" /><P d="M12.5 15h4.5" /></>,
   focus: <><circle cx="12" cy="13" r="7.5" /><P d="M12 9v4l2.6 1.6" /><P d="M9.5 2.8h5" /><P d="M12 2.8v2.7" /></>,
   calc: <><rect x="4.5" y="3.5" width="15" height="17" rx="1.8" /><P d="M7.8 7.6h8.4" /><P d="M8.4 12h.01M12 12h.01M15.6 12h.01M8.4 16h.01M12 16h.01M15.6 16h.01" /></>,
+  /* ── Office suite ─────────────────────────────────────────────────────── */
+  // Office: a start centre, three documents fanned out.
+  office: <><rect x="3.5" y="6" width="10" height="13" rx="1.4" /><P d="M8 6V4.6a1.1 1.1 0 0 1 1.1-1.1h8.3a1.1 1.1 0 0 1 1.1 1.1v11.8a1.1 1.1 0 0 1-1.1 1.1H13.5" /><P d="M6.3 10h4.4M6.3 13h4.4M6.3 16h2.8" /></>,
+  // Writer: a page with ruled lines and a pen nib.
+  writer: <><P d="M5.5 3.5h9l4.5 4.5v12.5h-13.5z" /><P d="M14.5 3.5v4.5h4.5" /><P d="M8.4 11h7.2M8.4 14h7.2M8.4 17h4.2" /></>,
+  // Sheets: a grid with a highlighted header row.
+  sheets: <><rect x="3.5" y="4" width="17" height="16" rx="1.6" /><P d="M3.5 9h17M3.5 14h17M9 4v16M14.8 4v16" /></>,
+  // Impress: a slide on an easel.
+  impress: <><rect x="3" y="4" width="18" height="11.5" rx="1.4" /><P d="M12 15.5v3M8.4 20.5 12 18.5l3.6 2" /><P d="M7 8h6M7 11h9" /></>,
+  // Draw: a circle and a square overlapping, joined by a connector.
+  drawapp: <><circle cx="8" cy="8.5" r="4" /><rect x="12.2" y="12.2" width="8" height="8" rx="1" /><P d="M10.8 11.4l2.4 2.4" /></>,
+  // Math: a summation sign.
+  math: <><P d="M17.5 5H6.5l6 7-6 7h11" /></>,
+  // Base: a database cylinder.
+  base: <><ellipse cx="12" cy="6" rx="7" ry="2.6" /><P d="M5 6v12c0 1.45 3.13 2.6 7 2.6s7-1.15 7-2.6V6" /><P d="M5 12c0 1.45 3.13 2.6 7 2.6s7-1.15 7-2.6" /></>,
   media: <><circle cx="12" cy="12" r="8.3" /><P d="M10.3 8.8 15.6 12l-5.3 3.2z" /></>,
   mediadeck: <><rect x="3.5" y="5.5" width="17" height="13" rx="1.8" /><P d="M3.5 9.2h17" /><P d="M9.2 12.2 13.4 14.4 9.2 16.6z" /><P d="M6.6 5.5V3.2M17.4 5.5V3.2" /></>,
 

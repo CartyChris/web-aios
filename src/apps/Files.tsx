@@ -4,6 +4,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useVFS, type VNode } from "@/kernel/vfs";
 import { useWM } from "@/kernel/wm";
 import { bus } from "@/kernel/bus";
+import { getApp } from "@/kernel/registry";
+import { appForPath } from "@/lib/office/files";
 import { registerContextTarget, type TargetContext } from "@/kernel/ctxmenu";
 import type { Entry, MenuSection } from "@/lib/ctxmenu";
 import type { AppProps } from "@/kernel/types";
@@ -112,8 +114,9 @@ export default function Files({}: AppProps) {
   );
 
   const openIn = useCallback((path: string, appId?: string) => {
-    const app = appId ?? (path.endsWith(".md") || path.endsWith(".txt") ? "notes" : "ide");
-    wm.open(app, { title: path.split("/").pop(), icon: app, args: { path } });
+    const app = appId ?? appForPath(path) ?? (path.endsWith(".md") || path.endsWith(".txt") ? "notes" : "ide");
+    const m = getApp(app);
+    wm.open(app, { title: path.split("/").pop(), icon: m?.icon ?? app, size: m?.defaultSize, args: { path } });
   }, [wm]);
 
   const openEntry = useCallback((e: { path: string; kind: "file" | "dir" }) => {
@@ -275,6 +278,7 @@ export default function Files({}: AppProps) {
       const openWith: Entry[] = [
         { id: "notes", label: "Notes", icon: "notes", run: () => openIn(path, "notes") },
         { id: "ide", label: "IDE", icon: "ide", run: () => openIn(path, "ide") },
+        ...(appForPath(path) ? [{ id: "office", label: getApp(appForPath(path)!)?.name ?? "Office", icon: getApp(appForPath(path)!)?.icon ?? "office", run: () => openIn(path) }] : []),
         { id: "chat", label: "AIOS Chat (summarize)", icon: "chat", run: () => {
           const n = useVFS.getState().read(path);
           if (n) bus.emit("aios-chat:ask", { prompt: `Summarize the file ${n.name}.`, context: { label: n.path, text: n.content.slice(0, 20000) } });

@@ -36,7 +36,7 @@ const sample = {
     { t: "quote", runs: [{ text: "Measure twice." }] },
     { t: "code", text: "const x = 1;\n  indented()" },
     { t: "table", rows: [[[{ text: "Name" }], [{ text: "Qty" }]], [[{ text: "Apples" }], [{ text: "3" }]]] },
-    { t: "img", src: PNG, alt: "a pixel" },
+    { t: "img", src: PNG, alt: "a pixel", w: 320, h: 180 },
     { t: "hr" },
     { t: "pagebreak" },
     { t: "p", runs: [{ text: "End." }] },
@@ -123,4 +123,15 @@ test("base64 round trip at every length mod 3", () => {
     assert.deepEqual(fromBase64(toBase64(b)), b, `length ${n}`);
   }
   assert.equal(toBase64(new TextEncoder().encode("Man")), "TWFu");
+});
+
+import { imgSize } from "../.test-build/office/doc.js";
+
+test("images keep their proportions, capped at 600 wide", () => {
+  assert.deepEqual(imgSize({ w: 1200, h: 300 }), [600, 150]);
+  assert.deepEqual(imgSize({ w: 200, h: 400 }), [200, 400]);
+  assert.deepEqual(imgSize({}), [480, 317]);
+  const d = { title: "t", blocks: [{ t: "img", src: PNG, alt: "a", w: 320, h: 180 }] };
+  const back = fromDocx(new Map(toDocx(d).map((e) => [e.path, e.content])), "t");
+  assert.deepEqual(back.blocks[0], { t: "img", src: PNG, alt: "a", w: 320, h: 180 }, "size survives .docx");
 });

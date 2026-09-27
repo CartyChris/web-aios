@@ -1,0 +1,10 @@
+[
+  {"when": "Improve the clarity", "reply": "Here is the revised text:\n\nThe quick brown fox leaps cleanly over the dog."},
+  {"when": "BAD-FORMULA", "reply": "=NOPE(B2)"},
+  {"when": "Write one formula for", "reply": "Sure! Here it is:\n```\n=SUM(B2:B3)\n```\nThis adds them."},
+  {"when": "Write a presentation", "reply": "Here is your deck:\n# Bakery app pitch\n> Fresh bread, fewer queues\n\n## The problem\n- Queues at 8am\n- Sold-out loaves\nNotes: Everyone has stood in that line.\n\n## The solution\n- Pre-order in the app\n  - Pick up in 30 seconds\n\n## The ask\n- 250k to launch in 3 cities"},
+  {"when": "STUB-DIAGRAM", "reply": "```json\n{\"direction\":\"down\",\"nodes\":[{\"id\":\"s\",\"label\":\"Start\",\"shape\":\"ellipse\"},{\"id\":\"c\",\"label\":\"Paid?\",\"shape\":\"diamond\"},{\"id\":\"ok\",\"label\":\"Ship order\"},{\"id\":\"no\",\"label\":\"Email customer\"}],\"edges\":[{\"from\":\"s\",\"to\":\"c\"},{\"from\":\"c\",\"to\":\"ok\",\"label\":\"yes\"},{\"from\":\"c\",\"to\":\"no\",\"label\":\"no\"}]}\n```"},
+  {"when": "Question:", "reply": "```sql\nSELECT name, orders FROM contacts WHERE orders > 1 ORDER BY orders DESC;\n```"},
+  {"when": "STUB-MATH", "reply": "$$\\frac{-b \\pm \\sqrt{b^2-4ac}}{2a}$$"},
+  {"when": ".", "reply": "STUB: no rule matched"}
+]

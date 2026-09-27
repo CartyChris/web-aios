@@ -108,6 +108,13 @@ export function parseDataUrl(src: string): { mime: string; bytes: Uint8Array } |
   return m ? { mime: m[1], bytes: fromBase64(m[2]) } : null;
 }
 
+/** Display size in px, capped at 600 wide with the proportions kept; 480 x 317 when unknown. */
+export function imgSize(b: { w?: number; h?: number }): [number, number] {
+  const w = Math.min(600, b.w ?? 480);
+  const h = b.h && b.w ? Math.round((b.h * w) / b.w) : Math.round(w * 0.66);
+  return [w, Math.max(1, h)];
+}
+
 const EXT: Record<string, string> = { "image/png": "png", "image/jpeg": "jpeg", "image/gif": "gif", "image/webp": "webp", "image/svg+xml": "svg" };
 
 /* ── Markdown ────────────────────────────────────────────────────────────── */
@@ -278,7 +285,7 @@ export function toHtml(doc: Doc, opts: { standalone?: boolean } = {}): string {
           return `<${tag}>${b.items.map((it) => `<li style="margin-left:${it.level * 1.5}em">${htmlRuns(it.runs)}</li>`).join("")}</${tag}>`;
         }
         case "table": return `<table>${b.rows.map((r, i) => `<tr>${r.map((c) => `<${i ? "td" : "th"}>${htmlRuns(c)}</${i ? "td" : "th"}>`).join("")}</tr>`).join("")}</table>`;
-        case "img": return /^data:image\/(png|jpeg|gif|webp);base64,/.test(b.src) || /^https?:/.test(b.src) ? `<p><img src="${esc(b.src)}" alt="${esc(b.alt)}"${b.w ? ` width="${b.w}"` : ""}></p>` : "";
+        case "img": return /^data:image\/(png|jpeg|gif|webp);base64,/.test(b.src) || /^https?:/.test(b.src) ? `<p><img src="${esc(b.src)}" alt="${esc(b.alt)}"${b.w ? ` width="${b.w}"` : ""}${b.w && b.h ? ` height="${b.h}"` : ""}></p>` : "";
         case "hr": return "<hr>";
         case "pagebreak": return `<div style="page-break-after:always"></div>`;
       }
@@ -341,7 +348,7 @@ export function toDocx(doc: Doc, opts: { when?: string } = {}): ZipEntry[] {
         media.push({ path: `word/media/image${n}.${ext}`, content: d.bytes });
         mediaTypes.add(ext);
         rels.push(`<Relationship Id="${id}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/image${n}.${ext}"/>`);
-        const wPx = Math.min(600, b.w ?? 480), hPx = b.h ?? Math.round(wPx * 0.66);
+        const [wPx, hPx] = imgSize(b);
         const cx = wPx * 9525, cy = hPx * 9525;
         body.push(`<w:p><w:r><w:drawing><wp:inline><wp:extent cx="${cx}" cy="${cy}"/><wp:docPr id="${n}" name="Image ${n}" descr="${escapeXml(b.alt)}"/><a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic><pic:nvPicPr><pic:cNvPr id="${n}" name="image${n}.${ext}"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="${id}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>`);
         break;
@@ -452,7 +459,9 @@ export function fromDocx(files: Map<string, string | Uint8Array>, title = "Impor
       const ext = target.split(".").pop()?.toLowerCase() ?? "png";
       const mime = ext === "jpg" || ext === "jpeg" ? "image/jpeg" : ext === "gif" ? "image/gif" : "image/png";
       const alt = attr(all(node, "docPr")[0] ?? { name: "", attrs: {}, children: [] }, "descr") ?? "";
-      if (bytes && typeof bytes !== "string") { blocks.push({ t: "img", src: `data:${mime};base64,${toBase64(bytes)}`, alt }); continue; }
+      const ext0 = all(node, "extent")[0];
+      const w = ext0 ? Math.round(Number(attr(ext0, "cx") ?? 0) / 9525) : 0, h = ext0 ? Math.round(Number(attr(ext0, "cy") ?? 0) / 9525) : 0;
+      if (bytes && typeof bytes !== "string") { blocks.push({ t: "img", src: `data:${mime};base64,${toBase64(bytes)}`, alt, ...(w > 0 && h > 0 ? { w, h } : {}) }); continue; }
     }
     const runs = runsOf(node);
     const h = /^heading\s?([1-6])$/i.exec(style) ?? /^Heading([1-6])$/.exec(style);
@@ -554,7 +563,8 @@ export function toOdt(doc: Doc, opts: { when?: string } = {}): ZipEntry[] {
         const n = ++imgN, path = `Pictures/image${n}.${EXT[d.mime]}`;
         media.push({ path, content: d.bytes });
         mediaParts.push({ path, type: d.mime });
-        const wIn = (Math.min(600, b.w ?? 480) / 96).toFixed(2), hIn = ((b.h ?? Math.round(Math.min(600, b.w ?? 480) * 0.66)) / 96).toFixed(2);
+        const [iw, ih] = imgSize(b);
+        const wIn = (iw / 96).toFixed(2), hIn = (ih / 96).toFixed(2);
         body.push(`<text:p text:style-name="Standard"><draw:frame draw:name="Image${n}" text:anchor-type="as-char" svg:width="${wIn}in" svg:height="${hIn}in"><draw:image xlink:href="${path}" xlink:type="simple" xlink:show="embed" xlink:actuate="onLoad"/><svg:desc>${escapeXml(b.alt)}</svg:desc></draw:frame></text:p>`);
         break;
       }
@@ -579,6 +589,14 @@ export function toOdt(doc: Doc, opts: { when?: string } = {}): ZipEntry[] {
     { path: "meta.xml", content: odfMeta(doc.title, opts.when ?? "2026-01-01T00:00:00Z") },
     ...media,
   ];
+}
+
+/** An ODF length ("3.33in", "8.5cm", "40mm", "120pt") in CSS px; 0 if unreadable. */
+export function lengthPx(v: string | undefined): number {
+  const m = /^([\d.]+)(in|cm|mm|pt|px)$/.exec((v ?? "").trim());
+  if (!m) return 0;
+  const k = { in: 96, cm: 96 / 2.54, mm: 96 / 25.4, pt: 96 / 72, px: 1 }[m[2] as "in"];
+  return Math.round(Number(m[1]) * k);
 }
 
 /** Read an unzipped .odt's content.xml (styles resolved from its automatic styles). */
@@ -635,7 +653,9 @@ export function fromOdt(files: Map<string, string | Uint8Array>, title = "Import
         const href = attr(frame, "href") ?? "";
         const bytes = files.get(href);
         const ext = href.split(".").pop()?.toLowerCase();
-        if (bytes && typeof bytes !== "string") { blocks.push({ t: "img", src: `data:${ext === "jpg" || ext === "jpeg" ? "image/jpeg" : "image/png"};base64,${toBase64(bytes)}`, alt: textOf(all(n, "desc")[0] ?? { name: "", attrs: {}, children: [] }) }); continue; }
+        const fr = all(n, "frame")[0];
+        const w = fr ? lengthPx(attr(fr, "width")) : 0, h = fr ? lengthPx(attr(fr, "height")) : 0;
+        if (bytes && typeof bytes !== "string") { blocks.push({ t: "img", src: `data:${ext === "jpg" || ext === "jpeg" ? "image/jpeg" : "image/png"};base64,${toBase64(bytes)}`, alt: textOf(all(n, "desc")[0] ?? { name: "", attrs: {}, children: [] }), ...(w > 0 && h > 0 ? { w, h } : {}) }); continue; }
       }
       if (/quotation/i.test(st)) blocks.push({ t: "quote", runs: runsOf(n) });
       else if (/preformatted/i.test(st)) {

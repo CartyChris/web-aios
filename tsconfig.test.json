@@ -127,6 +127,9 @@
     "src/lib/office/slides.ts",
     "src/lib/office/mathml.ts",
     "src/lib/office/basedb.ts",
-    "src/lib/office/draw.ts"
+    "src/lib/office/draw.ts",
+    "src/lib/office/files.ts",
+    "src/lib/office/ai.ts",
+    "src/lib/office/sheetops.ts"
   ]
 }
