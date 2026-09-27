@@ -61,6 +61,8 @@ const MUST_BE_LAZY = [
   ["src/lib/harness/tools.ts", "the harness tools"],
   ["src/lib/harness/fixtures.ts", "the harness fixtures"],
   ["src/lib/services.ts", "the service catalogue (loaded with a data widget)"],
+  ["src/shell/ThreeUIWallpaper.tsx", "the ThreeUI wallpapers and three.js (loaded when chosen)"],
+  ["src/lib/office/formula.ts", "the office suite (loaded when an office app opens)"],
 ];
 
 for (const [file, what] of MUST_BE_LAZY) {

@@ -1,5 +1,6 @@
 "use client";
 
+import { THREE_WALLPAPERS, CURSOR_FX, WINDOW_ANIMS, ICON_SHAPES, UI_SOUNDS, CUSTOMIZE_DEFAULTS } from "@/lib/customize";
 import { WallpaperThemeButton } from "@/shell/WallpaperThemeButton";
 import { useCallback, useMemo, useRef, useState } from "react";
 import { useSettings, resolveTokens } from "@/kernel/settings";
@@ -107,6 +108,7 @@ export default function Personalize({}: AppProps) {
           { id: "theme", label: "Theme", icon: "personalize" },
           { id: "wallpaper", label: "Wallpaper", icon: "wallpaper" },
           { id: "layout", label: "Layout", icon: "layout" },
+          { id: "effects", label: "Effects", icon: "sparkles" },
           { id: "personality", label: "Personality", icon: "pet" },
           { id: "widgets", label: "Widgets", icon: "widgets" },
           { id: "tokens", label: "Tokens", icon: "tokens" },
@@ -337,12 +339,77 @@ export default function Personalize({}: AppProps) {
               </div>
             )}
 
+            {s.wallpaper === "threeui" && (() => {
+              const tw = s.customize.threeWallpaper;
+              const def = THREE_WALLPAPERS.find((w) => w.id === tw.id) ?? THREE_WALLPAPERS[0];
+              const setTw = (patch: Partial<typeof tw>) => s.set("customize", { ...s.customize, threeWallpaper: { ...tw, ...patch } });
+              return (
+                <div className="os-card mb-4 !p-2.5" data-threeui-picker>
+                  <div className="mb-1.5 text-[12px] font-medium">ThreeUI live wallpaper</div>
+                  <div className="mb-2 grid gap-1.5" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(130px, 1fr))" }}>
+                    {THREE_WALLPAPERS.map((w) => (
+                      <button key={w.id} className={cn("os-btn !py-1.5 text-[11px]", tw.id === w.id && "!border-[var(--accent)] !bg-[var(--accent)]/16")} aria-pressed={tw.id === w.id} onClick={() => setTw({ id: w.id })}>{w.name}</button>
+                    ))}
+                  </div>
+                  {def.speed && <Slider label="Speed" value={tw.speed} min={0.1} max={3} step={0.1} onChange={(v) => setTw({ speed: v })} format={(v) => `${v.toFixed(1)}x`} />}
+                  {def.hue && <Slider label="Hue shift" value={tw.hue} min={-180} max={180} step={5} onChange={(v) => setTw({ hue: v })} format={(v) => `${v} deg`} />}
+                  <p className="mt-1 text-[10.5px] text-[var(--muted)]">From ThreeUI by Meng To (MIT). Each one downloads only when chosen; if WebGL is unavailable the theme gradient shows instead.</p>
+                </div>
+              );
+            })()}
+
             <Slider label="Blur" value={s.wallpaperBlur} min={0} max={40} onChange={(v) => s.set("wallpaperBlur", v)} format={(v) => (v ? `${v}px` : "none")} />
             <Slider label="Dim" value={s.wallpaperDim} min={0} max={0.85} step={0.05} onChange={(v) => s.set("wallpaperDim", v)} format={(v) => `${Math.round(v * 100)}%`} />
             <Toggle label="Animate wallpaper" checked={s.wallpaperAnimate} onChange={(v) => s.set("wallpaperAnimate", v)} hint="Static wallpapers cost nothing per frame." />
 
           </div>
         )}
+
+        {/* ── EFFECTS (lib/customize.ts, drawn by shell/CustomizeLayer.tsx) ── */}
+        {tab === "effects" && (() => {
+          const c = s.customize;
+          const setC = (patch: Partial<typeof c>) => s.set("customize", { ...c, ...patch });
+          const pick = <T extends string>(label: string, value: T, all: readonly T[], on: (v: T) => void, names?: Record<string, string>) => (
+            <div className="mb-3">
+              <div className="os-label mb-1">{label}</div>
+              <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label={label}>
+                {all.map((v) => <button key={v} role="radio" aria-checked={value === v} className={cn("os-btn !py-1 text-[11px]", value === v && "!border-[var(--accent)] !bg-[var(--accent)]/16")} onClick={() => on(v)}>{names?.[v] ?? v[0].toUpperCase() + v.slice(1)}</button>)}
+              </div>
+            </div>
+          );
+          const themes = allThemes(generatedThemes);
+          return (
+            <div className="max-w-2xl" data-personalize-effects>
+              <div className="os-card mb-3 !p-2.5">
+                <div className="mb-1.5 text-[12px] font-medium">Screen</div>
+                <Slider label="Film grain" value={c.screenFx.grain} min={0} max={1} step={0.05} onChange={(v) => setC({ screenFx: { ...c.screenFx, grain: v } })} format={(v) => (v ? `${Math.round(v * 100)}%` : "off")} />
+                <Slider label="Vignette" value={c.screenFx.vignette} min={0} max={1} step={0.05} onChange={(v) => setC({ screenFx: { ...c.screenFx, vignette: v } })} format={(v) => (v ? `${Math.round(v * 100)}%` : "off")} />
+                <Toggle label="CRT scanlines" checked={c.screenFx.scanlines} onChange={(v) => setC({ screenFx: { ...c.screenFx, scanlines: v } })} />
+                <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px]">
+                  <span className="text-[var(--muted)]">Colour tint</span>
+                  {[null, "#ff9f43", "#54a0ff", "#ff6b9d", "#1dd1a1", "#a55eea"].map((t) => <button key={t ?? "none"} className={cn("h-5 w-5 rounded-full border", c.screenFx.tint === t ? "border-[var(--accent)]" : "border-white/25")} style={{ background: t ?? "transparent" }} aria-label={t ? `Tint ${t}` : "No tint"} onClick={() => setC({ screenFx: { ...c.screenFx, tint: t } })} />)}
+                </div>
+              </div>
+              {pick("Cursor effect", c.cursorFx, CURSOR_FX, (v) => setC({ cursorFx: v }), { off: "Off", glow: "Glow", trail: "Trail", spotlight: "Spotlight" })}
+              {pick("Window animation", c.windowAnim, WINDOW_ANIMS, (v) => setC({ windowAnim: v }))}
+              {pick("Icon shape", c.iconShape, ICON_SHAPES, (v) => setC({ iconShape: v }))}
+              {pick("Interface sounds", c.uiSounds, UI_SOUNDS, (v) => setC({ uiSounds: v }))}
+              {c.uiSounds !== "off" && <Slider label="Sound volume" value={c.uiVolume} min={0} max={1} step={0.05} onChange={(v) => setC({ uiVolume: v })} format={(v) => `${Math.round(v * 100)}%`} />}
+              <div className="os-card mt-3 !p-2.5">
+                <Toggle label="Switch theme for day and night" checked={c.autoTheme.on} onChange={(v) => setC({ autoTheme: { ...c.autoTheme, on: v, ...(v && c.autoTheme.day === c.autoTheme.night ? { day: s.themeId } : {}) } })} hint="Checked every minute, using this device's clock." />
+                {c.autoTheme.on && (
+                  <div className="mt-2 grid gap-1.5 text-[11.5px] sm:grid-cols-2">
+                    <label className="flex items-center gap-1.5">Day theme <select className="os-input !w-auto !py-0.5" value={c.autoTheme.day} onChange={(e) => setC({ autoTheme: { ...c.autoTheme, day: e.target.value } })}>{themes.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select></label>
+                    <label className="flex items-center gap-1.5">from <select className="os-input !w-auto !py-0.5" value={c.autoTheme.dayStart} onChange={(e) => setC({ autoTheme: { ...c.autoTheme, dayStart: Number(e.target.value) } })}>{Array.from({ length: 24 }, (_, h) => <option key={h} value={h}>{String(h).padStart(2, "0")}:00</option>)}</select></label>
+                    <label className="flex items-center gap-1.5">Night theme <select className="os-input !w-auto !py-0.5" value={c.autoTheme.night} onChange={(e) => setC({ autoTheme: { ...c.autoTheme, night: e.target.value } })}>{themes.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select></label>
+                    <label className="flex items-center gap-1.5">from <select className="os-input !w-auto !py-0.5" value={c.autoTheme.nightStart} onChange={(e) => setC({ autoTheme: { ...c.autoTheme, nightStart: Number(e.target.value) } })}>{Array.from({ length: 24 }, (_, h) => <option key={h} value={h}>{String(h).padStart(2, "0")}:00</option>)}</select></label>
+                  </div>
+                )}
+              </div>
+              <button className="os-btn mt-3 !py-1 text-[11px]" onClick={() => s.set("customize", { ...CUSTOMIZE_DEFAULTS, threeWallpaper: c.threeWallpaper })}>Reset effects</button>
+            </div>
+          );
+        })()}
 
         {/* ── LAYOUT ── */}
         {tab === "layout" && (

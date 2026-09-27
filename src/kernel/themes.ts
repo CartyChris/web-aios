@@ -165,6 +165,9 @@ export const WALLPAPERS = [
   { id: "contours", name: "Contour Lines", theme: "survey" },
   { id: "horizon", name: "Synth Horizon", theme: "dusk" },
   { id: "ink", name: "Ink in Water", theme: "sumi" },
+  /* ThreeUI live wallpapers (MIT, Meng To): which one is settings.customize.
+     threeWallpaper; the catalogue is lib/customize.ts. Loaded only when chosen. */
+  { id: "threeui", name: "ThreeUI Live" },
 ] as const;
 
 /** The theme a wallpaper was designed against, if it names one. */

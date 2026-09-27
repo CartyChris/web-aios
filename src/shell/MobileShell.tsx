@@ -1,5 +1,6 @@
 "use client";
 
+import { CustomizeLayer } from "./CustomizeLayer";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useWM } from "@/kernel/wm";
 import { handoffUrl } from "@/kernel/scenes";
@@ -126,6 +127,7 @@ export function MobileShell() {
       onTouchEnd={onTouchEnd}
     >
       <Wallpaper />
+      <CustomizeLayer />
 
       {/* ── Status bar ── */}
       <MobileStatusBar />
@@ -192,7 +194,7 @@ export function MobileShell() {
               {(pages[page] ?? []).map((app) => (
                 <button key={app.id} onClick={() => open(app)} className="flex flex-col items-center gap-1.5">
                   <span
-                    className="grid place-items-center rounded-[22%] shadow-lg"
+                    className="grid place-items-center rounded-[var(--os-icon-radius,22%)] shadow-lg"
                     style={{
                       width: 58, height: 58,
                       background: `linear-gradient(150deg, color-mix(in srgb, ${app.accent ?? "var(--accent)"} 38%, var(--panel-solid)), var(--panel-solid))`,
@@ -233,7 +235,7 @@ export function MobileShell() {
             {dockApps.map((app) => (
               <button key={app.id} onClick={() => open(app)} aria-label={app.name}>
                 <span
-                  className="grid place-items-center rounded-[22%]"
+                  className="grid place-items-center rounded-[var(--os-icon-radius,22%)]"
                   style={{
                     width: 52, height: 52,
                     background: `linear-gradient(150deg, color-mix(in srgb, ${app.accent ?? "var(--accent)"} 38%, var(--panel-solid)), var(--panel-solid))`,
@@ -247,7 +249,7 @@ export function MobileShell() {
             ))}
             <button onClick={() => setPalette(true)} aria-label="Command palette">
               <span
-                className="grid place-items-center rounded-[22%]"
+                className="grid place-items-center rounded-[var(--os-icon-radius,22%)]"
                 style={{ width: 52, height: 52, background: "color-mix(in srgb, var(--accent) 24%, var(--panel-solid))", border: "1px solid var(--border)", color: "var(--accent)" }}
               >
                 <Icon name="launcher" size={24} />

@@ -1,9 +1,12 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { lazy, Suspense, useEffect, useRef } from "react";
 import { useSettings } from "@/kernel/settings";
 import { isShaderWallpaper } from "@/lib/wallpaper-shaders";
 import { ShaderWallpaper } from "./ShaderWallpaper";
+
+// Loaded only when chosen: ThreeUI brings three.js and its own stylesheet.
+const ThreeUIWallpaper = lazy(() => import("./ThreeUIWallpaper"));
 
 /** Procedural wallpapers drawn on one canvas.
  *
@@ -246,6 +249,10 @@ export function Wallpaper() {
           className="absolute inset-0 bg-cover bg-center"
           style={{ backgroundImage: `url(${image})`, filter: blur ? `blur(${blur}px)` : undefined, transform: blur ? "scale(1.06)" : undefined }}
         />
+      ) : kind === "threeui" ? (
+        <div className="absolute inset-0" style={{ background: "linear-gradient(135deg, var(--bg), var(--bg2))", filter: blur ? `blur(${blur}px)` : undefined }}>
+          <Suspense fallback={null}><ThreeUIWallpaper /></Suspense>
+        </div>
       ) : isShaderWallpaper(kind) ? (
         // Keyed by kind: a fresh canvas per shader, so no GL state from the
         // previous recipe can leak into the next one. The gradient underneath

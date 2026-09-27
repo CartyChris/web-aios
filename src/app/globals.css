@@ -218,6 +218,16 @@ input, textarea, select, button { font: inherit; color: inherit; }
    and the OS reduced-motion preference both turn it off. */
 @keyframes os-window-in { from { opacity: 0; transform: translateY(8px) scale(0.965); } to { opacity: 1; transform: none; } }
 .os-window-enter { animation: os-window-in calc(200ms * var(--motion, 1)) cubic-bezier(0.2, 0.9, 0.3, 1.15) backwards; }
+/* Personalize > Effects: how windows arrive (lib/customize.ts). */
+@keyframes os-window-zoom { from { opacity: 0; transform: scale(0.7); } to { opacity: 1; transform: none; } }
+@keyframes os-window-slide { from { opacity: 0; transform: translateY(40px); } to { opacity: 1; transform: none; } }
+@keyframes os-window-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes os-window-genie { 0% { opacity: 0; transform: translateY(45%) scale(0.2, 0.05); transform-origin: 50% 100%; } 60% { opacity: 1; transform: translateY(0) scale(0.9, 1.05); } 100% { opacity: 1; transform: none; } }
+:root[data-window-anim="zoom"] .os-window-enter { animation-name: os-window-zoom; animation-duration: calc(240ms * var(--motion, 1)); }
+:root[data-window-anim="slide"] .os-window-enter { animation-name: os-window-slide; animation-duration: calc(260ms * var(--motion, 1)); }
+:root[data-window-anim="fade"] .os-window-enter { animation-name: os-window-fade; animation-duration: calc(220ms * var(--motion, 1)); }
+:root[data-window-anim="genie"] .os-window-enter { animation-name: os-window-genie; animation-duration: calc(380ms * var(--motion, 1)); animation-timing-function: cubic-bezier(0.2, 0.8, 0.2, 1); }
+:root[data-window-anim="none"] .os-window-enter { animation: none; }
 @keyframes pet-bounce { 0%, 100% { transform: translateY(0) scale(1); } 30% { transform: translateY(-16%) scale(1.06, 0.94); } 62% { transform: translateY(0) scale(0.95, 1.05); } }
 .pet-bounce { animation: pet-bounce calc(420ms * var(--motion, 1)) ease-out; }
 @media (prefers-reduced-motion: reduce) { .os-window-enter, .pet-bounce { animation: none; } }

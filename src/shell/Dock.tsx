@@ -176,7 +176,7 @@ function DockButton({ label, icon, accent, running, active, elsewhere, scale, sh
       {...rest}
       title={label}
       aria-label={label}
-      className="group relative grid place-items-center rounded-[calc(var(--radius)*0.8)] transition-transform"
+      className="group relative grid place-items-center rounded-[var(--os-icon-radius,calc(var(--radius)*0.8))] transition-transform"
       style={{
         width: "var(--dock-size)",
         height: "var(--dock-size)",

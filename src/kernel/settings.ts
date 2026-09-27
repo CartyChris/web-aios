@@ -1,5 +1,6 @@
 "use client";
 
+import { CUSTOMIZE_DEFAULTS, normaliseCustomize, type Customize } from "@/lib/customize";
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 import { THEMES, FONT_STACKS, type Theme, type WallpaperId } from "./themes";
@@ -96,6 +97,9 @@ export interface Settings {
    *  under the Dynamic Island; "solid" avoids the iOS 26 bottom-gap bug.
    *  Read before first paint by the boot script in app/layout.tsx. */
   statusBar: "translucent" | "solid";
+  /** Screen and cursor effects, window animation, icon shape, sounds,
+   *  day/night themes and the ThreeUI wallpaper (lib/customize.ts). */
+  customize: Customize;
 
   // ── AI ──────────────────────────────────────────────────────────────────
   ai: AISettings;
@@ -240,6 +244,7 @@ const DEFAULTS: Settings = {
   phoneMode: "auto",
   phoneTipSeen: false,
   statusBar: "translucent",
+  customize: CUSTOMIZE_DEFAULTS,
 
   ai: {
     provider: "openai",
@@ -447,6 +452,7 @@ export const useSettings = create<SettingsState>()(
           keybinds: { ...DEFAULT_KEYBINDS, ...(p.keybinds ?? {}) },
           customVars: { ...(p.customVars ?? {}) },
           statusBar: p.statusBar === "solid" ? "solid" : "translucent",
+          customize: normaliseCustomize(p.customize),
         };
       },
     },

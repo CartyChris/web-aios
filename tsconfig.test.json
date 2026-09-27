@@ -131,6 +131,7 @@
     "src/lib/office/files.ts",
     "src/lib/office/ai.ts",
     "src/lib/office/sheetops.ts",
-    "src/lib/bridge-cli.ts"
+    "src/lib/bridge-cli.ts",
+    "src/lib/customize.ts"
   ]
 }

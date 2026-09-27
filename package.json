@@ -2,7 +2,7 @@
   "name": "web-aios",
   "version": "1.0.0",
   "private": true,
-  "description": "Web-AIOS \u2014 a fully customizable AI/Agent desktop operating system for the web.",
+  "description": "Web-AIOS — a fully customizable AI/Agent desktop operating system for the web.",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
@@ -14,6 +14,7 @@
     "check": "node scripts/check.mjs"
   },
   "dependencies": {
+    "@designcodeio/threeui": "1.2.0",
     "clsx": "2.1.1",
     "lucide-react": "1.46.0",
     "next": "16.3.5",

@@ -23,6 +23,7 @@ import { chooseShell, offerPhoneView } from "@/lib/shell-mode";
 import { cn } from "@/lib/cn";
 import { Icon } from "./icons";
 import { PetLayer } from "./pets";
+import { CustomizeLayer } from "./CustomizeLayer";
 import { DesktopIcons } from "./DesktopIcons";
 import { PinPicker } from "./PinPicker";
 import { EGGS, useEggs, watchSequences } from "@/lib/easter";
@@ -263,6 +264,7 @@ export function Desktop() {
       {visible.map((w) => <WindowFrame key={w.id} win={w} />)}
 
       <PetLayer />
+      <CustomizeLayer />
 
       <TopBar onLauncher={() => setLauncher((v) => !v)} onPalette={() => setPalette((v) => !v)} />
       <Dock onLauncher={() => setLauncher((v) => !v)} />
