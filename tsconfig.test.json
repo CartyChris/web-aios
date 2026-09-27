@@ -118,6 +118,15 @@
     "src/lib/media-embed.ts",
     "src/lib/textdiff.ts",
     "src/lib/panelchart.ts",
-    "src/lib/viewport-fit.ts"
+    "src/lib/viewport-fit.ts",
+    "src/lib/office/xml.ts",
+    "src/lib/office/zipread.ts",
+    "src/lib/office/formula.ts",
+    "src/lib/office/doc.ts",
+    "src/lib/office/sheetio.ts",
+    "src/lib/office/slides.ts",
+    "src/lib/office/mathml.ts",
+    "src/lib/office/basedb.ts",
+    "src/lib/office/draw.ts"
   ]
 }
