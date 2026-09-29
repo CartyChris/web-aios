@@ -18,7 +18,7 @@ shows how far ahead). All five checks were green together:
 | Check | Result |
 |---|---|
 | `npm run check` | OK: 45 apps, 58 themes, 658 buttons with accessible names |
-| `npm test` | 1446/1446 |
+| `npm test` | 1462/1462 |
 | `tsc --noEmit` | clean |
 | ESLint | 0 errors, 0 warnings |
 | `next build` | OK |
@@ -32,7 +32,8 @@ The work since the last hand-off is ten commits, `1d78a9a` to `245be2c`, plus th
 
 1. **Rematerialize the repo from iCloud**, before anything else (see §1a).
 2. **Read these, in this order:**
-   - `docs/HANDOFF-2026-09-20.md` §16–§22. That's everything built in the last six sessions, what was verified, and what wasn't.
+   - `docs/LESSONS.md`: one page of do/don't rules, each learned the hard way.
+   - `docs/HANDOFF-2026-09-20.md` §16–§23. That's everything built in the last seven sessions, what was verified, and what wasn't.
    - `docs/ROADMAP-2026-09-25.md`. It lists the 10 roadmap features and their sources. All 10 have a first slice.
 3. **Prove the baseline yourself** (§1c). If a number differs from the table above, find out why before you change anything.
 4. **Write a numbered stage plan**, giving each stage a check that can fail. Then build.
@@ -93,6 +94,7 @@ mkdir -p .next && xattr -w 'com.apple.fileprovider.ignore#P' 1 .next
 | 20 | Dock, video sound |
 | 21 | Snap geometry, Rewind v2, Timeline tool, chart/timeline/diff panels, cheat sheet, startup -18% |
 | 22 | iPhone fit, office suite, Bridge CLI provider, ThreeUI + Effects, pets, resumable AIOS Chat |
+| 23 | iPhone app fills the screen (opaque status bar), top bar takes taps, main model on phones, Restore from backup |
 
 `HANDOFF.md` at the repo root is stale and has a banner pointing to the docs file.
 There's no `docs/WORKLOG.md` here; that convention belongs to the sibling Eigenstate project.
@@ -242,7 +244,7 @@ npm run lint                       # must be 0 errors AND 0 warnings
 |---|---|---|
 | **Office suite:** Office start centre, Writer, Sheets, Impress, Draw, Math, Base, each with an AI panel; .docx .xlsx .pptx and ODF in/out | `src/lib/office/*` (pure), `src/apps/office/*` | 22 |
 | **Bridge CLI provider:** AI through local Claude Code / Codex via the Bridge daemon's `/ai` | `src/lib/bridge-cli.ts`, `useAI.ts` "bridge" branch | 22 |
-| **iPhone installed-app fit:** iOS 26 gap cover, status-bar choice, live readout | `lib/viewport-fit.ts`, `kernel/viewport.ts`, `shell/ScreenFit.tsx` | 22 |
+| **iPhone installed-app fit:** opaque status bar by default (the see-through one strands a band iOS won't draw), safe-area insets on every edge, the reinstall notice, Restore from backup | `lib/viewport-fit.ts`, `kernel/viewport.ts`, `shell/ScreenFit.tsx`, `shell/ScreenFitNotice.tsx`, `lib/backup.ts` | 23 |
 | **ThreeUI wallpapers + Effects tab** (grain, vignette, cursor, window animation, icon shape, sounds, day/night) | `lib/customize.ts`, `shell/CustomizeLayer.tsx`, `shell/ThreeUIWallpaper.tsx` | 22 |
 | **Pets with a life:** needs, bond levels, accessories, tricks, fetch, OS reactions | `lib/petlife.ts`, `kernel/petlife.ts`, `shell/pets.tsx` | 22 |
 | **Resumable AIOS Chat:** per-step checkpoints, kept transcript, "Resume from step N" | `lib/aios-resume.ts`, `shell/AiosChat.tsx` | 22 |
@@ -314,12 +316,12 @@ Done since the last hand-off: **24** backwards window cycling. Still open:
 tests). 21. C2PA (verify a signer exists first). 22. Realtime voice (Chris's key). 23. Third-party
 MCP Apps. And 15b: **Agent Loop checkpoints**, the other half of resumable runs.
 
-### D. Implementation map (updated 2026-09-27)
+### D. Implementation map (updated 2026-09-28)
 
-**1. Verify the iPhone fix on the device (minutes, Chris).** Settings > Phone & Screen on the
-iPhone Air: read "Gap" and "Covering it with". If a band remains with Full-bleed, try Solid and
-reopen from the Home Screen. Record the numbers in HANDOFF; if 100lvh did not recover the band,
-make Solid the default for iOS 26 standalone.
+**1. Verify the iPhone fix on the device (minutes, Chris).** Done in the iOS 27 simulator
+(HANDOFF §23); still to confirm on the iPhone Air itself. Download a backup, remove the Home
+Screen icon, add it again from Safari, then check Settings > Phone & Screen: "Installed with"
+should read "standard status bar" and there should be no band. Record the numbers in HANDOFF.
 
 **2. C15b Agent Loop checkpoints (half a session).** Reuse `lib/aios-resume.ts`: checkpoint each
 round in `src/lib/agent-loop.ts`'s caller, clear on completion, offer "Resume from round N" in
