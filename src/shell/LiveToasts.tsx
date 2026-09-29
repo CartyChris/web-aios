@@ -193,9 +193,9 @@ export function LiveToasts({ compact }: { compact?: boolean }) {
       aria-live="polite"
       className={cn(
         "pointer-events-none fixed z-[9800] flex flex-col gap-1.5",
-        compact ? "left-2 right-2" : "bottom-20 right-3 w-[320px] max-w-[calc(100vw-24px)]",
+        compact ? "left-2 right-2" : "right-3 w-[320px] max-w-[calc(100vw-24px)]",
       )}
-      style={compact ? { top: "calc(env(safe-area-inset-top) + 34px)" } : undefined}
+      style={compact ? { top: "calc(env(safe-area-inset-top) + 34px)" } : { bottom: "calc(80px + var(--sa-b))" }}
       data-live-toasts
     >
       {live.map((j) => (

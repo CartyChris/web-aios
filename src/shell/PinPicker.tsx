@@ -8,6 +8,7 @@ import { useUserApps } from "@/kernel/userapps";
 import { bus } from "@/kernel/bus";
 import { Icon } from "./icons";
 import { cn } from "@/lib/cn";
+import { safeArea } from "@/kernel/viewport";
 
 /* Pin anything to the desktop: a built-in app, an app you built in Studio, or
  * a file. Opened from the desktop context menu, and it drops the icon where
@@ -60,7 +61,8 @@ export function PinPicker() {
   const pin = (kind: "app" | "userapp" | "file", ref: string) => {
     // Drop it where the right-click happened, offset so the cursor is not
     // sitting on top of the icon it just made.
-    const topInset = settings.topBarVisible ? 40 : 0;
+    // The same inset DesktopIcons is laid out under (Desktop.tsx).
+    const topInset = (settings.topBarVisible ? 40 : 0) + safeArea().top;
     settings.addDesktopItem({ kind, ref, x: Math.max(0, at.x - 42), y: Math.max(0, at.y - topInset - 20) });
     bus.emit("notify", { title: "Pinned to desktop", kind: "success" });
     setAt(null);

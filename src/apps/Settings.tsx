@@ -18,6 +18,7 @@ import { Icon } from "@/shell/icons";
 import { findConflicts, actionLabel, searchSettings, type SettingEntry } from "@/lib/keyhelp";
 import { ShortcutSheet } from "@/shell/ShortcutSheet";
 import { ScreenFit } from "@/shell/ScreenFit";
+import { readBackup } from "@/lib/backup";
 
 const TAB_LABELS: Record<string, string> = {
   providers: "Providers & Keys", ai: "AI", keys: "Keyboard", screen: "Phone & Screen", privacy: "Privacy", storage: "Storage", about: "About",
@@ -55,11 +56,12 @@ const SETTINGS_INDEX: SettingEntry[] = [
 
 
 /** Settings — providers and keys, AI tuning, keybindings, privacy and storage. */
-export default function Settings({}: AppProps) {
+export default function Settings({ args }: AppProps) {
   const s = useSettings();
   const vfs = useVFS();
   const wm = useWM();
-  const [tab, setTab] = useState("providers");
+  // Opened at a tab by name (the screen-fit notice opens "screen").
+  const [tab, setTab] = useState(() => (typeof args?.tab === "string" && args.tab in TAB_LABELS ? args.tab : "providers"));
   const [error, setError] = useState<string | null>(null);
   const [reveal, setReveal] = useState<string | null>(null);
   const [capturing, setCapturing] = useState<string | null>(null);
@@ -413,6 +415,31 @@ export default function Settings({}: AppProps) {
               >
                 Download full backup
               </button>
+              <label className="os-btn cursor-pointer !py-1 text-[11px]" data-restore-backup>
+                Restore from backup
+                <input
+                  type="file"
+                  accept="application/json,.json"
+                  className="sr-only"
+                  onChange={async (e) => {
+                    const f = e.target.files?.[0];
+                    e.target.value = "";
+                    if (!f) return;
+                    const r = readBackup(await f.text());
+                    if (!r.ok) { bus.emit("notify", { title: "Not restored", body: r.error, kind: "error" }); return; }
+                    const n = r.vfs ? vfs.importAll(r.vfs) : 0;
+                    const prof = r.settings ? s.importProfile(r.settings) : { ok: true };
+                    bus.emit("notify", {
+                      title: "Backup restored",
+                      body: `${n} file${n === 1 ? "" : "s"}${r.settings ? (prof.ok ? " and your settings" : "; settings were not readable") : ""}. API keys are never in a backup: add them again in AI. Reloading.`,
+                      kind: "success",
+                    });
+                    // A reload runs the restored settings through the store's
+                    // own validation on the way back in.
+                    setTimeout(() => location.reload(), 1200);
+                  }}
+                />
+              </label>
               <button className="os-btn !py-1 text-[11px]" onClick={() => { vfs.clear(); bus.emit("notify", { title: "Filesystem cleared", kind: "warn" }); }}>Clear filesystem</button>
               <button className="os-btn !py-1 text-[11px]" onClick={() => { wm.closeAll(); wm.clearNotifications(); }}>Close all windows</button>
             </div>

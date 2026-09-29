@@ -477,8 +477,8 @@ export function AiosChat() {
         <div
           role="dialog"
           aria-label="AIOS Chat"
-          className="glass fixed left-2 right-2 top-11 z-[9850] flex select-text flex-col shadow-2xl sm:left-auto sm:w-[420px]"
-          style={{ borderRadius: "var(--radius)", maxHeight: "min(72vh, 600px)" }}
+          className="glass fixed left-2 right-2 z-[9850] flex select-text flex-col shadow-2xl sm:left-auto sm:w-[420px]"
+          style={{ borderRadius: "var(--radius)", top: "calc(var(--os-top) + 4px)", maxHeight: "min(72vh, 600px, calc(100dvh - var(--os-top) - var(--sa-b) - 16px))" }}
         >
           <div className="flex items-center gap-2 border-b border-white/10 px-3 py-2">
             <Icon name="agents" size={13} />

@@ -55,25 +55,31 @@
 
 * { box-sizing: border-box; min-width: 0; }
 
-/* The OS root. Fixed to the viewport rather than sized with 100vh: an
-   installed iOS 26 web app reports every "small" unit short by the status-bar
-   height (WebKit bug 301108), leaving a band at the bottom. In an installed
-   app we use the large viewport, and kernel/viewport.ts sets --os-fill-h to
-   the measured screen height when it sees that exact gap. A browser tab keeps
-   100dvh, because there the toolbars really do take space. */
+/* The OS root: fixed to the viewport, exactly as tall as the page is told it
+   is (100dvh). An installed iOS 26+ app with the see-through status bar is
+   told 68px less than the screen, and that band is outside what a page can
+   draw -- measured on the iOS 27 simulator: a 100lvh element stopped at the
+   same line. Stretching over it (an earlier version did) only hid the bottom
+   of the OS, the dock included. The fix is the opaque status bar
+   (lib/viewport-fit.ts); the root simply fills what it is given.
+
+   --sa-* are the safe-area insets, the one place env() is read for the
+   desktop shell: the top bar pads below the status bar with them, because
+   iOS does not deliver taps that land under it. */
+:root {
+  --sa-t: env(safe-area-inset-top, 0px);
+  --sa-r: env(safe-area-inset-right, 0px);
+  --sa-b: env(safe-area-inset-bottom, 0px);
+  --sa-l: env(safe-area-inset-left, 0px);
+  /* Where the desktop's top bar ends: 40px below the status bar. */
+  --os-top: calc(40px + var(--sa-t));
+}
 .os-root {
   position: fixed;
   top: 0;
   left: 0;
   width: 100%;
   height: 100dvh;
-}
-:root[data-display-mode="standalone"],
-:root[data-display-mode="standalone"] body {
-  height: 100lvh;
-}
-:root[data-display-mode="standalone"] .os-root {
-  height: var(--os-fill-h, 100lvh);
 }
 
 html, body {
@@ -366,3 +372,24 @@ input, textarea, select, button { font: inherit; color: inherit; }
 .pet-spin { animation: pet-spin calc(700ms * var(--motion, 1)) cubic-bezier(.5,0,.3,1); }
 .pet-jump { animation: pet-jump calc(650ms * var(--motion, 1)) ease-out; }
 .pet-dance { animation: pet-dance calc(1100ms * var(--motion, 1)) ease-in-out; }
+
+/* Finger-sized targets in the desktop's top bar on a touch screen: the
+   controls are drawn small, so the hit area grows instead (44pt is Apple's
+   minimum; 34px keeps the controls on one row of a 420px phone). */
+@media (pointer: coarse) {
+  [data-topbar] :is(.os-btn, .os-chip, button) {
+    min-height: 34px;
+    min-width: 34px;
+    justify-content: center;
+  }
+}
+
+/* The desktop's top bar on a phone-width screen. Its controls must not shrink
+   (the global min-width: 0 let them squash into each other at 420px), so the
+   ones the phone already shows above it -- the clock, "online" -- step aside.
+   An attribute selector, so it outranks .os-chip's display. */
+[data-topbar] > * { flex-shrink: 0; }
+[data-topbar] > :is(.flex-1, .truncate) { flex-shrink: 1; }
+@media (max-width: 639px) {
+  [data-topbar] [data-narrow-hide] { display: none; }
+}

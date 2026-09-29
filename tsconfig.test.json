@@ -134,6 +134,7 @@
     "src/lib/bridge-cli.ts",
     "src/lib/customize.ts",
     "src/lib/petlife.ts",
-    "src/lib/aios-resume.ts"
+    "src/lib/aios-resume.ts",
+    "src/lib/backup.ts"
   ]
 }

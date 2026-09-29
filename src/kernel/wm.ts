@@ -1,6 +1,6 @@
 "use client";
 
-import { appHeight } from "./viewport";
+import { appHeight, safeArea } from "./viewport";
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 import { resolveOpen } from "@/lib/window-open";
@@ -76,12 +76,17 @@ const uid = () => `w_${Math.random().toString(36).slice(2, 10)}`;
  *  definition, exported, so layouts and scenes cannot drift from each other. */
 export function workArea(): { x: number; y: number; w: number; h: number } {
   const v = viewport();
-  return { x: 0, y: v.top, w: v.w, h: v.h - v.top - v.bottom };
+  return { x: v.left, y: v.top, w: v.w - v.left - v.right, h: v.h - v.top - v.bottom };
 }
 
+/** The top bar is 40px below the status bar, and the dock sits 8px above the
+ *  bottom edge or on the home indicator's inset, whichever is taller (the
+ *  same sums the CSS does with --sa-*). In landscape an iPhone's notch side
+ *  has an inset too, and windows keep out of it. */
 function viewport() {
-  if (typeof window === "undefined") return { w: 1440, h: 900, top: 40, bottom: 76 };
-  return { w: window.innerWidth, h: appHeight(), top: 40, bottom: 76 };
+  if (typeof window === "undefined") return { w: 1440, h: 900, top: 40, bottom: 76, left: 0, right: 0 };
+  const sa = safeArea();
+  return { w: window.innerWidth, h: appHeight(), top: 40 + sa.top, bottom: 68 + Math.max(8, sa.bottom), left: sa.left, right: sa.right };
 }
 
 function clampToViewport(win: WindowInstance): WindowInstance {

@@ -1,25 +1,42 @@
-/** The height the OS actually has, after the iOS 26 installed-app gap.
+/** What the screen gives the OS, measured.
  *
- *  lib/viewport-fit.ts decides (pure, tested); this reads the numbers, keeps
- *  the verdict current across rotation and resize, and publishes it two ways:
- *  the `--os-fill-h` CSS variable the shell roots use, and appHeight() for the
- *  code that lays windows out in pixels (wm.workArea, useViewport). Both must
- *  agree, or a maximized window would stop short of a root that was stretched.
+ *  lib/viewport-fit.ts decides (pure, tested) whether an installed iPhone app
+ *  is losing a band to the iOS 26+ status-bar bug; this reads the numbers and
+ *  keeps the verdict current across rotation and resize. It also publishes the
+ *  safe-area insets in px (safeArea()), for the code that lays windows out in
+ *  pixels (wm.workArea): the CSS reads the same insets through --sa-*.
+ *
+ *  Nothing here stretches the OS any more: the band is outside the page.
  */
 import { diagnoseViewport, isStatusBarPref, type FitVerdict, type ViewportSample } from "@/lib/viewport-fit";
 
 let verdict: FitVerdict | null = null;
 let sample: ViewportSample | null = null;
 
-function safeInsets(): { top: number; bottom: number } {
+export interface Insets { top: number; right: number; bottom: number; left: number }
+const NO_INSETS: Insets = { top: 0, right: 0, bottom: 0, left: 0 };
+let insets: Insets = NO_INSETS;
+
+function safeInsets(): Insets {
   // env() is only readable through a styled element.
   const probe = document.createElement("div");
-  probe.style.cssText = "position:fixed;top:0;left:0;visibility:hidden;pointer-events:none;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)";
+  probe.style.cssText = "position:fixed;top:0;left:0;visibility:hidden;pointer-events:none;padding:env(safe-area-inset-top,0px) env(safe-area-inset-right,0px) env(safe-area-inset-bottom,0px) env(safe-area-inset-left,0px)";
   document.body.appendChild(probe);
   const cs = getComputedStyle(probe);
-  const out = { top: parseFloat(cs.paddingTop) || 0, bottom: parseFloat(cs.paddingBottom) || 0 };
+  const px = (v: string) => Math.max(0, Math.round(parseFloat(v) || 0));
+  const out = { top: px(cs.paddingTop), right: px(cs.paddingRight), bottom: px(cs.paddingBottom), left: px(cs.paddingLeft) };
   probe.remove();
   return out;
+}
+
+/** The safe-area insets in px, as last measured (zeros before the first). */
+export const safeArea = (): Insets => insets;
+
+/** Measure the insets now (rotation changes them) and remember them. */
+export function readSafeArea(): Insets {
+  if (typeof document === "undefined" || !document.body) return insets;
+  insets = safeInsets();
+  return insets;
 }
 
 export function readStatusBarPref(): "translucent" | "solid" {
@@ -34,6 +51,7 @@ export function readStatusBarPref(): "translucent" | "solid" {
 export function measureViewport(): ViewportSample {
   const nav = navigator as Navigator & { standalone?: boolean };
   const ins = safeInsets();
+  insets = ins;
   return {
     screenW: screen.width,
     screenH: screen.height,
@@ -52,8 +70,7 @@ function apply() {
   verdict = diagnoseViewport(sample);
   const root = document.documentElement;
   root.dataset.displayMode = sample.standalone ? "standalone" : "browser";
-  if (verdict.fillHeight) root.style.setProperty("--os-fill-h", `${verdict.fillHeight}px`);
-  else root.style.removeProperty("--os-fill-h");
+  root.dataset.screenFit = verdict.kind;
 }
 
 let installed = false;
@@ -66,13 +83,11 @@ export function installViewportFit() {
   window.addEventListener("orientationchange", () => setTimeout(again, 250));
 }
 
-/** The OS's usable height in px: the stretched height when the iOS gap is
- *  being covered AND the keyboard is not up, otherwise what the browser says. */
+/** The OS's usable height in px: what the browser says (the visual viewport,
+ *  so an on-screen keyboard shrinks it). */
 export function appHeight(): number {
   if (typeof window === "undefined") return 900;
-  const vv = window.visualViewport?.height ?? window.innerHeight;
-  if (verdict?.fillHeight && vv >= window.innerHeight - 2) return verdict.fillHeight;
-  return Math.round(vv);
+  return Math.round(window.visualViewport?.height ?? window.innerHeight);
 }
 
 export const viewportReport = (): { sample: ViewportSample | null; verdict: FitVerdict | null } => ({ sample, verdict });

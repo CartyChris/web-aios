@@ -1,7 +1,7 @@
 "use client";
 
 import { useSyncExternalStore } from "react";
-import { appHeight } from "@/kernel/viewport";
+import { appHeight, readSafeArea } from "@/kernel/viewport";
 
 export interface Viewport {
   w: number;
@@ -15,11 +15,17 @@ export interface Viewport {
   landscape: boolean;
   /** Coarse pointer means touch targets need to be finger-sized. */
   touch: boolean;
+  /** Safe-area insets in px: the status bar / Dynamic Island, the home
+   *  indicator, and the notch side in landscape. */
+  safeTop: number;
+  safeRight: number;
+  safeBottom: number;
+  safeLeft: number;
 }
 
 const PHONE_MAX = 768;
 
-const SERVER: Viewport = { w: 1440, h: 900, isPhone: false, isTablet: false, standalone: false, landscape: true, touch: false };
+const SERVER: Viewport = { w: 1440, h: 900, isPhone: false, isTablet: false, standalone: false, landscape: true, touch: false, safeTop: 0, safeRight: 0, safeBottom: 0, safeLeft: 0 };
 
 /* One module-level snapshot shared by every subscriber.
  *
@@ -37,9 +43,9 @@ function measure(): Viewport {
   // the two disagree about which axis is longer.
   const vv = window.visualViewport;
   const w = Math.round(vv?.width ?? window.innerWidth);
-  // appHeight() is the visual height, stretched over the iOS 26 installed-app
-  // gap when that is being covered (kernel/viewport.ts).
+  // appHeight() is the visual height (kernel/viewport.ts).
   const h = vv ? appHeight() : Math.round(window.innerHeight);
+  const sa = readSafeArea();
   return {
     w,
     h,
@@ -50,6 +56,10 @@ function measure(): Viewport {
       ("standalone" in window.navigator && Boolean((window.navigator as Navigator & { standalone?: boolean }).standalone)),
     landscape: w > h,
     touch: window.matchMedia("(pointer: coarse)").matches,
+    safeTop: sa.top,
+    safeRight: sa.right,
+    safeBottom: sa.bottom,
+    safeLeft: sa.left,
   };
 }
 
@@ -59,7 +69,9 @@ function refresh(): boolean {
   if (
     next.w === prev.w && next.h === prev.h && next.isPhone === prev.isPhone &&
     next.isTablet === prev.isTablet && next.standalone === prev.standalone &&
-    next.landscape === prev.landscape && next.touch === prev.touch
+    next.landscape === prev.landscape && next.touch === prev.touch &&
+    next.safeTop === prev.safeTop && next.safeRight === prev.safeRight &&
+    next.safeBottom === prev.safeBottom && next.safeLeft === prev.safeLeft
   ) {
     return false;
   }

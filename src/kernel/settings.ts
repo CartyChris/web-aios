@@ -94,9 +94,11 @@ export interface Settings {
   phoneMode: "auto" | "desktop" | "phone";
   /** The one-time "turn your phone on its side" notice has been dismissed. */
   phoneTipSeen: boolean;
-  /** Apple status bar for the installed app: "translucent" runs the wallpaper
-   *  under the Dynamic Island; "solid" avoids the iOS 26 bottom-gap bug.
-   *  Read before first paint by the boot script in app/layout.tsx. */
+  /** Apple status bar for the installed app: "solid" (Apple's opaque
+   *  "default", the default here) fills the screen to the bottom edge;
+   *  "translucent" runs the wallpaper under the Dynamic Island but makes iOS
+   *  26+ leave a band at the bottom. Read before first paint by the boot
+   *  script in app/layout.tsx; iOS keeps whatever it saw at install time. */
   statusBar: "translucent" | "solid";
   /** Screen and cursor effects, window animation, icon shape, sounds,
    *  day/night themes and the ThreeUI wallpaper (lib/customize.ts). */
@@ -244,7 +246,9 @@ const DEFAULTS: Settings = {
   keybinds: { ...DEFAULT_KEYBINDS },
   phoneMode: "auto",
   phoneTipSeen: false,
-  statusBar: "translucent",
+  // The opaque bar: measured to fill an installed iPhone app to the bottom
+  // edge, where the see-through one leaves a band (lib/viewport-fit.ts).
+  statusBar: "solid",
   customize: CUSTOMIZE_DEFAULTS,
 
   ai: {
@@ -452,7 +456,7 @@ export const useSettings = create<SettingsState>()(
           ai: { ...current.ai, ...(p.ai ?? {}) },
           keybinds: { ...DEFAULT_KEYBINDS, ...(p.keybinds ?? {}) },
           customVars: { ...(p.customVars ?? {}) },
-          statusBar: p.statusBar === "solid" ? "solid" : "translucent",
+          statusBar: p.statusBar === "translucent" ? "translucent" : "solid",
           customize: normaliseCustomize(p.customize),
         };
       },

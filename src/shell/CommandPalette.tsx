@@ -173,8 +173,8 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
 
   return (
     <div
-      className="fixed inset-0 z-[9700] flex justify-center px-4 pt-[12vh]"
-      style={{ background: "color-mix(in srgb, var(--bg) 55%, transparent)", backdropFilter: "blur(6px)" }}
+      className="fixed inset-0 z-[9700] flex justify-center px-4"
+      style={{ paddingTop: "max(12vh, calc(var(--sa-t) + 16px))", background: "color-mix(in srgb, var(--bg) 55%, transparent)", backdropFilter: "blur(6px)" }}
       onClick={(e) => e.target === e.currentTarget && onClose()}
     >
       <div className="glass h-fit w-full max-w-2xl overflow-hidden shadow-2xl" style={{ borderRadius: "var(--radius)" }}>

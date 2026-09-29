@@ -37,7 +37,7 @@ export const viewport: Viewport = {
   ],
 };
 
-const BOOT_SCRIPT = `(function(){try{var d=document.documentElement,n=navigator;var sa=n.standalone===true||matchMedia('(display-mode: standalone)').matches||matchMedia('(display-mode: fullscreen)').matches;d.dataset.displayMode=sa?'standalone':'browser';var p='translucent';try{var st=JSON.parse(localStorage.getItem('webaios.settings.v1')||'{}').state;if(st&&st.statusBar==='solid')p='solid';}catch(e){}var m=document.createElement('meta');m.name='apple-mobile-web-app-status-bar-style';m.id='os-status-bar';m.content=p==='solid'?'black':'black-translucent';document.head.appendChild(m);}catch(e){}})();`;
+const BOOT_SCRIPT = `(function(){try{var d=document.documentElement,n=navigator;var sa=n.standalone===true||matchMedia('(display-mode: standalone)').matches||matchMedia('(display-mode: fullscreen)').matches;d.dataset.displayMode=sa?'standalone':'browser';var p='solid';try{var st=JSON.parse(localStorage.getItem('webaios.settings.v1')||'{}').state;if(st&&st.statusBar==='translucent')p='translucent';}catch(e){}var m=document.createElement('meta');m.name='apple-mobile-web-app-status-bar-style';m.id='os-status-bar';m.content=p==='translucent'?'black-translucent':'default';document.head.appendChild(m);}catch(e){}})();`;
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -45,7 +45,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <head>
         {/* Runs during head parsing, before first paint: marks an installed app
             (so the CSS can use the large viewport at once, with no flash of a
-            short screen) and adds the chosen Apple status-bar style. The
+            short screen) and adds the chosen Apple status-bar style: the
+            opaque "default" unless the person chose see-through. iOS reads it
+            once, when the app is added to the Home Screen. The
             script creates that tag itself: a tag React rendered would be
             re-created by hydration with its original content (seen: two
             conflicting tags), since the script had changed it. */}

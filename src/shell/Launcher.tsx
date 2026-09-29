@@ -84,8 +84,8 @@ export function Launcher({ onClose }: { onClose: () => void }) {
 
   return (
     <div
-      className="fixed inset-0 z-[9600] flex flex-col items-center px-4 pt-16 backdrop-blur-xl"
-      style={{ background: "color-mix(in srgb, var(--bg) 72%, transparent)" }}
+      className="fixed inset-0 z-[9600] flex flex-col items-center px-4 backdrop-blur-xl"
+      style={{ background: "color-mix(in srgb, var(--bg) 72%, transparent)", paddingTop: "calc(64px + var(--sa-t))", paddingBottom: "var(--sa-b)" }}
       onClick={(e) => e.target === e.currentTarget && onClose()}
     >
       <input

@@ -7,6 +7,7 @@ import { PROVIDERS, getProvider } from "@/lib/providers";
 import { cn } from "@/lib/cn";
 import { Icon } from "./icons";
 import { ModelRefreshButton, ModelRefreshStatus } from "./ModelRefresh";
+import { useViewport } from "@/lib/useViewport";
 
 /* ────────────────────────────────────────────────────────────────────────────
    The model picker.
@@ -53,11 +54,13 @@ export function ModelPicker({ onClose }: { onClose: () => void }) {
   const [query, setQuery] = useState("");
 
   return (
-    <div className="fixed inset-0 z-[9900] flex items-start justify-center p-4 pt-[8vh]" role="dialog" aria-label="Choose a model">
+    <div className="fixed inset-0 z-[9900] flex items-start justify-center p-4" style={{ paddingTop: "max(8vh, calc(var(--sa-t) + 16px))", paddingBottom: "max(16px, var(--sa-b))" }} role="dialog" aria-label="Choose a model">
       <div className="absolute inset-0 bg-black/45" onClick={onClose} />
       <div
         className="glass relative flex max-h-[76vh] w-full max-w-2xl flex-col overflow-hidden shadow-2xl"
-        style={{ borderRadius: "var(--radius)", animation: "os-fade-up 160ms ease-out" }}
+        // Solid, not glass: a list of model names is unreadable over desktop
+        // text (seen on the iPhone simulator, where the text showed through).
+        style={{ borderRadius: "var(--radius)", animation: "os-fade-up 160ms ease-out", background: "var(--panel-solid)" }}
       >
         {/* Providers */}
         <div className="flex shrink-0 gap-1 overflow-x-auto border-b border-[var(--border)] px-2 py-1.5">
@@ -154,13 +157,16 @@ function ModelResults({ providerId, query, setQuery, onClose }: {
 
   // Spinner while asking; the built-in list stays visible underneath.
   const loading = busy;
+  // On a touch screen a focused field raises the keyboard over half the list;
+  // the list is what a phone user came for, so the search waits for a tap.
+  const touch = useViewport().touch;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col" onKeyDown={onKey}>
       <div className="flex shrink-0 items-center gap-2 border-b border-[var(--border)] px-3 py-2.5">
         <Icon name="search" size={15} style={{ color: "var(--muted)" }} />
         <input
-          autoFocus
+          autoFocus={!touch}
           value={query}
           onChange={(e) => { setQuery(e.target.value); setActive(0); }}
           placeholder={`Search ${models.length || ""} models — name, "vision", "free"…`}

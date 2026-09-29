@@ -16,6 +16,8 @@ import { bus } from "@/kernel/bus";
 import { ContextMenuHost } from "./ContextMenu";
 import { LiveToasts } from "./LiveToasts";
 import { AiosChat } from "./AiosChat";
+import { ModelPicker } from "./ModelPicker";
+import { ScreenFitNotice } from "./ScreenFitNotice";
 
 /* ────────────────────────────────────────────────────────────────────────────
    MobileShell — the phone paradigm.
@@ -40,6 +42,7 @@ export function MobileShell() {
   const [rawView, setView] = useState<View>("home");
   const [rawPage, setPage] = useState(0);
   const [palette, setPalette] = useState(false);
+  const [picker, setPicker] = useState(false);
   const [search, setSearch] = useState("");
   const touchStart = useRef<{ x: number; y: number; t: number } | null>(null);
 
@@ -128,6 +131,7 @@ export function MobileShell() {
     >
       <Wallpaper />
       <CustomizeLayer />
+      <ScreenFitNotice top="calc(var(--sa-t) + 34px)" />
 
       {/* ── Status bar ── */}
       <MobileStatusBar />
@@ -155,10 +159,11 @@ export function MobileShell() {
           <div className="app-surface min-h-0 flex-1 overflow-hidden">
             <activeApp.component win={activeWin} args={activeWin.args} />
           </div>
-          {/* Room for the home indicator below, which sits 5px above the
-              inset and is 4px tall: without this it drew over the app's last
-              row (Forge 3D's rotation fields). */}
-          <div style={{ height: "calc(env(safe-area-inset-bottom, 0px) + 14px)" }} />
+          {/* Room for the home indicator. On an iPhone that is the system's
+              own, inside the bottom inset; elsewhere it is the drawn one below
+              (5px up, 4px tall), which needs 14px. Both at once used to leave
+              48px of nothing under every app on an iPhone. */}
+          <div style={{ height: vp.safeBottom > 0 ? "var(--sa-b)" : 14 }} data-home-spacer />
         </div>
       )}
 
@@ -185,6 +190,16 @@ export function MobileShell() {
               title="Switch to full desktop"
             >
               <Icon name="monitor" size={14} className="mr-1" />Full desktop
+            </button>
+            {/* The main model, as the desktop's top bar has it. */}
+            <button
+              onClick={() => setPicker(true)}
+              className="os-btn shrink-0 !px-2 !py-1.5"
+              aria-label={`Main model: ${settings.ai.model}. Change`}
+              title={`${settings.ai.provider} · ${settings.ai.model}`}
+              data-mobile-model
+            >
+              <Icon name="spark" size={14} />
             </button>
             <AiosChat />
           </div>
@@ -230,7 +245,10 @@ export function MobileShell() {
           {/* ── Dock ── */}
           <div
             className="glass mx-3 mb-2 flex shrink-0 items-center justify-around p-2"
-            style={{ borderRadius: 24, marginBottom: "calc(env(safe-area-inset-bottom, 0px) + 8px)" }}
+            // Just above the system home indicator, as the iPhone's own dock
+            // sits, rather than a whole inset plus 8px above it.
+            style={{ borderRadius: 24, marginBottom: "max(8px, calc(var(--sa-b) - 10px))" }}
+            data-mobile-dock
           >
             {dockApps.map((app) => (
               <button key={app.id} onClick={() => open(app)} aria-label={app.name}>
@@ -308,6 +326,7 @@ export function MobileShell() {
       )}
 
       {palette && <CommandPalette onClose={() => setPalette(false)} />}
+      {picker && <ModelPicker onClose={() => setPicker(false)} />}
 
       {/* Right-click and long-press menus, and live job toasts, need their
           hosts in this tree too — the desktop's copies are not mounted here. */}
@@ -350,9 +369,9 @@ export function MobileShell() {
         </div>
       )}
 
-      {/* Home indicator — a real affordance, and it keeps content clear of the
-          hardware one on devices that have it. */}
-      {view === "app" && (
+      {/* Home indicator: a real affordance where the device has none. An
+          iPhone draws its own, and a second one above it was just clutter. */}
+      {view === "app" && vp.safeBottom === 0 && (
         <button
           onClick={() => setView("home")}
           aria-label="Home"

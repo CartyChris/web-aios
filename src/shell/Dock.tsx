@@ -47,12 +47,17 @@ export function Dock({ onLauncher }: { onLauncher: () => void }) {
       onMouseLeave={() => { setPeek(false); setHovered(null); }}
       className={cn(
         "fixed z-[9000] flex items-end justify-center",
-        dockPosition === "bottom" && "bottom-0 left-0 right-0 pb-2",
-        dockPosition === "top" && "top-10 left-0 right-0 pt-2 items-start",
-        dockPosition === "left" && "left-0 top-0 bottom-0 pl-2 items-center",
-        dockPosition === "right" && "right-0 top-0 bottom-0 pr-2 items-center justify-end",
+        dockPosition === "bottom" && "bottom-0 left-0 right-0",
+        dockPosition === "top" && "left-0 right-0 pt-2 items-start",
+        dockPosition === "left" && "left-0 top-0 bottom-0 items-center",
+        dockPosition === "right" && "right-0 top-0 bottom-0 items-center justify-end",
       )}
       style={{
+        // Clear of the home indicator, the status bar and a landscape notch.
+        ...(dockPosition === "bottom" && { paddingBottom: "max(8px, var(--sa-b))" }),
+        ...(dockPosition === "top" && { top: "var(--os-top)" }),
+        ...(dockPosition === "left" && { paddingLeft: "max(8px, var(--sa-l))" }),
+        ...(dockPosition === "right" && { paddingRight: "max(8px, var(--sa-r))" }),
         transform: hiddenAway
           ? dockPosition === "bottom" ? "translateY(calc(100% - 6px))"
           : dockPosition === "top" ? "translateY(calc(-100% + 6px))"

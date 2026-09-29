@@ -46,7 +46,14 @@ export function TopBar({ onLauncher, onPalette }: { onLauncher: () => void; onPa
   const has = (k: string) => topBarItems.includes(k);
 
   return (
-    <div className="glass no-select fixed left-0 right-0 top-0 z-[9500] flex h-10 items-center gap-1 px-2 text-[12px]" style={{ borderRadius: 0, borderLeft: 0, borderRight: 0, borderTop: 0 }}>
+    // Padded below the status bar and clear of a landscape notch: iOS does not
+    // deliver taps that land under the status bar (measured on the iOS 27
+    // simulator), so a bar drawn there could only be used sideways.
+    <div
+      className="glass no-select fixed left-0 right-0 top-0 z-[9500] flex items-center gap-1 text-[12px]"
+      style={{ borderRadius: 0, borderLeft: 0, borderRight: 0, borderTop: 0, height: "var(--os-top)", paddingTop: "var(--sa-t)", paddingLeft: "max(8px, var(--sa-l))", paddingRight: "max(8px, var(--sa-r))" }}
+      data-topbar
+    >
       <button onClick={onLauncher} className="os-btn !px-2 !py-1 font-semibold" title="Open launcher">
         <Icon name="launcher" size={13} /> <span className="ml-1 hidden sm:inline">Web-AIOS</span>
       </button>
@@ -110,20 +117,25 @@ export function TopBar({ onLauncher, onPalette }: { onLauncher: () => void; onPa
       <LayoutMenu open={openMenu === "layouts"} onOpen={() => setOpenMenu(openMenu === "layouts" ? null : "layouts")} onClose={() => setOpenMenu(null)} />
 
       {has("ai") && (
+        // On every width: it used to be hidden below 1024px, so on a phone the
+        // main model could not be changed from the top bar at all.
         <button
-          className="os-chip hidden lg:inline-flex hover:!border-[var(--accent)]"
+          className="os-chip inline-flex hover:!border-[var(--accent)]"
           title={`${ai.provider} · ${ai.model} — click to change`}
+          aria-label={`Main model: ${ai.model}. Change`}
           onClick={() => setPicker(true)}
+          data-topbar-model
         >
           <Icon name="spark" size={11} />
-          <span className="max-w-44 truncate">{ai.model}</span>
+          <span className="max-w-14 truncate sm:max-w-32 lg:max-w-44">{ai.model}</span>
           {ai.webAccess && <Icon name="network" size={9} style={{ opacity: 0.65 }} />}
         </button>
       )}
       {picker && <ModelPicker onClose={() => setPicker(false)} />}
 
       {has("net") && (
-        <span className={cn("os-chip", !online && "!border-[var(--danger)] !bg-[var(--danger)]/15")} title={online ? "Online" : "Offline"}>
+        // On a phone-width bar only "offline" is worth the room (globals.css).
+        <span className={cn("os-chip", !online && "!border-[var(--danger)] !bg-[var(--danger)]/15")} title={online ? "Online" : "Offline"} data-narrow-hide={online || undefined}>
           <Icon name="network" size={11} /> {online ? "online" : "offline"}
         </span>
       )}
@@ -167,7 +179,8 @@ export function TopBar({ onLauncher, onPalette }: { onLauncher: () => void; onPa
 
       {has("clock") && (
         <button
-          className="tabular-nums px-1.5 font-medium"
+          className="whitespace-nowrap tabular-nums px-1.5 font-medium"
+          data-narrow-hide
           title={now.toDateString()}
           onClick={() => {
             // The clock is a button that does not announce itself. Seven taps

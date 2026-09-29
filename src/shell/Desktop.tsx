@@ -37,6 +37,7 @@ import { installWebMcp } from "./webmcp";
 import { chordMatches } from "@/lib/keyhelp";
 import { installViewportFit } from "@/kernel/viewport";
 import { ShortcutSheet } from "./ShortcutSheet";
+import { ScreenFitNotice } from "./ScreenFitNotice";
 
 export function Desktop() {
   const hydrated = useHydrated();
@@ -250,12 +251,13 @@ export function Desktop() {
       <Wallpaper />
       <WidgetLayer />
 
-      <DesktopIcons topInset={settings.topBarVisible ? 40 : 0} />
+      <DesktopIcons topInset={settings.topBarVisible ? 40 + vp.safeTop : vp.safeTop} />
 
       {visible.map((w) => <WindowFrame key={w.id} win={w} />)}
 
       <PetLayer />
       <CustomizeLayer />
+      <ScreenFitNotice top="calc(var(--os-top) + 8px)" />
 
       <TopBar onLauncher={() => setLauncher((v) => !v)} onPalette={() => setPalette((v) => !v)} />
       <Dock onLauncher={() => setLauncher((v) => !v)} />
@@ -345,7 +347,7 @@ function MinimizedTray() {
         borderRadius: "var(--radius)",
         left: "50%",
         transform: "translateX(-50%)",
-        bottom: dockPosition === "bottom" ? "calc(var(--dock-size) + 22px)" : 12,
+        bottom: dockPosition === "bottom" ? "calc(var(--dock-size) + 14px + max(8px, var(--sa-b)))" : "max(12px, var(--sa-b))",
       }}
     >
       {mins.map((w) => (
